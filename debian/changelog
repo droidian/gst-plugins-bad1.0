@@ -1,6 +1,7 @@
 gst-plugins-bad1.0 (1.16.2-3) UNRELEASED; urgency=medium
 
   * Trim trailing whitespace.
+  * Use secure copyright file specification URI.
 
  -- Debian Janitor <janitor@jelmer.uk>  Thu, 19 Dec 2019 10:41:38 +0000
 
