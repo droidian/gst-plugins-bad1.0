@@ -49,7 +49,7 @@ Build-Depends: debhelper,
                libnice-dev (>= 0.1.14),
                libofa0-dev (>= 0.9.3),
                libopenal-dev (>= 1:1.14),
-               libopencv-dev (>= 3.0.0),
+               libopencv-dev (>= 3.0.0) [amd64 arm64 armel armhf i386 mips64el mipsel ppc64el s390x powerpc ppc64 riscv64],
                libopenexr-dev,
                libopenjp2-7-dev (>= 2.1),
                libopenmpt-dev,
@@ -140,7 +140,7 @@ Description: GStreamer plugins from the "bad" set
  real live maintainer, or some actual wide use.
 
 Package: gstreamer1.0-opencv
-Architecture: any
+Architecture: amd64 arm64 armel armhf i386 mips64el mipsel ppc64el s390x powerpc ppc64 riscv64
 Multi-Arch: same
 Depends: ${misc:Depends},
          ${shlibs:Depends},

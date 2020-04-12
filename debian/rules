@@ -68,7 +68,10 @@ gst_extra_build_depends += , wayland-protocols (>= 1.4) [linux-any]
 gst_extra_build_depends += , libvulkan-dev [linux-any]
 gst_extra_build_depends += , libsrt-dev [linux-any]
 
-PLUGINS += plugins-bad opencv
+PLUGINS += plugins-bad
+ifneq (,$(filter $(DEB_HOST_ARCH), amd64 arm64 armel armhf i386 mips64el mipsel ppc64el s390x powerpc ppc64 riscv64))
+  PLUGINS += opencv
+endif
 ifeq ($(DEB_HOST_ARCH_OS),linux)
 PLUGINS +=
 endif
