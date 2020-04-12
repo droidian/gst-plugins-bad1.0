@@ -115,7 +115,6 @@ debian/tmp/usr/lib/*/gstreamer-@GST_ABI@/libgsty4mdec.so
 debian/tmp/usr/lib/*/gstreamer-@GST_ABI@/libgstyadif.so
 debian/tmp/usr/lib/*/gstreamer-@GST_ABI@/libgstzbar.so
 debian/tmp/usr/share/locale
-debian/tmp/usr/share/gst-plugins-bad/@GST_ABI@/
 debian/tmp/usr/share/gstreamer-@GST_ABI@/presets/
 @dvb@
 @resindvd@

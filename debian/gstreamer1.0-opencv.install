@@ -1,1 +1,2 @@
 debian/tmp/usr/lib/*/gstreamer-@GST_ABI@/libgstopencv.so
+debian/tmp/usr/share/gst-plugins-bad/@GST_ABI@/opencv_haarcascades

@@ -147,8 +147,8 @@ Depends: ${misc:Depends},
          gstreamer1.0-plugins-base,
          libgstreamer-plugins-bad1.0-0 (= ${binary:Version}),
          libgstreamer-opencv1.0-0 (= ${binary:Version}),
-Conflicts: gstreamer1.0-plugins-bad (<< 1.13.1)
-Replaces: gstreamer1.0-plugins-bad (<< 1.13.1)
+Conflicts: gstreamer1.0-plugins-bad (<< 1.17.2~)
+Replaces: gstreamer1.0-plugins-bad (<< 1.17.2~)
 Recommends: opencv-data
 XB-GStreamer-Version: ${gstreamer:Version}
 XB-GStreamer-Elements: ${gstreamer:Elements}
