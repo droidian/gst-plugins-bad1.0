@@ -46,12 +46,11 @@
  *
  * Smooths the image using thes cvSmooth OpenCV function.
  *
- * <refsect2>
- * <title>Example launch line</title>
+ * ## Example launch line
+ *
  * |[
  * gst-launch-1.0 videotestsrc ! cvsmooth ! videoconvert ! autovideosink
  * ]|
- * </refsect2>
  */
 
 #ifdef HAVE_CONFIG_H
@@ -234,11 +233,13 @@ gst_cv_smooth_class_init (GstCvSmoothClass * klass)
   templ = gst_pad_template_new ("src", GST_PAD_SRC, GST_PAD_ALWAYS, caps);
   gst_element_class_add_pad_template (element_class, templ);
   gst_caps_unref (caps);
+
+  gst_type_mark_as_plugin_api (GST_TYPE_CV_SMOOTH_TYPE, (GstPluginAPIFlags) 0);
 }
 
 /* initialize the new element
  * instantiate pads and add them to element
- * set pad calback functions
+ * set pad callback functions
  * initialize instance structure
  */
 static void

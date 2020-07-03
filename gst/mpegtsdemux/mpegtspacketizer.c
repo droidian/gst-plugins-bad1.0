@@ -354,6 +354,17 @@ mpegts_packetizer_parse_adaptation_field_control (MpegTSPacketizer2 *
       GST_MEMDUMP ("Unknown payload", packet->data + length,
           packet->data_end - packet->data - length);
     }
+  } else if (length == 183) {
+    /* Note: According to the specification, the adaptation field length
+     * must be 183 if there is no payload data and < 183 if the packet
+     * contains an adaptation field and payload data.
+     * Some payloaders always set the flag for payload data, even if the
+     * adaptation field length is 183. This just means a zero length
+     * payload so we clear the payload flag here and continue.
+     */
+    GST_WARNING ("PID 0x%04x afc == 0x%02x and length %d == 183 (ignored)",
+        packet->pid, packet->scram_afc_cc & 0x30, length);
+    packet->scram_afc_cc &= ~0x10;
   } else if (length > 182) {
     GST_WARNING ("PID 0x%04x afc == 0x%02x and length %d > 182",
         packet->pid, packet->scram_afc_cc & 0x30, length);
@@ -482,7 +493,7 @@ mpegts_packetizer_parse_packet (MpegTSPacketizer2 * packetizer,
       return FALSE;
   }
 
-  if (FLAGS_HAS_PAYLOAD (tmp))
+  if (FLAGS_HAS_PAYLOAD (packet->scram_afc_cc))
     packet->payload = packet->data;
   else
     packet->payload = NULL;
@@ -983,7 +994,7 @@ mpegts_packetizer_push_section (MpegTSPacketizer2 * packetizer,
    *  If it is not a PUSI
    *    Accumulate the expected data and check for complete section
    *    (loop)
-   *    
+   *
    **/
 
   if (packet->payload_unit_start_indicator) {
@@ -1092,7 +1103,7 @@ section_start:
     GST_DEBUG ("Short packet");
     section_length = (GST_READ_UINT16_BE (data + 1) & 0xfff) + 3;
     /* Only do fast-path if we have enough byte */
-    if (section_length < packet->data_end - data) {
+    if (data + section_length <= packet->data_end) {
       if ((section =
               gst_mpegts_section_new (packet->pid, g_memdup (data,
                       section_length), section_length))) {
@@ -1280,7 +1291,7 @@ mpegts_packetizer_resync (MpegTSPCR * pcr, GstClockTime time,
  *    Cri    : The time of the clock at the receiver for packet i
  *    D + ni : The jitter when receiving packet i
  *
- * We see that the network delay is irrelevant here as we can elliminate D:
+ * We see that the network delay is irrelevant here as we can eliminate D:
  *
  *  recv_diff(i) = (Cri + ni) - (Cr0 + n0))
  *
@@ -1613,7 +1624,7 @@ _reevaluate_group_pcr_offset (MpegTSPCR * pcrtable, PCROffsetGroup * group)
        * We will use raw (non-corrected/non-absolute) PCR values in a first time
        * to detect wraparound/resets/gaps...
        *
-       * We will use the corrected/asolute PCR values to calculate
+       * We will use the corrected/absolute PCR values to calculate
        * bitrate and estimate the target group pcr_offset.
        * */
 
@@ -1939,7 +1950,7 @@ record_pcr (MpegTSPacketizer2 * packetizer, MpegTSPCR * pcrtable,
     GList *tmp;
     /* No current estimator. This happens for the initial value, or after
      * discont and flushes. Figure out where we need to record this position.
-     * 
+     *
      * Possible choices:
      * 1) No groups at all:
      *    Create a new group with pcr/offset

@@ -73,7 +73,6 @@ gst_cc_combiner_finalize (GObject * object)
 
   g_array_unref (self->current_frame_captions);
   self->current_frame_captions = NULL;
-  gst_caps_replace (&self->video_caps, NULL);
 
   G_OBJECT_CLASS (parent_class)->finalize (object);
 }
@@ -146,12 +145,47 @@ gst_cc_combiner_collect_captions (GstCCCombiner * self, gboolean timeout)
       continue;
     }
 
+    if (gst_buffer_get_size (caption_buf) == 0 &&
+        GST_BUFFER_FLAG_IS_SET (caption_buf, GST_BUFFER_FLAG_GAP)) {
+      /* This is a gap, we can go ahead. We only consume it once its end point
+       * is behind the current video running time. Important to note that
+       * we can't deal with gaps with no duration (-1)
+       */
+      if (!GST_CLOCK_TIME_IS_VALID (GST_BUFFER_DURATION (caption_buf))) {
+        GST_ERROR_OBJECT (self, "GAP buffer without a duration");
+
+        gst_buffer_unref (caption_buf);
+        gst_object_unref (caption_pad);
+
+        return GST_FLOW_ERROR;
+      }
+
+      gst_buffer_unref (caption_buf);
+
+      if (caption_time + GST_BUFFER_DURATION (caption_buf) <
+          self->current_video_running_time_end) {
+        gst_aggregator_pad_drop_buffer (caption_pad);
+        continue;
+      } else {
+        break;
+      }
+    }
+
     /* Collected all caption buffers for this video buffer */
     if (caption_time >= self->current_video_running_time_end) {
       gst_buffer_unref (caption_buf);
       break;
+    } else if (GST_CLOCK_TIME_IS_VALID (self->previous_video_running_time_end)) {
+      if (caption_time < self->previous_video_running_time_end) {
+        GST_WARNING_OBJECT (self,
+            "Caption buffer before end of last video frame, dropping");
+
+        gst_aggregator_pad_drop_buffer (caption_pad);
+        gst_buffer_unref (caption_buf);
+        continue;
+      }
     } else if (caption_time < self->current_video_running_time) {
-      GST_DEBUG_OBJECT (self,
+      GST_WARNING_OBJECT (self,
           "Caption buffer before current video frame, dropping");
 
       gst_aggregator_pad_drop_buffer (caption_pad);
@@ -334,6 +368,8 @@ gst_cc_combiner_aggregate (GstAggregator * aggregator, gboolean timeout)
     flow_ret = GST_FLOW_OK;
   } else {
     gst_buffer_replace (&self->current_video_buffer, NULL);
+    self->previous_video_running_time_end =
+        self->current_video_running_time_end;
     self->current_video_running_time = self->current_video_running_time_end =
         GST_CLOCK_TIME_NONE;
   }
@@ -374,7 +410,7 @@ gst_cc_combiner_sink_event (GstAggregator * aggregator,
         self->video_fps_n = fps_n;
         self->video_fps_d = fps_d;
 
-        self->video_caps = gst_caps_ref (caps);
+        gst_aggregator_set_src_caps (aggregator, caps);
       }
 
       break;
@@ -394,9 +430,8 @@ gst_cc_combiner_stop (GstAggregator * aggregator)
 
   self->video_fps_n = self->video_fps_d = 0;
   self->current_video_running_time = self->current_video_running_time_end =
-      GST_CLOCK_TIME_NONE;
+      self->previous_video_running_time_end = GST_CLOCK_TIME_NONE;
   gst_buffer_replace (&self->current_video_buffer, NULL);
-  gst_caps_replace (&self->video_caps, NULL);
 
   g_array_set_size (self->current_frame_captions, 0);
   self->current_caption_type = GST_VIDEO_CAPTION_TYPE_UNKNOWN;
@@ -412,7 +447,7 @@ gst_cc_combiner_flush (GstAggregator * aggregator)
       GST_AGGREGATOR_PAD (GST_AGGREGATOR_SRC_PAD (aggregator));
 
   self->current_video_running_time = self->current_video_running_time_end =
-      GST_CLOCK_TIME_NONE;
+      self->previous_video_running_time_end = GST_CLOCK_TIME_NONE;
   gst_buffer_replace (&self->current_video_buffer, NULL);
 
   g_array_set_size (self->current_frame_captions, 0);
@@ -447,19 +482,105 @@ gst_cc_combiner_create_new_pad (GstAggregator * aggregator,
   return agg_pad;
 }
 
-static GstFlowReturn
-gst_cc_combiner_update_src_caps (GstAggregator * agg,
-    GstCaps * caps, GstCaps ** ret)
+static gboolean
+gst_cc_combiner_src_query (GstAggregator * aggregator, GstQuery * query)
 {
-  GstFlowReturn res = GST_AGGREGATOR_FLOW_NEED_DATA;
-  GstCCCombiner *self = GST_CCCOMBINER (agg);
+  GstPad *video_sinkpad =
+      gst_element_get_static_pad (GST_ELEMENT_CAST (aggregator), "sink");
+  gboolean ret;
 
-  if (self->video_caps) {
-    *ret = gst_caps_intersect (caps, self->video_caps);
-    res = GST_FLOW_OK;
+  switch (GST_QUERY_TYPE (query)) {
+    case GST_QUERY_POSITION:
+    case GST_QUERY_DURATION:
+    case GST_QUERY_URI:
+    case GST_QUERY_CAPS:
+    case GST_QUERY_ALLOCATION:
+      ret = gst_pad_peer_query (video_sinkpad, query);
+      break;
+    case GST_QUERY_ACCEPT_CAPS:{
+      GstCaps *caps;
+      GstCaps *templ = gst_static_pad_template_get_caps (&srctemplate);
+
+      gst_query_parse_accept_caps (query, &caps);
+      gst_query_set_accept_caps_result (query, gst_caps_is_subset (caps,
+              templ));
+      ret = TRUE;
+      break;
+    }
+    default:
+      ret = GST_AGGREGATOR_CLASS (parent_class)->src_query (aggregator, query);
+      break;
   }
 
-  return res;
+  gst_object_unref (video_sinkpad);
+
+  return ret;
+}
+
+static gboolean
+gst_cc_combiner_sink_query (GstAggregator * aggregator,
+    GstAggregatorPad * aggpad, GstQuery * query)
+{
+  GstPad *video_sinkpad =
+      gst_element_get_static_pad (GST_ELEMENT_CAST (aggregator), "sink");
+  GstPad *srcpad = GST_AGGREGATOR_SRC_PAD (aggregator);
+
+  gboolean ret;
+
+  switch (GST_QUERY_TYPE (query)) {
+    case GST_QUERY_POSITION:
+    case GST_QUERY_DURATION:
+    case GST_QUERY_URI:
+    case GST_QUERY_ALLOCATION:
+      if (GST_PAD_CAST (aggpad) == video_sinkpad) {
+        ret = gst_pad_peer_query (srcpad, query);
+      } else {
+        ret =
+            GST_AGGREGATOR_CLASS (parent_class)->src_query (aggregator, query);
+      }
+      break;
+    case GST_QUERY_CAPS:
+      if (GST_PAD_CAST (aggpad) == video_sinkpad) {
+        ret = gst_pad_peer_query (srcpad, query);
+      } else {
+        GstCaps *filter;
+        GstCaps *templ = gst_static_pad_template_get_caps (&captiontemplate);
+
+        gst_query_parse_caps (query, &filter);
+
+        if (filter) {
+          GstCaps *caps =
+              gst_caps_intersect_full (filter, templ, GST_CAPS_INTERSECT_FIRST);
+          gst_query_set_caps_result (query, caps);
+          gst_caps_unref (caps);
+        } else {
+          gst_query_set_caps_result (query, templ);
+        }
+        gst_caps_unref (templ);
+        ret = TRUE;
+      }
+      break;
+    case GST_QUERY_ACCEPT_CAPS:
+      if (GST_PAD_CAST (aggpad) == video_sinkpad) {
+        ret = gst_pad_peer_query (srcpad, query);
+      } else {
+        GstCaps *caps;
+        GstCaps *templ = gst_static_pad_template_get_caps (&captiontemplate);
+
+        gst_query_parse_accept_caps (query, &caps);
+        gst_query_set_accept_caps_result (query, gst_caps_is_subset (caps,
+                templ));
+        ret = TRUE;
+      }
+      break;
+    default:
+      ret = GST_AGGREGATOR_CLASS (parent_class)->src_query (aggregator, query);
+      break;
+  }
+
+  gst_object_unref (video_sinkpad);
+
+  return ret;
 }
 
 static void
@@ -493,8 +614,10 @@ gst_cc_combiner_class_init (GstCCCombinerClass * klass)
   aggregator_class->flush = gst_cc_combiner_flush;
   aggregator_class->create_new_pad = gst_cc_combiner_create_new_pad;
   aggregator_class->sink_event = gst_cc_combiner_sink_event;
-  aggregator_class->update_src_caps = gst_cc_combiner_update_src_caps;
+  aggregator_class->negotiate = NULL;
   aggregator_class->get_next_time = gst_aggregator_simple_get_next_time;
+  aggregator_class->src_query = gst_cc_combiner_src_query;
+  aggregator_class->sink_query = gst_cc_combiner_sink_query;
 
   GST_DEBUG_CATEGORY_INIT (gst_cc_combiner_debug, "cccombiner",
       0, "Closed Caption combiner");
@@ -518,7 +641,7 @@ gst_cc_combiner_init (GstCCCombiner * self)
       (GDestroyNotify) caption_data_clear);
 
   self->current_video_running_time = self->current_video_running_time_end =
-      GST_CLOCK_TIME_NONE;
+      self->previous_video_running_time_end = GST_CLOCK_TIME_NONE;
 
   self->current_caption_type = GST_VIDEO_CAPTION_TYPE_UNKNOWN;
 }

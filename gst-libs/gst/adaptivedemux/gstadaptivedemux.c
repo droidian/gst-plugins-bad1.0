@@ -22,7 +22,6 @@
 /**
  * SECTION:gstadaptivedemux
  * @short_description: Base class for adaptive demuxers
- * @see_also:
  *
  * What is an adaptive demuxer?
  * Adaptive demuxers are special demuxers in the sense that they don't
@@ -64,7 +63,7 @@
  * Subclasses:
  * While GstAdaptiveDemux is responsible for the workflow, it knows nothing
  * about the intrinsics of the subclass formats, so the subclasses are
- * resposible for maintaining the manifest data structures and stream
+ * responsible for maintaining the manifest data structures and stream
  * information.
  */
 
@@ -481,14 +480,12 @@ gst_adaptive_demux_init (GstAdaptiveDemux * demux,
   } else {
     GDateTime *utc_now;
     GstClockTime rtc_now;
-    GTimeVal gtv;
 
     utc_now = g_date_time_new_now_utc ();
     rtc_now = gst_clock_get_time (demux->realtime_clock);
-    g_date_time_to_timeval (utc_now, &gtv);
     demux->clock_offset =
-        gtv.tv_sec * G_TIME_SPAN_SECOND + gtv.tv_usec -
-        GST_TIME_AS_USECONDS (rtc_now);
+        g_date_time_to_unix (utc_now) * G_TIME_SPAN_SECOND +
+        g_date_time_get_microsecond (utc_now) - GST_TIME_AS_USECONDS (rtc_now);
     g_date_time_unref (utc_now);
   }
   g_rec_mutex_init (&demux->priv->updates_lock);
@@ -1563,13 +1560,6 @@ gst_adaptive_demux_handle_seek_event (GstAdaptiveDemux * demux, GstPad * pad,
   GST_API_LOCK (demux);
   GST_MANIFEST_LOCK (demux);
 
-  if (!gst_adaptive_demux_can_seek (demux)) {
-    GST_MANIFEST_UNLOCK (demux);
-    GST_API_UNLOCK (demux);
-    gst_event_unref (event);
-    return FALSE;
-  }
-
   gst_event_parse_seek (event, &rate, &format, &flags, &start_type, &start,
       &stop_type, &stop);
 
@@ -1591,6 +1581,48 @@ gst_adaptive_demux_handle_seek_event (GstAdaptiveDemux * demux, GstPad * pad,
   }
 
   seqnum = gst_event_get_seqnum (event);
+
+  if (flags & GST_SEEK_FLAG_INSTANT_RATE_CHANGE) {
+    /* For instant rate seeks, reply directly and update
+     * our segment so the new rate is reflected in any future
+     * fragments */
+    GstEvent *ev;
+
+    /* instant rate change only supported if direction does not change. All
+     * other requirements are already checked before creating the seek event
+     * but let's double-check here to be sure */
+    if ((demux->segment.rate > 0 && rate < 0) ||
+        (demux->segment.rate < 0 && rate > 0) ||
+        start_type != GST_SEEK_TYPE_NONE ||
+        stop_type != GST_SEEK_TYPE_NONE || (flags & GST_SEEK_FLAG_FLUSH)) {
+      GST_ERROR_OBJECT (demux,
+          "Instant rate change seeks only supported in the "
+          "same direction, without flushing and position change");
+      GST_MANIFEST_UNLOCK (demux);
+      GST_API_UNLOCK (demux);
+      return FALSE;
+    }
+
+    ev = gst_event_new_instant_rate_change (rate / demux->segment.rate,
+        (GstSegmentFlags) flags);
+    gst_event_set_seqnum (ev, seqnum);
+
+    GST_MANIFEST_UNLOCK (demux);
+
+    ret = gst_adaptive_demux_push_src_event (demux, ev);
+
+    GST_API_UNLOCK (demux);
+    gst_event_unref (event);
+
+    return ret;
+  }
+
+  if (!gst_adaptive_demux_can_seek (demux)) {
+    GST_MANIFEST_UNLOCK (demux);
+    GST_API_UNLOCK (demux);
+    gst_event_unref (event);
+    return FALSE;
+  }
 
   if (gst_adaptive_demux_is_live (demux)) {
     gint64 range_start, range_stop;
@@ -1746,7 +1778,7 @@ gst_adaptive_demux_handle_seek_event (GstAdaptiveDemux * demux, GstPad * pad,
       demux_class->stream_seek (stream, rate >= 0, stream_seek_flags, ts, &ts);
     }
 
-    /* replace event with a new one without snaping to seek on all streams */
+    /* replace event with a new one without snapping to seek on all streams */
     gst_event_unref (event);
     if (rate >= 0) {
       start = ts;
@@ -1760,21 +1792,23 @@ gst_adaptive_demux_handle_seek_event (GstAdaptiveDemux * demux, GstPad * pad,
   }
   stream = NULL;
 
-  gst_segment_do_seek (&demux->segment, rate, format, flags, start_type,
+  ret = gst_segment_do_seek (&demux->segment, rate, format, flags, start_type,
       start, stop_type, stop, &update);
 
-  /* FIXME - this seems unatural, do_seek() is updating base when we
-   * only want the start/stop position to change, maybe do_seek() needs
-   * some fixing? */
-  if (!(flags & GST_SEEK_FLAG_FLUSH) && ((rate > 0
-              && start_type == GST_SEEK_TYPE_NONE) || (rate < 0
-              && stop_type == GST_SEEK_TYPE_NONE))) {
-    demux->segment.base = oldsegment.base;
+  if (ret) {
+    /* FIXME - this seems unatural, do_seek() is updating base when we
+     * only want the start/stop position to change, maybe do_seek() needs
+     * some fixing? */
+    if (!(flags & GST_SEEK_FLAG_FLUSH) && ((rate > 0
+                && start_type == GST_SEEK_TYPE_NONE) || (rate < 0
+                && stop_type == GST_SEEK_TYPE_NONE))) {
+      demux->segment.base = oldsegment.base;
+    }
+
+    GST_DEBUG_OBJECT (demux, "Calling subclass seek: %" GST_PTR_FORMAT, event);
+
+    ret = demux_class->seek (demux, event);
   }
-
-  GST_DEBUG_OBJECT (demux, "Calling subclass seek: %" GST_PTR_FORMAT, event);
-
-  ret = demux_class->seek (demux, event);
 
   if (!ret) {
     /* Is there anything else we can do if it fails? */
@@ -1921,6 +1955,13 @@ gst_adaptive_demux_src_query (GstPad * pad, GstObject * parent,
       GstFormat fmt;
 
       gst_query_parse_duration (query, &fmt, NULL);
+
+      if (gst_adaptive_demux_is_live (demux)) {
+        /* We are able to answer this query: the duration is unknown */
+        gst_query_set_duration (query, fmt, -1);
+        ret = TRUE;
+        break;
+      }
 
       if (fmt == GST_FORMAT_TIME
           && g_atomic_int_get (&demux->priv->have_manifest)) {
@@ -4479,14 +4520,18 @@ GDateTime *
 gst_adaptive_demux_get_client_now_utc (GstAdaptiveDemux * demux)
 {
   GstClockTime rtc_now;
-  gint64 utc_now;
-  GTimeVal gtv;
+  GDateTime *unix_datetime;
+  GDateTime *result_datetime;
+  gint64 utc_now_in_us;
 
   rtc_now = gst_clock_get_time (demux->realtime_clock);
-  utc_now = demux->clock_offset + GST_TIME_AS_USECONDS (rtc_now);
-  gtv.tv_sec = utc_now / G_TIME_SPAN_SECOND;
-  gtv.tv_usec = utc_now % G_TIME_SPAN_SECOND;
-  return g_date_time_new_from_timeval_utc (&gtv);
+  utc_now_in_us = demux->clock_offset + GST_TIME_AS_USECONDS (rtc_now);
+  unix_datetime =
+      g_date_time_new_from_unix_utc (utc_now_in_us / G_TIME_SPAN_SECOND);
+  result_datetime =
+      g_date_time_add (unix_datetime, utc_now_in_us % G_TIME_SPAN_SECOND);
+  g_date_time_unref (unix_datetime);
+  return result_datetime;
 }
 
 /**

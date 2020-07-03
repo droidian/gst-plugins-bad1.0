@@ -40,13 +40,13 @@
  * a single probe and DSP.
  *
  * The probe can only be used within the same top level GstPipeline.
- * Additonally, to simplify the code, the probe element must be created
+ * Additionally, to simplify the code, the probe element must be created
  * before the DSP sink pad is activated. It does not need to be in any
  * particular state and does not even need to be added to the pipeline yet.
  *
  * # Example launch line
  *
- * As a conveniance, the echo canceller can be tested using an echo loop. In
+ * As a convenience, the echo canceller can be tested using an echo loop. In
  * this configuration, one would expect a single echo to be heard.
  *
  * |[
@@ -279,7 +279,7 @@ G_DEFINE_TYPE (GstWebrtcDsp, gst_webrtc_dsp, GST_TYPE_AUDIO_FILTER);
 static const gchar *
 webrtc_error_to_string (gint err)
 {
-  const gchar *str = "unkown error";
+  const gchar *str = "unknown error";
 
   switch (err) {
     case webrtc::AudioProcessing::kNoError:
@@ -1113,6 +1113,10 @@ gst_webrtc_dsp_class_init (GstWebrtcDspClass * klass)
           (GParamFlags) (G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS |
               G_PARAM_CONSTRUCT)));
 
+  gst_type_mark_as_plugin_api (GST_TYPE_WEBRTC_GAIN_CONTROL_MODE, (GstPluginAPIFlags) 0);
+  gst_type_mark_as_plugin_api (GST_TYPE_WEBRTC_NOISE_SUPPRESSION_LEVEL, (GstPluginAPIFlags) 0);
+  gst_type_mark_as_plugin_api (GST_TYPE_WEBRTC_ECHO_SUPPRESSION_LEVEL, (GstPluginAPIFlags) 0);
+  gst_type_mark_as_plugin_api (GST_TYPE_WEBRTC_VOICE_DETECTION_LIKELIHOOD, (GstPluginAPIFlags) 0);
 }
 
 static gboolean

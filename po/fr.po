@@ -3,14 +3,14 @@
 # This file is distributed under the same license as the gst-plugins-bad package.
 #
 # Claude Paroz <claude@2xlibre.net>, 2008-2011.
-# Stéphane Aulery <lkppo@free.fr>, 2015-2016, 2019.
+# Stéphane Aulery <lkppo@free.fr>, 2015-2016.
 #
 msgid ""
 msgstr ""
-"Project-Id-Version: gst-plugins-bad 1.15.1\n"
+"Project-Id-Version: gst-plugins-bad 1.10.0\n"
 "Report-Msgid-Bugs-To: http://bugzilla.gnome.org/\n"
-"POT-Creation-Date: 2019-12-03 11:13+0000\n"
-"PO-Revision-Date: 2019-05-12 03:46+0200\n"
+"POT-Creation-Date: 2019-02-26 11:53+0000\n"
+"PO-Revision-Date: 2016-12-23 20:45+0100\n"
 "Last-Translator: Stéphane Aulery <lkppo@free.fr>\n"
 "Language-Team: French <traduc@traduc.org>\n"
 "Language: fr\n"
@@ -20,7 +20,7 @@ msgstr ""
 "X-Bugs: Report translation errors to the Language-Team address.\n"
 
 msgid "No URL set."
-msgstr "Aucune URL définie."
+msgstr ""
 
 msgid "OpenCV failed to load template image"
 msgstr "OpenCV n’a pas pu charger l’image modèle"

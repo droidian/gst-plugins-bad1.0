@@ -23,11 +23,11 @@
  * SECTION:element-srtsink
  * @title: srtsink
  *
- * srtsink is a network sink that sends <ulink url="http://www.srtalliance.org/">SRT</ulink>
+ * srtsink is a network sink that sends [SRT](http://www.srtalliance.org/)
  * packets to the network.
  *
- * <refsect2>
- * <title>Examples</title>
+ * ## Examples</title>
+ *
  * |[
  * gst-launch-1.0 -v audiotestsrc ! srtsink uri=srt://host
  * ]| This pipeline shows how to serve SRT packets through the default port.
@@ -35,8 +35,7 @@
  * |[
  * gst-launch-1.0 -v audiotestsrc ! srtsink uri=srt://:port
  * ]| This pipeline shows how to wait SRT callers.
- * </refsect2>
- * 
+ *
  */
 
 #ifdef HAVE_CONFIG_H
@@ -119,21 +118,6 @@ gst_srt_sink_init (GstSRTSink * self)
   gst_srt_object_set_uri (self->srtobject, GST_SRT_DEFAULT_URI, NULL);
 }
 
-static void
-gst_srt_sink_caller_added_cb (int sock, GSocketAddress * addr,
-    GstSRTObject * srtobject)
-{
-  g_signal_emit (srtobject->element, signals[SIG_CALLER_ADDED], 0, sock, addr);
-}
-
-static void
-gst_srt_sink_caller_removed_cb (int sock, GSocketAddress * addr,
-    GstSRTObject * srtobject)
-{
-  g_signal_emit (srtobject->element, signals[SIG_CALLER_REMOVED], 0, sock,
-      addr);
-}
-
 static gboolean
 gst_srt_sink_start (GstBaseSink * bsink)
 {
@@ -146,13 +130,7 @@ gst_srt_sink_start (GstBaseSink * bsink)
   gst_structure_get_enum (self->srtobject->parameters, "mode",
       GST_TYPE_SRT_CONNECTION_MODE, (gint *) & connection_mode);
 
-  if (connection_mode == GST_SRT_CONNECTION_MODE_LISTENER) {
-    ret =
-        gst_srt_object_open_full (self->srtobject, gst_srt_sink_caller_added_cb,
-        gst_srt_sink_caller_removed_cb, self->cancellable, &error);
-  } else {
-    ret = gst_srt_object_open (self->srtobject, self->cancellable, &error);
-  }
+  ret = gst_srt_object_open (self->srtobject, self->cancellable, &error);
 
   if (!ret) {
     /* ensure error is posted since state change will fail */
@@ -304,14 +282,13 @@ gst_srt_sink_class_init (GstSRTSinkClass * klass)
    * @gstsrtsink: the srtsink element that emitted this signal
    * @sock: the client socket descriptor that was added to srtsink
    * @addr: the #GSocketAddress that describes the @sock
-   * 
+   *
    * The given socket descriptor was added to srtsink.
    */
   signals[SIG_CALLER_ADDED] =
       g_signal_new ("caller-added", G_TYPE_FROM_CLASS (klass),
       G_SIGNAL_RUN_LAST, G_STRUCT_OFFSET (GstSRTSinkClass, caller_added),
-      NULL, NULL, g_cclosure_marshal_generic, G_TYPE_NONE,
-      2, G_TYPE_INT, G_TYPE_SOCKET_ADDRESS);
+      NULL, NULL, NULL, G_TYPE_NONE, 2, G_TYPE_INT, G_TYPE_SOCKET_ADDRESS);
 
   /**
    * GstSRTSink::caller-removed:
@@ -324,7 +301,7 @@ gst_srt_sink_class_init (GstSRTSinkClass * klass)
   signals[SIG_CALLER_REMOVED] =
       g_signal_new ("caller-removed", G_TYPE_FROM_CLASS (klass),
       G_SIGNAL_RUN_LAST, G_STRUCT_OFFSET (GstSRTSinkClass,
-          caller_added), NULL, NULL, g_cclosure_marshal_generic, G_TYPE_NONE,
+          caller_added), NULL, NULL, NULL, G_TYPE_NONE,
       2, G_TYPE_INT, G_TYPE_SOCKET_ADDRESS);
 
   gst_srt_object_install_properties_helper (gobject_class);
@@ -376,8 +353,13 @@ gst_srt_sink_uri_set_uri (GstURIHandler * handler,
     const gchar * uri, GError ** error)
 {
   GstSRTSink *self = GST_SRT_SINK (handler);
+  gboolean ret;
 
-  return gst_srt_object_set_uri (self->srtobject, uri, error);
+  GST_OBJECT_LOCK (self);
+  ret = gst_srt_object_set_uri (self->srtobject, uri, error);
+  GST_OBJECT_UNLOCK (self);
+
+  return ret;
 }
 
 static void

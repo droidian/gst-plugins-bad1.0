@@ -144,9 +144,8 @@ _check_sdp_crypto (SDPSource source, GstWebRTCSessionDescription * sdp,
   return TRUE;
 }
 
-#if 0
-static gboolean
-_session_has_attribute_key (const GstSDPMessage * msg, const gchar * key)
+gboolean
+_message_has_attribute_key (const GstSDPMessage * msg, const gchar * key)
 {
   int i;
   for (i = 0; i < gst_sdp_message_attributes_len (msg); i++) {
@@ -159,6 +158,7 @@ _session_has_attribute_key (const GstSDPMessage * msg, const gchar * key)
   return FALSE;
 }
 
+#if 0
 static gboolean
 _session_has_attribute_key_value (const GstSDPMessage * msg, const gchar * key,
     const gchar * value)
@@ -212,7 +212,7 @@ _media_has_mid (const GstSDPMedia * media, guint media_idx, GError ** error)
   return TRUE;
 }
 
-static const gchar *
+const gchar *
 _media_get_ice_ufrag (const GstSDPMessage * msg, guint media_idx)
 {
   const gchar *ice_ufrag;
@@ -227,7 +227,7 @@ _media_get_ice_ufrag (const GstSDPMessage * msg, guint media_idx)
   return ice_ufrag;
 }
 
-static const gchar *
+const gchar *
 _media_get_ice_pwd (const GstSDPMessage * msg, guint media_idx)
 {
   const gchar *ice_pwd;
@@ -319,7 +319,7 @@ validate_sdp (GstWebRTCSignalingState state, SDPSource source,
     }
     if (!_media_has_setup (media, i, error))
       goto fail;
-    /* check paramaters in bundle are the same */
+    /* check parameters in bundle are the same */
     if (media_in_bundle) {
       const gchar *ice_ufrag =
           gst_sdp_media_get_attribute_val (media, "ice-ufrag");
@@ -397,6 +397,8 @@ GstWebRTCRTPTransceiverDirection
 _intersect_answer_directions (GstWebRTCRTPTransceiverDirection offer,
     GstWebRTCRTPTransceiverDirection answer)
 {
+  if (offer == DIR (INACTIVE) || answer == DIR (INACTIVE))
+    return DIR (INACTIVE);
   if (offer == DIR (SENDONLY) && answer == DIR (SENDRECV))
     return DIR (RECVONLY);
   if (offer == DIR (SENDONLY) && answer == DIR (RECVONLY))
@@ -411,6 +413,10 @@ _intersect_answer_directions (GstWebRTCRTPTransceiverDirection offer,
     return DIR (SENDONLY);
   if (offer == DIR (SENDRECV) && answer == DIR (RECVONLY))
     return DIR (RECVONLY);
+  if (offer == DIR (RECVONLY) && answer == DIR (RECVONLY))
+    return DIR (INACTIVE);
+  if (offer == DIR (SENDONLY) && answer == DIR (SENDONLY))
+    return DIR (INACTIVE);
 
   return DIR (NONE);
 }
@@ -431,11 +437,13 @@ _media_replace_direction (GstSDPMedia * media,
 
     if (g_strcmp0 (attr->key, "sendonly") == 0
         || g_strcmp0 (attr->key, "sendrecv") == 0
-        || g_strcmp0 (attr->key, "recvonly") == 0) {
+        || g_strcmp0 (attr->key, "recvonly") == 0
+        || g_strcmp0 (attr->key, "inactive") == 0) {
       GstSDPAttribute new_attr = { 0, };
       GST_TRACE ("replace %s with %s", attr->key, dir_str);
       gst_sdp_attribute_set (&new_attr, dir_str, "");
       gst_sdp_media_replace_attribute (media, i, &new_attr);
+      g_free (dir_str);
       return;
     }
   }
@@ -704,21 +712,56 @@ _generate_ice_credentials (gchar ** ufrag, gchar ** password)
 int
 _get_sctp_port_from_media (const GstSDPMedia * media)
 {
-  int sctpmap = -1, i;
+  int i;
+  const gchar *format;
+  gchar *endptr;
 
-  for (i = 0; i < gst_sdp_media_attributes_len (media); i++) {
-    const GstSDPAttribute *attr = gst_sdp_media_get_attribute (media, i);
+  if (gst_sdp_media_formats_len (media) != 1) {
+    /* only exactly one format is supported */
+    return -1;
+  }
 
-    if (g_strcmp0 (attr->key, "sctp-port") == 0) {
-      return atoi (attr->value);
-    } else if (g_strcmp0 (attr->key, "sctpmap") == 0) {
-      sctpmap = atoi (attr->value);
+  format = gst_sdp_media_get_format (media, 0);
+
+  if (g_strcmp0 (format, "webrtc-datachannel") == 0) {
+    /* draft-ietf-mmusic-sctp-sdp-21, e.g. Firefox 63 and later */
+
+    for (i = 0; i < gst_sdp_media_attributes_len (media); i++) {
+      const GstSDPAttribute *attr = gst_sdp_media_get_attribute (media, i);
+
+      if (g_strcmp0 (attr->key, "sctp-port") == 0) {
+        gint64 port = g_ascii_strtoll (attr->value, &endptr, 10);
+        if (endptr == attr->value) {
+          /* conversion error */
+          return -1;
+        }
+        return port;
+      }
+    }
+  } else {
+    /* draft-ietf-mmusic-sctp-sdp-05, e.g. Chrome as recent as 75 */
+    gint64 port = g_ascii_strtoll (format, &endptr, 10);
+    if (endptr == format) {
+      /* conversion error */
+      return -1;
+    }
+
+    for (i = 0; i < gst_sdp_media_attributes_len (media); i++) {
+      const GstSDPAttribute *attr = gst_sdp_media_get_attribute (media, i);
+
+      if (g_strcmp0 (attr->key, "sctpmap") == 0 && atoi (attr->value) == port) {
+        /* a=sctpmap:5000 webrtc-datachannel 256 */
+        gchar **parts = g_strsplit (attr->value, " ", 3);
+        if (!parts[1] || g_strcmp0 (parts[1], "webrtc-datachannel") != 0) {
+          port = -1;
+        }
+        g_strfreev (parts);
+        return port;
+      }
     }
   }
 
-  if (sctpmap >= 0)
-    GST_LOG ("no sctp-port attribute in media");
-  return sctpmap;
+  return -1;
 }
 
 guint64
@@ -760,6 +803,21 @@ _message_media_is_datachannel (const GstSDPMessage * msg, guint media_id)
     return FALSE;
 
   return TRUE;
+}
+
+guint
+_message_get_datachannel_index (const GstSDPMessage * msg)
+{
+  guint i;
+
+  for (i = 0; i < gst_sdp_message_medias_len (msg); i++) {
+    if (_message_media_is_datachannel (msg, i)) {
+      g_assert (i < G_MAXUINT);
+      return i;
+    }
+  }
+
+  return G_MAXUINT;
 }
 
 void
@@ -827,6 +885,8 @@ _parse_bundle (GstSDPMessage * sdp, GStrv * bundled)
     if (!(*bundled)[0]) {
       GST_ERROR ("Invalid format for BUNDLE group, expected at least "
           "one mid (%s)", group);
+      g_strfreev (*bundled);
+      *bundled = NULL;
       goto done;
     }
   } else {
@@ -858,4 +918,20 @@ _get_bundle_index (GstSDPMessage * sdp, GStrv bundled, guint * idx)
   }
 
   return ret;
+}
+
+gboolean
+_media_is_bundle_only (const GstSDPMedia * media)
+{
+  int i;
+
+  for (i = 0; i < gst_sdp_media_attributes_len (media); i++) {
+    const GstSDPAttribute *attr = gst_sdp_media_get_attribute (media, i);
+
+    if (g_strcmp0 (attr->key, "bundle-only") == 0) {
+      return TRUE;
+    }
+  }
+
+  return FALSE;
 }

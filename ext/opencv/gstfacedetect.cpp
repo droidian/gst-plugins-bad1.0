@@ -56,8 +56,8 @@
  * until the size is &lt;= GstFaceDetect::min-size-width or
  * GstFaceDetect::min-size-height.
  *
- * <refsect2>
- * <title>Example launch line</title>
+ * ## Example launch line
+ *
  * |[
  * gst-launch-1.0 autovideosrc ! decodebin ! colorspace ! facedetect ! videoconvert ! xvimagesink
  * ]| Detect and show faces
@@ -65,7 +65,6 @@
  * gst-launch-1.0 autovideosrc ! video/x-raw,width=320,height=240 ! videoconvert ! facedetect min-size-width=60 min-size-height=60 ! colorspace ! xvimagesink
  * ]| Detect large faces on a smaller image
  *
- * </refsect2>
  */
 
 /* FIXME: development version of OpenCV has CV_HAAR_FIND_BIGGEST_OBJECT which
@@ -321,7 +320,7 @@ gst_face_detect_class_init (GstFaceDetectClass * klass)
           1.1, 10.0, DEFAULT_SCALE_FACTOR,
           (GParamFlags) (G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS)));
   g_object_class_install_property (gobject_class, PROP_MIN_NEIGHBORS,
-      g_param_spec_int ("min-neighbors", "Mininum neighbors",
+      g_param_spec_int ("min-neighbors", "Minimum neighbors",
           "Minimum number (minus 1) of neighbor rectangles that makes up "
           "an object", 0, G_MAXINT, DEFAULT_MIN_NEIGHBORS,
           (GParamFlags) (G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS)));
@@ -357,6 +356,9 @@ gst_face_detect_class_init (GstFaceDetectClass * klass)
 
   gst_element_class_add_static_pad_template (element_class, &src_factory);
   gst_element_class_add_static_pad_template (element_class, &sink_factory);
+
+  gst_type_mark_as_plugin_api (GST_TYPE_OPENCV_FACE_DETECT_FLAGS, (GstPluginAPIFlags) 0);
+  gst_type_mark_as_plugin_api (GST_TYPE_FACE_DETECT_UPDATES, (GstPluginAPIFlags) 0);
 }
 
 /* initialize the new element

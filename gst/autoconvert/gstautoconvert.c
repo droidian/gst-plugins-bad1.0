@@ -30,7 +30,7 @@
  * no longer matches the caps.
  *
  * The list of element it will look into can be specified in the
- * #GstAutoConvert::factories property, otherwise it will look at all available
+ * #GstAutoConvert:factories property, otherwise it will look at all available
  * elements.
  */
 
@@ -164,7 +164,7 @@ gst_auto_convert_class_init (GstAutoConvertClass * klass)
   gst_element_class_add_static_pad_template (gstelement_class, &sinktemplate);
 
   gst_element_class_set_static_metadata (gstelement_class,
-      "Select convertor based on caps", "Generic/Bin",
+      "Select converter based on caps", "Generic/Bin",
       "Selects the right transform element based on the caps",
       "Olivier Crete <olivier.crete@collabora.com>");
 
@@ -895,7 +895,7 @@ gst_auto_convert_load_factories (GstAutoConvert * autoconvert)
 
   g_assert (all_factories);
 
-  if (g_atomic_pointer_compare_and_exchange (&autoconvert->factories, NULL,
+  if (!g_atomic_pointer_compare_and_exchange (&autoconvert->factories, NULL,
           all_factories)) {
     gst_plugin_feature_list_free (all_factories);
   }

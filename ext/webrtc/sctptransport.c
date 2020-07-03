@@ -91,7 +91,8 @@ _sctp_enqueue_task (GstWebRTCSCTPTransport * sctp, SCTPTask func,
   task->notify = notify;
 
   gst_webrtc_bin_enqueue_task (sctp->webrtcbin,
-      (GstWebRTCBinFunc) _execute_task, task, (GDestroyNotify) _free_task);
+      (GstWebRTCBinFunc) _execute_task, task, (GDestroyNotify) _free_task,
+      NULL);
 }
 
 static void
@@ -254,8 +255,7 @@ gst_webrtc_sctp_transport_class_init (GstWebRTCSCTPTransportClass * klass)
    */
   gst_webrtc_sctp_transport_signals[ON_RESET_STREAM_SIGNAL] =
       g_signal_new ("stream-reset", G_TYPE_FROM_CLASS (klass),
-      G_SIGNAL_RUN_LAST, 0, NULL, NULL, g_cclosure_marshal_generic,
-      G_TYPE_NONE, 1, G_TYPE_UINT);
+      G_SIGNAL_RUN_LAST, 0, NULL, NULL, NULL, G_TYPE_NONE, 1, G_TYPE_UINT);
 }
 
 static void

@@ -58,7 +58,7 @@ struct _GstWebRTCICEClass
   GstObjectClass            parent_class;
 };
 
-GstWebRTCICE *              gst_webrtc_ice_new                      (void);
+GstWebRTCICE *              gst_webrtc_ice_new                      (const gchar * name);
 GstWebRTCICEStream *        gst_webrtc_ice_add_stream               (GstWebRTCICE * ice,
                                                                      guint session_id);
 GstWebRTCICETransport *     gst_webrtc_ice_find_transport           (GstWebRTCICE * ice,
@@ -81,7 +81,6 @@ gboolean                    gst_webrtc_ice_set_remote_credentials   (GstWebRTCIC
                                                                      gchar * pwd);
 gboolean                    gst_webrtc_ice_add_turn_server          (GstWebRTCICE * ice,
                                                                      const gchar * uri);
-
 G_END_DECLS
 
 #endif /* __GST_WEBRTC_ICE_H__ */

@@ -17,6 +17,7 @@ if opencv_dep.found()
   gstopencv = library('gstopencv-' + api_version,
     opencv_sources,
     c_args : gst_plugins_bad_args + ['-DBUILDING_GST_OPENCV'],
+    cpp_args : gst_plugins_bad_args + ['-DBUILDING_GST_OPENCV'],
     include_directories : [configinc, libsinc],
     version : libversion,
     soversion : soversion,
@@ -32,4 +33,6 @@ if opencv_dep.found()
   install_headers(opencv_headers, subdir : 'gstreamer-1.0/gst/opencv')
 elif get_option('opencv').enabled()
   error('OpenCV support enabled but required dependencies were not found.')
+else
+  gstopencv_dep = disabler()
 endif

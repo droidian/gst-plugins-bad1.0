@@ -48,6 +48,7 @@ enum
   SIGNAL_0,
   ON_ICE_CANDIDATE_SIGNAL,
   ON_ICE_GATHERING_STATE_CHANGE_SIGNAL,
+  ADD_LOCAL_IP_ADDRESS_SIGNAL,
   LAST_SIGNAL,
 };
 
@@ -60,6 +61,8 @@ enum
   PROP_CONTROLLER,
   PROP_AGENT,
   PROP_FORCE_RELAY,
+  PROP_ICE_TCP,
+  PROP_ICE_UDP,
 };
 
 static guint gst_webrtc_ice_signals[LAST_SIGNAL] = { 0 };
@@ -118,7 +121,7 @@ static void
 _start_thread (GstWebRTCICE * ice)
 {
   g_mutex_lock (&ice->priv->lock);
-  ice->priv->thread = g_thread_new ("gst-nice-ops",
+  ice->priv->thread = g_thread_new (GST_OBJECT_NAME (ice),
       (GThreadFunc) _gst_nice_thread, ice);
 
   while (!ice->priv->loop)
@@ -414,9 +417,8 @@ _add_stun_server (GstWebRTCICE * ice, GstUri * stun_server)
   gchar *ip = NULL;
   guint port;
 
-  GST_DEBUG_OBJECT (ice, "adding stun server, %s", s);
-
   s = gst_uri_to_string (stun_server);
+  GST_DEBUG_OBJECT (ice, "adding stun server, %s", s);
 
   host = gst_uri_get_host (stun_server);
   if (!host) {
@@ -669,6 +671,28 @@ done:
   return ret;
 }
 
+static gboolean
+gst_webrtc_ice_add_local_ip_address (GstWebRTCICE * ice, const gchar * address)
+{
+  gboolean ret = FALSE;
+  NiceAddress nice_addr;
+
+  nice_address_init (&nice_addr);
+
+  ret = nice_address_set_from_string (&nice_addr, address);
+
+  if (ret) {
+    ret = nice_agent_add_local_address (ice->priv->nice_agent, &nice_addr);
+    if (!ret) {
+      GST_ERROR_OBJECT (ice, "Failed to add local address to NiceAgent");
+    }
+  } else {
+    GST_ERROR_OBJECT (ice, "Failed to initialize NiceAddress [%s]", address);
+  }
+
+  return ret;
+}
+
 gboolean
 gst_webrtc_ice_set_local_credentials (GstWebRTCICE * ice,
     GstWebRTCICEStream * stream, gchar * ufrag, gchar * pwd)
@@ -834,6 +858,14 @@ gst_webrtc_ice_set_property (GObject * object, guint prop_id,
       g_object_set_property (G_OBJECT (ice->priv->nice_agent),
           "force-relay", value);
       break;
+    case PROP_ICE_TCP:
+      g_object_set_property (G_OBJECT (ice->priv->nice_agent),
+          "ice-tcp", value);
+      break;
+    case PROP_ICE_UDP:
+      g_object_set_property (G_OBJECT (ice->priv->nice_agent),
+          "ice-udp", value);
+      break;
     default:
       G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
       break;
@@ -870,6 +902,14 @@ gst_webrtc_ice_get_property (GObject * object, guint prop_id,
       g_object_get_property (G_OBJECT (ice->priv->nice_agent),
           "force-relay", value);
       break;
+    case PROP_ICE_TCP:
+      g_object_get_property (G_OBJECT (ice->priv->nice_agent),
+          "ice-tcp", value);
+      break;
+    case PROP_ICE_UDP:
+      g_object_get_property (G_OBJECT (ice->priv->nice_agent),
+          "ice-udp", value);
+      break;
     default:
       G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
       break;
@@ -903,10 +943,26 @@ gst_webrtc_ice_finalize (GObject * object)
 }
 
 static void
+gst_webrtc_ice_constructed (GObject * object)
+{
+  GstWebRTCICE *ice = GST_WEBRTC_ICE (object);
+
+  _start_thread (ice);
+
+  ice->priv->nice_agent = nice_agent_new (ice->priv->main_context,
+      NICE_COMPATIBILITY_RFC5245);
+  g_signal_connect (ice->priv->nice_agent, "new-candidate-full",
+      G_CALLBACK (_on_new_candidate), ice);
+
+  G_OBJECT_CLASS (parent_class)->constructed (object);
+}
+
+static void
 gst_webrtc_ice_class_init (GstWebRTCICEClass * klass)
 {
   GObjectClass *gobject_class = (GObjectClass *) klass;
 
+  gobject_class->constructed = gst_webrtc_ice_constructed;
   gobject_class->get_property = gst_webrtc_ice_get_property;
   gobject_class->set_property = gst_webrtc_ice_set_property;
   gobject_class->finalize = gst_webrtc_ice_finalize;
@@ -942,15 +998,42 @@ gst_webrtc_ice_class_init (GstWebRTCICEClass * klass)
           "Force all traffic to go through a relay.", FALSE,
           G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
 
+  g_object_class_install_property (gobject_class,
+      PROP_ICE_TCP,
+      g_param_spec_boolean ("ice-tcp", "ICE TCP",
+          "Whether the agent should use ICE-TCP when gathering candidates",
+          TRUE, G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
+
+  g_object_class_install_property (gobject_class,
+      PROP_ICE_UDP,
+      g_param_spec_boolean ("ice-udp", "ICE UDP",
+          "Whether the agent should use ICE-UDP when gathering candidates",
+          TRUE, G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
+
   /**
    * GstWebRTCICE::on-ice-candidate:
-   * @object: the #GstWebRtcBin
+   * @object: the #GstWebRTCBin
    * @candidate: the ICE candidate
    */
   gst_webrtc_ice_signals[ON_ICE_CANDIDATE_SIGNAL] =
       g_signal_new ("on-ice-candidate", G_TYPE_FROM_CLASS (klass),
-      G_SIGNAL_RUN_LAST, 0, NULL, NULL, g_cclosure_marshal_generic,
+      G_SIGNAL_RUN_LAST, 0, NULL, NULL, NULL,
       G_TYPE_NONE, 2, G_TYPE_UINT, G_TYPE_STRING);
+
+  /**
+   * GstWebRTCICE::add-local-ip-address:
+   * @object: the #GstWebRTCICE
+   * @address: The local IP address
+   *
+   * Add a local IP address to use for ICE candidate gathering.  If none
+   * are supplied, they will be discovered automatically. Calling this signal
+   * stops automatic ICE gathering.
+   */
+  gst_webrtc_ice_signals[ADD_LOCAL_IP_ADDRESS_SIGNAL] =
+      g_signal_new_class_handler ("add-local-ip-address",
+      G_TYPE_FROM_CLASS (klass), G_SIGNAL_RUN_LAST | G_SIGNAL_ACTION,
+      G_CALLBACK (gst_webrtc_ice_add_local_ip_address), NULL, NULL,
+      g_cclosure_marshal_generic, G_TYPE_BOOLEAN, 1, G_TYPE_STRING);
 }
 
 static void
@@ -965,13 +1048,6 @@ gst_webrtc_ice_init (GstWebRTCICE * ice)
       g_hash_table_new_full (g_str_hash, g_str_equal, g_free,
       (GDestroyNotify) gst_uri_unref);
 
-  _start_thread (ice);
-
-  ice->priv->nice_agent = nice_agent_new (ice->priv->main_context,
-      NICE_COMPATIBILITY_RFC5245);
-  g_signal_connect (ice->priv->nice_agent, "new-candidate-full",
-      G_CALLBACK (_on_new_candidate), ice);
-
   ice->priv->nice_stream_map =
       g_array_new (FALSE, TRUE, sizeof (struct NiceStreamItem));
   g_array_set_clear_func (ice->priv->nice_stream_map,
@@ -979,7 +1055,7 @@ gst_webrtc_ice_init (GstWebRTCICE * ice)
 }
 
 GstWebRTCICE *
-gst_webrtc_ice_new (void)
+gst_webrtc_ice_new (const gchar * name)
 {
-  return g_object_new (GST_TYPE_WEBRTC_ICE, NULL);
+  return g_object_new (GST_TYPE_WEBRTC_ICE, "name", name, NULL);
 }

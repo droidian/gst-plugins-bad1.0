@@ -96,20 +96,24 @@ struct _GstWebRTCBinPrivate
   guint max_sink_pad_serial;
 
   gboolean bundle;
-  GArray *transceivers;
+  GPtrArray *transceivers;
   GArray *session_mid_map;
-  GArray *transports;
-  GArray *data_channels;
+  GPtrArray *transports;
+  GPtrArray *data_channels;
   /* list of data channels we've received a sctp stream for but no data
    * channel protocol for */
-  GArray *pending_data_channels;
+  GPtrArray *pending_data_channels;
+
+  guint jb_latency;
 
   GstWebRTCSCTPTransport *sctp_transport;
   TransportStream *data_channel_transport;
 
   GstWebRTCICE *ice;
   GArray *ice_stream_map;
-  GArray *pending_ice_candidates;
+  GMutex ice_lock;
+  GArray *pending_remote_ice_candidates;
+  GArray *pending_local_ice_candidates;
 
   /* peerconnection variables */
   gboolean is_closed;
@@ -131,6 +135,10 @@ struct _GstWebRTCBinPrivate
   /* count of the number of media streams we've offered for uniqueness */
   /* FIXME: overflow? */
   guint media_counter;
+  /* the number of times create_offer has been called for the version field */
+  guint offer_count;
+  GstWebRTCSessionDescription *last_generated_offer;
+  GstWebRTCSessionDescription *last_generated_answer;
 
   GstStructure *stats;
 };
@@ -143,13 +151,14 @@ typedef struct
   GstWebRTCBinFunc op;
   gpointer data;
   GDestroyNotify notify;
-//  GstPromise *promise;      /* FIXME */
+  GstPromise *promise;
 } GstWebRTCBinTask;
 
-void            gst_webrtc_bin_enqueue_task             (GstWebRTCBin * pc,
+gboolean        gst_webrtc_bin_enqueue_task             (GstWebRTCBin * pc,
                                                          GstWebRTCBinFunc func,
                                                          gpointer data,
-                                                         GDestroyNotify notify);
+                                                         GDestroyNotify notify,
+                                                         GstPromise *promise);
 
 G_END_DECLS
 
