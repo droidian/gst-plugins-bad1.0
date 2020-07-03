@@ -346,7 +346,23 @@ _find_response (gconstpointer resp, gconstpointer comp_resp)
   GstMsdkAllocResponse *cached_resp = (GstMsdkAllocResponse *) resp;
   mfxFrameAllocResponse *_resp = (mfxFrameAllocResponse *) comp_resp;
 
-  return cached_resp ? cached_resp->mem_ids != _resp->mids : -1;
+  return cached_resp ? cached_resp->response.mids != _resp->mids : -1;
+}
+
+static inline gboolean
+_requested_frame_size_is_equal_or_lower (mfxFrameAllocRequest * _req,
+    GstMsdkAllocResponse * cached_resp)
+{
+  if (((_req->Type & MFX_MEMTYPE_EXPORT_FRAME) &&
+          _req->Info.Width == cached_resp->request.Info.Width &&
+          _req->Info.Height == cached_resp->request.Info.Height) ||
+      (!(_req->Type & MFX_MEMTYPE_EXPORT_FRAME) &&
+          _req->Info.Width <= cached_resp->request.Info.Width &&
+          _req->Info.Height <= cached_resp->request.Info.Height))
+
+    return TRUE;
+
+  return FALSE;
 }
 
 static gint
@@ -356,11 +372,10 @@ _find_request (gconstpointer resp, gconstpointer req)
   mfxFrameAllocRequest *_req = (mfxFrameAllocRequest *) req;
 
   /* Confirm if it's under the size of the cached response */
-  if (_req->Info.Width <= cached_resp->request.Info.Width &&
-      _req->Info.Height <= cached_resp->request.Info.Height) {
+  if (_req->NumFrameSuggested <= cached_resp->request.NumFrameSuggested &&
+      _requested_frame_size_is_equal_or_lower (_req, cached_resp))
     return _req->Type & cached_resp->
         request.Type & MFX_MEMTYPE_FROM_DECODE ? 0 : -1;
-  }
 
   return -1;
 }
@@ -400,8 +415,8 @@ create_surfaces (GstMsdkContext * context, GstMsdkAllocResponse * resp)
   mfxMemId *mem_id;
   mfxFrameSurface1 *surface;
 
-  for (i = 0; i < resp->response->NumFrameActual; i++) {
-    mem_id = resp->mem_ids[i];
+  for (i = 0; i < resp->response.NumFrameActual; i++) {
+    mem_id = resp->response.mids[i];
     surface = (mfxFrameSurface1 *) g_slice_new0 (mfxFrameSurface1);
     if (!surface) {
       GST_ERROR ("failed to allocate surface");
@@ -468,8 +483,9 @@ check_surfaces_available (GstMsdkContext * context, GstMsdkAllocResponse * resp)
   gboolean ret = FALSE;
 
   g_mutex_lock (&priv->mutex);
-  for (l = resp->surfaces_locked; l; l = l->next) {
+  for (l = resp->surfaces_locked; l;) {
     surface = l->data;
+    l = l->next;
     if (!surface->Data.Locked) {
       resp->surfaces_locked = g_list_remove (resp->surfaces_locked, surface);
       resp->surfaces_avail = g_list_prepend (resp->surfaces_avail, surface);
@@ -503,9 +519,9 @@ gst_msdk_context_get_surface_available (GstMsdkContext * context,
 
 retry:
   g_mutex_lock (&priv->mutex);
-  for (l = msdk_resp->surfaces_avail; l; l = l->next) {
+  for (l = msdk_resp->surfaces_avail; l;) {
     surface = l->data;
-
+    l = l->next;
     if (!surface->Data.Locked) {
       msdk_resp->surfaces_avail =
           g_list_remove (msdk_resp->surfaces_avail, surface);
@@ -521,7 +537,7 @@ retry:
    * upstream msdk element sometimes needs to wait for a gst buffer
    * to be released in downstream.
    *
-   * Poll the pool for a maximum of 20 milisecnds.
+   * Poll the pool for a maximum of 20 millisecond.
    *
    * FIXME: Is there any better way to handle this case?
    */

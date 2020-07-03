@@ -26,9 +26,8 @@
  * #GstPcapParse:src-port and #GstPcapParse:dst-port to restrict which packets
  * should be included.
  *
- * The supported data format is the classical <ulink
- * url="https://wiki.wireshark.org/Development/LibpcapFileFormat">libpcap file
- * format</ulink>.
+ * The supported data format is the classical
+ * [libpcap file format](https://wiki.wireshark.org/Development/LibpcapFileFormat)
  *
  * ## Example pipelines
  * |[
@@ -325,6 +324,7 @@ gst_pcap_parse_reset (GstPcapParse * self)
   self->cur_ts = GST_CLOCK_TIME_NONE;
   self->base_ts = GST_CLOCK_TIME_NONE;
   self->newsegment_sent = FALSE;
+  self->first_packet = TRUE;
 
   gst_adapter_clear (self->adapter);
 }
@@ -374,6 +374,7 @@ gst_pcap_parse_scan_frame (GstPcapParse * self,
   guint16 src_port;
   guint16 dst_port;
   guint16 len;
+  guint16 ip_packet_len;
 
   switch (self->linktype) {
     case LINKTYPE_ETHER:
@@ -448,6 +449,7 @@ gst_pcap_parse_scan_frame (GstPcapParse * self,
   ip_src_addr = *((guint32 *) (buf_ip + 12));
   ip_dst_addr = *((guint32 *) (buf_ip + 16));
   buf_proto = buf_ip + ip_header_size;
+  ip_packet_len = GUINT16_FROM_BE (*(guint16 *) (buf_ip + 2));
 
   /* ok for tcp and udp */
   src_port = GUINT16_FROM_BE (*((guint16 *) (buf_proto + 0)));
@@ -470,7 +472,7 @@ gst_pcap_parse_scan_frame (GstPcapParse * self,
 
     /* all remaining data following tcp header is payload */
     *payload = buf_proto + len;
-    *payload_size = self->cur_packet_size - (buf_proto - buf) - len;
+    *payload_size = ip_packet_len - ip_header_size - len;
   }
 
   /* but still filter as configured */
@@ -535,6 +537,15 @@ gst_pcap_parse_chain (GstPad * pad, GstObject * parent, GstBuffer * buffer)
             } else {
               out_buf = gst_buffer_new ();
             }
+
+            /* only first packet should have DISCONT flag */
+            if (G_LIKELY (!self->first_packet)) {
+              GST_BUFFER_FLAG_UNSET (out_buf, GST_BUFFER_FLAG_DISCONT);
+            } else {
+              GST_BUFFER_FLAG_SET (out_buf, GST_BUFFER_FLAG_DISCONT);
+              self->first_packet = FALSE;
+            }
+
             gst_adapter_flush (self->adapter,
                 self->cur_packet_size - offset - payload_size);
 

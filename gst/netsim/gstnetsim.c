@@ -68,7 +68,7 @@ enum
   PROP_ALLOW_REORDERING,
 };
 
-/* these numbers are nothing but wild guesses and dont reflect any reality */
+/* these numbers are nothing but wild guesses and don't reflect any reality */
 #define DEFAULT_MIN_DELAY 200
 #define DEFAULT_MAX_DELAY 400
 #define DEFAULT_DELAY_DISTRIBUTION DISTRIBUTION_UNIFORM
@@ -756,6 +756,8 @@ gst_net_sim_class_init (GstNetSimClass * klass)
           G_PARAM_READWRITE | G_PARAM_CONSTRUCT | G_PARAM_STATIC_STRINGS));
 
   GST_DEBUG_CATEGORY_INIT (netsim_debug, "netsim", 0, "Network simulator");
+
+  gst_type_mark_as_plugin_api (distribution_get_type (), 0);
 }
 
 static gboolean

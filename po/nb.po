@@ -2,14 +2,14 @@
 # This file is put in the public domain.
 #
 # Kjartan Maraas <kmaraas@gnome.org>, 2004-2007.
-# Johnny A. Solbu <johnny@solbu.net>, 2012-2019
+# Johnny A. Solbu <johnny@solbu.net>, 2012-2017
 #
 msgid ""
 msgstr ""
-"Project-Id-Version: gst-plugins-bad 1.15.1\n"
+"Project-Id-Version: gst-plugins-bad 1.10.0\n"
 "Report-Msgid-Bugs-To: http://bugzilla.gnome.org/\n"
-"POT-Creation-Date: 2019-12-03 11:13+0000\n"
-"PO-Revision-Date: 2019-09-03 09:33+0200\n"
+"POT-Creation-Date: 2019-02-26 11:53+0000\n"
+"PO-Revision-Date: 2017-01-05 01:34+0100\n"
 "Last-Translator: Johnny A. Solbu <johnny@solbu.net>\n"
 "Language-Team: Norwegian Bokmaal <i18n-nb@lister.ping.uio.no>\n"
 "Language: nb_NO\n"
@@ -20,7 +20,7 @@ msgstr ""
 "X-Generator: Poedit 1.8.7.1\n"
 
 msgid "No URL set."
-msgstr "Ingen URL satt."
+msgstr ""
 
 msgid "OpenCV failed to load template image"
 msgstr "OpenCV kunne ikke laste mal-bilde"

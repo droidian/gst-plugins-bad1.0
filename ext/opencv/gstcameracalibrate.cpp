@@ -57,12 +57,11 @@
  * 
  * Based on this tutorial: https://docs.opencv.org/2.4/doc/tutorials/calib3d/camera_calibration/camera_calibration.html
  *
- * <refsect2>
- * <title>Example pipelines</title>
+ * ## Example pipelines
+ *
  * |[
  * gst-launch-1.0 -v v4l2src ! videoconvert ! cameraundistort ! cameracalibrate | autovideosink
  * ]| will correct camera distortion once camera calibration is done.
- * </refsect2>
  */
 
 /*
@@ -289,6 +288,8 @@ gst_camera_calibrate_class_init (GstCameraCalibrateClass * klass)
   gst_element_class_add_pad_template (element_class, templ);
   templ = gst_pad_template_new ("src", GST_PAD_SRC, GST_PAD_ALWAYS, caps);
   gst_element_class_add_pad_template (element_class, templ);
+
+  gst_type_mark_as_plugin_api (GST_TYPE_CAMERA_CALIBRATION_PATTERN, (GstPluginAPIFlags) 0);
 }
 
 /* initialize the new element

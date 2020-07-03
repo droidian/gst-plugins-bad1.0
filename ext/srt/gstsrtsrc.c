@@ -2,7 +2,7 @@
  * Copyright (C) 2018, Collabora Ltd.
  * Copyright (C) 2018, SK Telecom, Co., Ltd.
  *   Author: Jeongseok Kim <jeongseok.kim@sk.com>
- * 
+ *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
  * License as published by the Free Software Foundation; either
@@ -23,11 +23,10 @@
  * SECTION:element-srtsrc
  * @title: srtsrc
  *
- * srtsrc is a network source that reads <ulink url="http://www.srtalliance.org/">SRT</ulink>
+ * srtsrc is a network source that reads [SRT](http://www.srtalliance.org/)
  * packets from the network.
  *
- * <refsect2>
- * <title>Examples</title>
+ * ## Examples
  * |[
  * gst-launch-1.0 -v srtsrc uri="srt://127.0.0.1:7001" ! fakesink
  * ]| This pipeline shows how to connect SRT server by setting #GstSRTSrc:uri property.
@@ -39,7 +38,6 @@
  * |[
  * gst-launch-1.0 -v srtclientsrc uri="srt://192.168.1.10:7001?mode=rendez-vous" ! fakesink
  * ]| This pipeline shows how to connect SRT server by setting #GstSRTSrc:uri property and using the rendez-vous mode.
- * </refsect2>
  *
  */
 
@@ -79,21 +77,6 @@ G_DEFINE_TYPE_WITH_CODE (GstSRTSrc, gst_srt_src,
     G_IMPLEMENT_INTERFACE (GST_TYPE_URI_HANDLER, gst_srt_src_uri_handler_init)
     GST_DEBUG_CATEGORY_INIT (GST_CAT_DEFAULT, "srtsrc", 0, "SRT Source"));
 
-static void
-gst_srt_src_caller_added_cb (int sock, GSocketAddress * addr,
-    GstSRTObject * srtobject)
-{
-  g_signal_emit (srtobject->element, signals[SIG_CALLER_ADDED], 0, sock, addr);
-}
-
-static void
-gst_srt_src_caller_removed_cb (int sock, GSocketAddress * addr,
-    GstSRTObject * srtobject)
-{
-  g_signal_emit (srtobject->element, signals[SIG_CALLER_REMOVED], 0, sock,
-      addr);
-}
-
 static gboolean
 gst_srt_src_start (GstBaseSrc * bsrc)
 {
@@ -105,13 +88,7 @@ gst_srt_src_start (GstBaseSrc * bsrc)
   gst_structure_get_enum (self->srtobject->parameters, "mode",
       GST_TYPE_SRT_CONNECTION_MODE, (gint *) & connection_mode);
 
-  if (connection_mode == GST_SRT_CONNECTION_MODE_LISTENER) {
-    ret =
-        gst_srt_object_open_full (self->srtobject, gst_srt_src_caller_added_cb,
-        gst_srt_src_caller_removed_cb, self->cancellable, &error);
-  } else {
-    ret = gst_srt_object_open (self->srtobject, self->cancellable, &error);
-  }
+  ret = gst_srt_object_open (self->srtobject, self->cancellable, &error);
 
   if (!ret) {
     /* ensure error is posted since state change will fail */
@@ -274,14 +251,13 @@ gst_srt_src_class_init (GstSRTSrcClass * klass)
    * @gstsrtsink: the srtsink element that emitted this signal
    * @sock: the client socket descriptor that was added to srtsink
    * @addr: the #GSocketAddress that describes the @sock
-   * 
+   *
    * The given socket descriptor was added to srtsink.
    */
   signals[SIG_CALLER_ADDED] =
       g_signal_new ("caller-added", G_TYPE_FROM_CLASS (klass),
       G_SIGNAL_RUN_LAST, G_STRUCT_OFFSET (GstSRTSrcClass, caller_added),
-      NULL, NULL, g_cclosure_marshal_generic, G_TYPE_NONE,
-      2, G_TYPE_INT, G_TYPE_SOCKET_ADDRESS);
+      NULL, NULL, NULL, G_TYPE_NONE, 2, G_TYPE_INT, G_TYPE_SOCKET_ADDRESS);
 
   /**
    * GstSRTSrc::caller-removed:
@@ -294,7 +270,7 @@ gst_srt_src_class_init (GstSRTSrcClass * klass)
   signals[SIG_CALLER_REMOVED] =
       g_signal_new ("caller-removed", G_TYPE_FROM_CLASS (klass),
       G_SIGNAL_RUN_LAST, G_STRUCT_OFFSET (GstSRTSrcClass,
-          caller_added), NULL, NULL, g_cclosure_marshal_generic, G_TYPE_NONE,
+          caller_added), NULL, NULL, NULL, G_TYPE_NONE,
       2, G_TYPE_INT, G_TYPE_SOCKET_ADDRESS);
 
   gst_srt_object_install_properties_helper (gobject_class);
@@ -345,8 +321,13 @@ gst_srt_src_uri_set_uri (GstURIHandler * handler,
     const gchar * uri, GError ** error)
 {
   GstSRTSrc *self = GST_SRT_SRC (handler);
+  gboolean ret;
 
-  return gst_srt_object_set_uri (self->srtobject, uri, error);
+  GST_OBJECT_LOCK (self);
+  ret = gst_srt_object_set_uri (self->srtobject, uri, error);
+  GST_OBJECT_UNLOCK (self);
+
+  return ret;
 }
 
 static void

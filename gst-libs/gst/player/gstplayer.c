@@ -23,6 +23,8 @@
  * SECTION:gstplayer
  * @title: GstPlayer
  * @short_description: Player
+ * @symbols:
+ * - GstPlayer
  *
  */
 
@@ -69,6 +71,9 @@ GST_DEBUG_CATEGORY_STATIC (gst_player_debug);
 #define DEFAULT_AUDIO_VIDEO_OFFSET 0
 #define DEFAULT_SUBTITLE_VIDEO_OFFSET 0
 
+/**
+ * gst_player_error_quark:
+ */
 GQuark
 gst_player_error_quark (void)
 {
@@ -1185,9 +1190,9 @@ error_cb (G_GNUC_UNUSED GstBus * bus, GstMessage * msg, gpointer user_data)
         g_strdup_printf ("Error from element %s: %s\n%s", name, message,
         err->message);
 
-  GST_ERROR_OBJECT (self, "ERROR: from element %s: %s\n", name, err->message);
+  GST_ERROR_OBJECT (self, "ERROR: from element %s: %s", name, err->message);
   if (debug != NULL)
-    GST_ERROR_OBJECT (self, "Additional debug info:\n%s\n", debug);
+    GST_ERROR_OBJECT (self, "Additional debug info: %s", debug);
 
   player_err =
       g_error_new_literal (GST_PLAYER_ERROR, GST_PLAYER_ERROR_FAILED,
@@ -1224,10 +1229,9 @@ warning_cb (G_GNUC_UNUSED GstBus * bus, GstMessage * msg, gpointer user_data)
         g_strdup_printf ("Warning from element %s: %s\n%s", name, message,
         err->message);
 
-  GST_WARNING_OBJECT (self, "WARNING: from element %s: %s\n", name,
-      err->message);
+  GST_WARNING_OBJECT (self, "WARNING: from element %s: %s", name, err->message);
   if (debug != NULL)
-    GST_WARNING_OBJECT (self, "Additional debug info:\n%s\n", debug);
+    GST_WARNING_OBJECT (self, "Additional debug info: %s", debug);
 
   player_err =
       g_error_new_literal (GST_PLAYER_ERROR, GST_PLAYER_ERROR_FAILED,
@@ -3928,7 +3932,7 @@ gst_player_set_video_track (GstPlayer * self, gint stream_index)
  *
  * Returns: %TRUE or %FALSE
  *
- * Sets the subtitle strack @stream_index.
+ * Sets the subtitle stack @stream_index.
  */
 gboolean
 gst_player_set_subtitle_track (GstPlayer * self, gint stream_index)

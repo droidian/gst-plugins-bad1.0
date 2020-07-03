@@ -375,7 +375,7 @@ GstMpeg2EncOptions::initProperties (GObjectClass * klass)
           (GParamFlags) (G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS)));
   g_object_class_install_property (klass, ARG_UNIT_COEFF_ELIM,
       g_param_spec_int ("unit-coeff-elim", "Unit coefficience elimination",
-          "How agressively small-unit picture blocks should be skipped",
+          "How aggressively small-unit picture blocks should be skipped",
           -40, 40, 0, 
           (GParamFlags) (G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS)));
 
@@ -502,6 +502,14 @@ GstMpeg2EncOptions::initProperties (GObjectClass * klass)
           "streams.  Quite some players do not support this.",
           FALSE, (GParamFlags) (G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS)));
 #endif
+
+  gst_type_mark_as_plugin_api (GST_TYPE_MPEG2ENC_ASPECT, (GstPluginAPIFlags) 0);
+  gst_type_mark_as_plugin_api (GST_TYPE_MPEG2ENC_FORMAT, (GstPluginAPIFlags) 0);
+  gst_type_mark_as_plugin_api (GST_TYPE_MPEG2ENC_FRAMERATE, (GstPluginAPIFlags) 0);
+  gst_type_mark_as_plugin_api (GST_TYPE_MPEG2ENC_INTERLACE_MODE, (GstPluginAPIFlags) 0);
+  gst_type_mark_as_plugin_api (GST_TYPE_MPEG2ENC_VIDEO_NORM, (GstPluginAPIFlags) 0);
+  gst_type_mark_as_plugin_api (GST_TYPE_MPEG2ENC_PLAYBACK_FIELD_ORDER, (GstPluginAPIFlags) 0);
+  gst_type_mark_as_plugin_api (GST_TYPE_MPEG2ENC_QUANTISATION_MATRIX, (GstPluginAPIFlags) 0);
 }
 
 /*

@@ -63,6 +63,18 @@ static const struct map gst_msdk_video_format_to_mfx_map[] = {
 #endif
   GST_VIDEO_INFO_TO_MFX_MAP (VUYA, YUV444, AYUV),
   GST_VIDEO_INFO_TO_MFX_MAP (BGR10A2_LE, YUV444, A2RGB10),
+#if (MFX_VERSION >= 1027)
+  GST_VIDEO_INFO_TO_MFX_MAP (Y210, YUV422, Y210),
+  GST_VIDEO_INFO_TO_MFX_MAP (Y410, YUV444, Y410),
+#endif
+#if (MFX_VERSION >= 1031)
+  /* P016 is used for semi-planar 12 bits format in MSDK */
+  GST_VIDEO_INFO_TO_MFX_MAP (P012_LE, YUV420, P016),
+  /* Y216 is used for 12bit 4:2:2 format in MSDK */
+  GST_VIDEO_INFO_TO_MFX_MAP (Y212_LE, YUV422, Y216),
+  /* Y416 is used for 12bit 4:4:4:4 format in MSDK */
+  GST_VIDEO_INFO_TO_MFX_MAP (Y412_LE, YUV444, Y416),
+#endif
   {0, 0, 0}
 };
 
@@ -137,7 +149,25 @@ msdk_status_to_string (mfxStatus status)
     default:
       break;
   }
-  return "undefiend error";
+  return "undefined error";
+}
+
+mfxU16
+msdk_get_platform_codename (mfxSession session)
+{
+  mfxU16 codename = MFX_PLATFORM_UNKNOWN;
+
+#if (MFX_VERSION >= 1019)
+  {
+    mfxStatus status;
+    mfxPlatform platform = { 0 };
+    status = MFXVideoCORE_QueryPlatform (session, &platform);
+    if (MFX_ERR_NONE == status)
+      codename = platform.CodeName;
+  }
+#endif
+
+  return codename;
 }
 
 void
@@ -161,6 +191,7 @@ msdk_open_session (mfxIMPL impl)
   };
   mfxIMPL implementation;
   mfxStatus status;
+  mfxU16 codename;
 
   static const gchar *implementation_names[] = {
     "AUTO", "SOFTWARE", "HARDWARE", "AUTO_ANY", "HARDWARE_ANY", "HARDWARE2",
@@ -187,9 +218,16 @@ msdk_open_session (mfxIMPL impl)
     goto failed;
   }
 
-  GST_INFO ("MSDK implementation: 0x%04x (%s)", implementation,
+  codename = msdk_get_platform_codename (session);
+
+  if (codename != MFX_PLATFORM_UNKNOWN)
+    GST_INFO ("Detected MFX platform with device code %d", codename);
+  else
+    GST_WARNING ("Unknown MFX platform");
+
+  GST_INFO ("MFX implementation: 0x%04x (%s)", implementation,
       implementation_names[MFX_IMPL_BASETYPE (implementation)]);
-  GST_INFO ("MSDK version: %d.%d", version.Major, version.Minor);
+  GST_INFO ("MFX version: %d.%d", version.Major, version.Minor);
 
   return session;
 
@@ -201,7 +239,7 @@ failed:
 gboolean
 msdk_is_available (void)
 {
-  mfxSession session = msdk_open_session (MFX_IMPL_AUTO_ANY);
+  mfxSession session = msdk_open_session (MFX_IMPL_HARDWARE_ANY);
   if (!session) {
     return FALSE;
   }
@@ -211,22 +249,37 @@ msdk_is_available (void)
 }
 
 void
-gst_msdk_set_video_alignment (GstVideoInfo * info,
+gst_msdk_set_video_alignment (GstVideoInfo * info, guint alloc_w, guint alloc_h,
     GstVideoAlignment * alignment)
 {
   guint i, width, height;
+  guint stride_align = 127;     /* 128-byte alignment */
 
   width = GST_VIDEO_INFO_WIDTH (info);
   height = GST_VIDEO_INFO_HEIGHT (info);
 
+  g_assert (alloc_w == 0 || alloc_w >= width);
+  g_assert (alloc_h == 0 || alloc_h >= height);
+
+  if (alloc_w == 0)
+    alloc_w = width;
+
+  if (alloc_h == 0)
+    alloc_h = height;
+
+  /* PitchAlignment is set to 64 bytes in the media driver for the following formats */
+  if (GST_VIDEO_INFO_FORMAT (info) == GST_VIDEO_FORMAT_BGRA ||
+      GST_VIDEO_INFO_FORMAT (info) == GST_VIDEO_FORMAT_BGRx ||
+      GST_VIDEO_INFO_FORMAT (info) == GST_VIDEO_FORMAT_BGR10A2_LE ||
+      GST_VIDEO_INFO_FORMAT (info) == GST_VIDEO_FORMAT_RGB16)
+    stride_align = 63;          /* 64-byte alignment */
+
   gst_video_alignment_reset (alignment);
   for (i = 0; i < GST_VIDEO_INFO_N_PLANES (info); i++)
-    alignment->stride_align[i] = 15;    /* 16-byte alignment */
+    alignment->stride_align[i] = stride_align;
 
-  if (width & 15)
-    alignment->padding_right = GST_MSDK_ALIGNMENT_PADDING (width, 16);
-  if (height & 31)
-    alignment->padding_bottom = GST_MSDK_ALIGNMENT_PADDING (height, 32);
+  alignment->padding_right = GST_ROUND_UP_16 (alloc_w) - width;
+  alignment->padding_bottom = GST_ROUND_UP_32 (alloc_h) - height;
 }
 
 static const struct map *
@@ -263,8 +316,20 @@ gst_msdk_set_mfx_frame_info_from_video_info (mfxFrameInfo * mfx_info,
 {
   g_return_if_fail (info && mfx_info);
 
-  mfx_info->Width = GST_ROUND_UP_16 (GST_VIDEO_INFO_WIDTH (info));
-  mfx_info->Height = GST_ROUND_UP_32 (GST_VIDEO_INFO_HEIGHT (info));
+  /* Use the first component in info to calculate mfx width / height */
+  mfx_info->Width =
+      GST_ROUND_UP_16 (GST_VIDEO_INFO_COMP_STRIDE (info,
+          0) / GST_VIDEO_INFO_COMP_PSTRIDE (info, 0));
+
+  if (GST_VIDEO_INFO_N_PLANES (info) > 1)
+    mfx_info->Height =
+        GST_ROUND_UP_32 (GST_VIDEO_INFO_COMP_OFFSET (info,
+            1) / GST_VIDEO_INFO_COMP_STRIDE (info, 0));
+  else
+    mfx_info->Height =
+        GST_ROUND_UP_32 (GST_VIDEO_INFO_SIZE (info) /
+        GST_VIDEO_INFO_COMP_STRIDE (info, 0));
+
   mfx_info->CropW = GST_VIDEO_INFO_WIDTH (info);
   mfx_info->CropH = GST_VIDEO_INFO_HEIGHT (info);
   mfx_info->FrameRateExtN = GST_VIDEO_INFO_FPS_N (info);
@@ -279,10 +344,39 @@ gst_msdk_set_mfx_frame_info_from_video_info (mfxFrameInfo * mfx_info,
   mfx_info->ChromaFormat =
       gst_msdk_get_mfx_chroma_from_format (GST_VIDEO_INFO_FORMAT (info));
 
-  if (mfx_info->FourCC == MFX_FOURCC_P010) {
-    mfx_info->BitDepthLuma = 10;
-    mfx_info->BitDepthChroma = 10;
-    mfx_info->Shift = 1;
+  switch (mfx_info->FourCC) {
+    case MFX_FOURCC_P010:
+#if (MFX_VERSION >= 1027)
+    case MFX_FOURCC_Y210:
+#endif
+      mfx_info->BitDepthLuma = 10;
+      mfx_info->BitDepthChroma = 10;
+      mfx_info->Shift = 1;
+
+      break;
+
+#if (MFX_VERSION >= 1027)
+    case MFX_FOURCC_Y410:
+      mfx_info->BitDepthLuma = 10;
+      mfx_info->BitDepthChroma = 10;
+      mfx_info->Shift = 0;
+
+      break;
+#endif
+
+#if (MFX_VERSION >= 1031)
+    case MFX_FOURCC_P016:
+    case MFX_FOURCC_Y216:
+    case MFX_FOURCC_Y416:
+      mfx_info->BitDepthLuma = 12;
+      mfx_info->BitDepthChroma = 12;
+      mfx_info->Shift = 1;
+
+      break;
+#endif
+
+    default:
+      break;
   }
 
   return;
@@ -335,4 +429,80 @@ gst_msdk_get_video_format_from_mfx_fourcc (mfxU32 fourcc)
   }
 
   return GST_VIDEO_FORMAT_UNKNOWN;
+}
+
+void
+gst_msdk_update_mfx_frame_info_from_mfx_video_param (mfxFrameInfo * mfx_info,
+    mfxVideoParam * param)
+{
+  mfx_info->BitDepthLuma = param->mfx.FrameInfo.BitDepthLuma;
+  mfx_info->BitDepthChroma = param->mfx.FrameInfo.BitDepthChroma;
+  mfx_info->Shift = param->mfx.FrameInfo.Shift;
+}
+
+void
+gst_msdk_get_mfx_video_orientation_from_video_direction (guint value,
+    guint * mfx_mirror, guint * mfx_rotation)
+{
+  *mfx_mirror = MFX_MIRRORING_DISABLED;
+  *mfx_rotation = MFX_ANGLE_0;
+
+  switch (value) {
+    case GST_VIDEO_ORIENTATION_IDENTITY:
+      *mfx_mirror = MFX_MIRRORING_DISABLED;
+      *mfx_rotation = MFX_ANGLE_0;
+      break;
+    case GST_VIDEO_ORIENTATION_HORIZ:
+      *mfx_mirror = MFX_MIRRORING_HORIZONTAL;
+      *mfx_rotation = MFX_ANGLE_0;
+      break;
+    case GST_VIDEO_ORIENTATION_VERT:
+      *mfx_mirror = MFX_MIRRORING_VERTICAL;
+      *mfx_rotation = MFX_ANGLE_0;
+      break;
+    case GST_VIDEO_ORIENTATION_90R:
+      *mfx_mirror = MFX_MIRRORING_DISABLED;
+      *mfx_rotation = MFX_ANGLE_90;
+      break;
+    case GST_VIDEO_ORIENTATION_180:
+      *mfx_mirror = MFX_MIRRORING_DISABLED;
+      *mfx_rotation = MFX_ANGLE_180;
+      break;
+    case GST_VIDEO_ORIENTATION_90L:
+      *mfx_mirror = MFX_MIRRORING_DISABLED;
+      *mfx_rotation = MFX_ANGLE_270;
+      break;
+    case GST_VIDEO_ORIENTATION_UL_LR:
+      *mfx_mirror = MFX_MIRRORING_HORIZONTAL;
+      *mfx_rotation = MFX_ANGLE_90;
+      break;
+    case GST_VIDEO_ORIENTATION_UR_LL:
+      *mfx_mirror = MFX_MIRRORING_VERTICAL;
+      *mfx_rotation = MFX_ANGLE_90;
+      break;
+    default:
+      break;
+  }
+}
+
+gboolean
+gst_msdk_load_plugin (mfxSession session, const mfxPluginUID * uid,
+    mfxU32 version, const gchar * plugin)
+{
+  mfxStatus status;
+
+  status = MFXVideoUSER_Load (session, uid, version);
+
+  if (status == MFX_ERR_UNDEFINED_BEHAVIOR) {
+    GST_WARNING ("Media SDK Plugin for %s has been loaded", plugin);
+  } else if (status < MFX_ERR_NONE) {
+    GST_ERROR ("Media SDK Plugin for %s load failed (%s)", plugin,
+        msdk_status_to_string (status));
+    return FALSE;
+  } else if (status > MFX_ERR_NONE) {
+    GST_WARNING ("Media SDK Plugin for %s load warning: %s", plugin,
+        msdk_status_to_string (status));
+  }
+
+  return TRUE;
 }

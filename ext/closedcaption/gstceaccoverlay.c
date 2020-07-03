@@ -285,6 +285,8 @@ gst_base_cea_cc_overlay_class_init (GstCeaCcOverlayClass * klass)
       "Chengjun Wang <cjun.wang@samsung.com>");
   gst_cea708_decoder_init_debug ();
 
+  gst_type_mark_as_plugin_api (GST_TYPE_CC_OVERLAY_WIN_H_POS, 0);
+
 }
 
 static void
@@ -1468,7 +1470,7 @@ gst_cea_cc_overlay_process_packet (GstCeaCcOverlay * overlay, guint8 cc_type)
  * @overlay: The #GstCeaCcOverlay 
  * @user_data: The #GstMpegVideoCCData to decode
  *
- * decode closed caption data and render when neccesary
+ * decode closed caption data and render when necessary
  * in struct GstMpegVideoCCData type's user_data's data field, 3 byte's data construct 1 cc_data_pkt
  *
  * A cc_data_pkt is 3 bytes as follows:

@@ -629,15 +629,15 @@ _gst_mss_stream_add_h264_codec_data (GstCaps * caps, const gchar * codecdatastr)
 
   nalu.ref_idc = (spsinfo.data[0] & 0x60) >> 5;
   nalu.type = GST_H264_NAL_SPS;
-  nalu.size = spsinfo.size;
-  nalu.data = spsinfo.data;
+  nalu.size = spsinfo.size - 1;
+  nalu.data = spsinfo.data + 1;
   nalu.offset = 0;
   nalu.sc_offset = 0;
   nalu.valid = TRUE;
   nalu.header_bytes = 0;
   nalu.extension_type = GST_H264_NAL_EXTENSION_NONE;
 
-  parseres = gst_h264_parse_sps (&nalu, &sps_struct, TRUE);
+  parseres = gst_h264_parse_sps (&nalu, &sps_struct);
   if (parseres == GST_H264_PARSER_OK) {
     gint fps_num, fps_den;
 
@@ -975,7 +975,7 @@ gst_mss_manifest_get_duration (GstMssManifest * manifest)
 }
 
 
-/**
+/*
  * Gets the duration in nanoseconds
  */
 GstClockTime
@@ -1194,7 +1194,7 @@ gst_mss_stream_type_name (GstMssStreamType streamtype)
   }
 }
 
-/**
+/*
  * Seeks all streams to the fragment that contains the set time
  *
  * @forward: if this is forward playback
@@ -1215,7 +1215,7 @@ gst_mss_manifest_seek (GstMssManifest * manifest, gboolean forward,
     ((forward && (flags & GST_SEEK_FLAG_SNAP_AFTER)) || \
     (!forward && (flags & GST_SEEK_FLAG_SNAP_BEFORE)))
 
-/**
+/*
  * Seeks this stream to the fragment that contains the sample at time
  *
  * @time: time in nanoseconds

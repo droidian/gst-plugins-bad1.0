@@ -48,12 +48,11 @@
  *
  * Performs canny edge detection on videos and images
  *
- * <refsect2>
- * <title>Example launch line</title>
+ * ## Example launch line
+ *
  * |[
  * gst-launch-1.0 videotestsrc ! videoconvert ! edgedetect ! videoconvert ! xvimagesink
  * ]|
- * </refsect2>
  */
 
 #ifdef HAVE_CONFIG_H
@@ -170,7 +169,7 @@ gst_edge_detect_class_init (GstEdgeDetectClass * klass)
 
 /* initialize the new element
  * instantiate pads and add them to element
- * set pad calback functions
+ * set pad callback functions
  * initialize instance structure
  */
 static void
