@@ -55,16 +55,12 @@ struct _GstSRTObject
   gint                          poll_id;
   gboolean                      sent_headers;
 
-  GMutex                        sock_lock;
   GCond                         sock_cond;
 
   GTask                        *listener_task;
   SRTSOCKET                     listener_sock;
   gint                          listener_poll_id;
 
-  GMainLoop                    *loop;
-  GMainContext                 *context;
-  GSource                      *listener_source;
   GThread                      *thread;
 
   GList                        *callers;
@@ -119,7 +115,8 @@ gssize          gst_srt_object_write    (GstSRTObject * srtobject,
                                          GCancellable *cancellable,
                                          GError **err);
 
-void            gst_srt_object_wakeup   (GstSRTObject * srtobject);
+void            gst_srt_object_wakeup   (GstSRTObject * srtobject,
+                                         GCancellable *cancellable);
 
 GstStructure   *gst_srt_object_get_stats        (GstSRTObject * srtobject);
 

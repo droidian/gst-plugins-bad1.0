@@ -114,7 +114,9 @@ gst_srt_src_start (GstBaseSrc * bsrc)
   }
 
   if (!ret) {
-    GST_WARNING_OBJECT (self, "Failed to open SRT: %s", error->message);
+    /* ensure error is posted since state change will fail */
+    GST_ELEMENT_ERROR (self, RESOURCE, OPEN_READ, (NULL),
+        ("Failed to open SRT: %s", error->message));
     g_clear_error (&error);
   }
 
@@ -216,8 +218,7 @@ gst_srt_src_unlock (GstBaseSrc * bsrc)
 {
   GstSRTSrc *self = GST_SRT_SRC (bsrc);
 
-  g_cancellable_cancel (self->cancellable);
-  gst_srt_object_wakeup (self->srtobject);
+  gst_srt_object_wakeup (self->srtobject, self->cancellable);
 
   return TRUE;
 }

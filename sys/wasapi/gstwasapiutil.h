@@ -25,9 +25,6 @@
 #include <gst/audio/gstaudiosrc.h>
 #include <gst/audio/gstaudiosink.h>
 
-#ifdef _MSC_VER
-#include <initguid.h>
-#endif
 #include <mmdeviceapi.h>
 #include <audioclient.h>
 
@@ -95,7 +92,7 @@ gint gst_wasapi_erole_to_device_role (gint erole);
 
 gchar *gst_wasapi_util_hresult_to_string (HRESULT hr);
 
-gboolean gst_wasapi_util_get_devices (GstElement * element, gboolean active,
+gboolean gst_wasapi_util_get_devices (GstObject * element, gboolean active,
     GList ** devices);
 
 gboolean gst_wasapi_util_get_device_client (GstElement * element,

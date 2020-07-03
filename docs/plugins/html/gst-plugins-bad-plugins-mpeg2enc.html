@@ -15,7 +15,8 @@
 <table class="navigation" id="top" width="100%" summary="Navigation header" cellpadding="2" cellspacing="5"><tr valign="middle">
 <td width="100%" align="left" class="shortcuts">
 <a href="#" class="shortcut">Top</a><span id="nav_description">  <span class="dim">|</span> 
-                  <a href="#gst-plugins-bad-plugins-mpeg2enc.description" class="shortcut">Description</a></span><span id="nav_interfaces">  <span class="dim">|</span> 
+                  <a href="#gst-plugins-bad-plugins-mpeg2enc.description" class="shortcut">Description</a></span><span id="nav_hierarchy">  <span class="dim">|</span> 
+                  <a href="#gst-plugins-bad-plugins-mpeg2enc.object-hierarchy" class="shortcut">Object Hierarchy</a></span><span id="nav_interfaces">  <span class="dim">|</span> 
                   <a href="#gst-plugins-bad-plugins-mpeg2enc.implemented-interfaces" class="shortcut">Implemented Interfaces</a></span><span id="nav_properties">  <span class="dim">|</span> 
                   <a href="#gst-plugins-bad-plugins-mpeg2enc.properties" class="shortcut">Properties</a></span>
 </td>
@@ -215,7 +216,7 @@
 </tbody>
 </table></div>
 </div>
-<div class="refsect1">
+<a name="GstMpeg2enc"></a><div class="refsect1">
 <a name="gst-plugins-bad-plugins-mpeg2enc.other"></a><h2>Types and Values</h2>
 <div class="informaltable"><table class="informaltable" width="100%" border="0">
 <colgroup>
@@ -224,9 +225,18 @@
 </colgroup>
 <tbody><tr>
 <td class="datatype_keyword"> </td>
-<td class="function_name"><a class="link" href="gst-plugins-bad-plugins-mpeg2enc.html#GstMpeg2enc" title="GstMpeg2enc">GstMpeg2enc</a></td>
+<td class="function_name"><a class="link" href="gst-plugins-bad-plugins-mpeg2enc.html#GstMpeg2enc-struct" title="GstMpeg2enc">GstMpeg2enc</a></td>
 </tr></tbody>
 </table></div>
+</div>
+<div class="refsect1">
+<a name="gst-plugins-bad-plugins-mpeg2enc.object-hierarchy"></a><h2>Object Hierarchy</h2>
+<pre class="screen">    <a href="/usr/share/gtk-doc/html/gobject/gobject-The-Base-Object-Type.html#GObject-struct">GObject</a>
+    <span class="lineart">╰──</span> <a href="/usr/share/gtk-doc/html/gobject/gobject-The-Base-Object-Type.html#GInitiallyUnowned">GInitiallyUnowned</a>
+        <span class="lineart">╰──</span> <a href="/usr/share/gtk-doc/html/gstreamer-1.0/GstObject.html#GstObject-struct">GstObject</a>
+            <span class="lineart">╰──</span> <a href="/usr/share/gtk-doc/html/gstreamer-1.0/GstElement.html#GstElement-struct">GstElement</a>
+                <span class="lineart">╰──</span> GstMpeg2enc
+</pre>
 </div>
 <div class="refsect1">
 <a name="gst-plugins-bad-plugins-mpeg2enc.implemented-interfaces"></a><h2>Implemented Interfaces</h2>
@@ -242,7 +252,7 @@ GstMpeg2enc implements
 <a class="ulink" href="https://sourceforge.net/docman/display_doc.php?docid=3456&amp;group_id=5776" target="_top">MJPEG Howto</a><p>and on the various available parameters in the documentation
 of the mpeg2enc tool in particular, which shares options with this element.</p>
 <div class="refsect2">
-<a name="id-1.2.142.6.7"></a><h3>Example pipeline</h3>
+<a name="id-1.2.142.8.7"></a><h3>Example pipeline</h3>
 <div class="informalexample">
   <table class="listing_frame" border="0" cellpadding="0" cellspacing="0">
     <tbody>
@@ -280,7 +290,7 @@ for PAL <a class="link" href="gst-plugins-bad-plugins-mpeg2enc.html#GstMpeg2enc-
 <div class="refsynopsisdiv">
 <h2>Synopsis</h2>
 <div class="refsect2">
-<a name="id-1.2.142.6.8.1"></a><h3>Element Information</h3>
+<a name="id-1.2.142.8.8.1"></a><h3>Element Information</h3>
 <div class="variablelist"><table border="0" class="variablelist">
 <colgroup>
 <col align="left" valign="top">
@@ -307,7 +317,7 @@ Ronald Bultje &lt;rbultje@ronald.bitfreak.net&gt;</td>
 </div>
 <hr>
 <div class="refsect2">
-<a name="id-1.2.142.6.8.2"></a><h3>Element Pads</h3>
+<a name="id-1.2.142.8.8.2"></a><h3>Element Pads</h3>
 <div class="variablelist"><table border="0" class="variablelist">
 <colgroup>
 <col align="left" valign="top">
@@ -366,38 +376,8 @@ Ronald Bultje &lt;rbultje@ronald.bitfreak.net&gt;</td>
 <div class="refsect1">
 <a name="gst-plugins-bad-plugins-mpeg2enc.other_details"></a><h2>Types and Values</h2>
 <div class="refsect2">
-<a name="GstMpeg2enc"></a><h3>GstMpeg2enc</h3>
-<pre class="programlisting">typedef struct {
-  GstElement parent;
-
-  /* pads */
-  GstPad *sinkpad, *srcpad;
-
-  /* video info for in caps */
-  GstVideoInfo vinfo;
-
-  /* options wrapper */
-  GstMpeg2EncOptions *options;
-
-  /* general encoding object (contains rest) */
-  GstMpeg2Encoder *encoder;
-
-  /* lock for syncing with encoding task */
-  GMutex tlock;
-  /* with TLOCK */
-  /* signals counterpart thread that something changed;
-   * buffer ready for task or buffer has been processed */
-  GCond cond;
-  /* seen eos */
-  gboolean eos;
-  /* flowreturn obtained by encoding task */
-  GstFlowReturn srcresult;
-  /* buffer for encoding task */
-  GstBuffer *buffer;
-  /* timestamps for output */
-  GQueue *time;
-} GstMpeg2enc;
-</pre>
+<a name="GstMpeg2enc-struct"></a><h3>GstMpeg2enc</h3>
+<pre class="programlisting">typedef struct _GstMpeg2enc GstMpeg2enc;</pre>
 </div>
 </div>
 <div class="refsect1">

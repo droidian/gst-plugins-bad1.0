@@ -3,7 +3,7 @@ AC_PREREQ([2.69])
 dnl initialize autoconf
 dnl when going to/from release please set the nano (fourth number) right !
 dnl releases only do Wall, git and prerelease does Werror too
-AC_INIT([GStreamer Bad Plug-ins],[1.16.0],[http://bugzilla.gnome.org/enter_bug.cgi?product=GStreamer],[gst-plugins-bad])
+AC_INIT([GStreamer Bad Plug-ins],[1.16.2],[http://bugzilla.gnome.org/enter_bug.cgi?product=GStreamer],[gst-plugins-bad])
 
 AG_GST_INIT
 
@@ -51,11 +51,11 @@ dnl - interfaces added/removed/changed -> increment CURRENT, REVISION = 0
 dnl - interfaces added -> increment AGE
 dnl - interfaces removed -> AGE = 0
 dnl sets GST_LT_LDFLAGS
-AS_LIBTOOL(GST, 1600, 0, 1600)
+AS_LIBTOOL(GST, 1602, 0, 1602)
 
 dnl *** required versions of GStreamer stuff ***
-GST_REQ=1.16.0
-GSTPB_REQ=1.16.0
+GST_REQ=1.16.2
+GSTPB_REQ=1.16.2
 
 dnl *** autotools stuff ****
 
@@ -1743,9 +1743,9 @@ main (int   argc,
     TestOutputStream () : OutputStream () { }
     void Write (uint8_t *a, unsigned int b) { }
     void NextSegment () { }
-    uint64_t SegmentSize () { }
+    uint64_t SegmentSize () { return 0; }
     void Close () { }
-    int Open () { }
+    int Open () { return 0; }
 };
   MultiplexJob *job = new MultiplexJob ();
   vector<IBitStream *> inputs;
@@ -1845,7 +1845,7 @@ AG_GST_CHECK_FEATURE(OPENCV, [opencv plugins], opencv, [
       HAVE_OPENCV="yes"
     fi
   ], [
-    PKG_CHECK_MODULES([OPENCV], [opencv4 >= 4.0.0 opencv4 < 4.1.0] , [
+    PKG_CHECK_MODULES([OPENCV], [opencv4 >= 4.0.0 opencv4 < 4.2.0] , [
     AC_PROG_CXX
     AC_LANG([C++])
     OLD_CPPFLAGS=$CPPFLAGS
@@ -1896,6 +1896,15 @@ dnl *** OpenEXR ***
 translit(dnm, m, l) AM_CONDITIONAL(USE_OPENEXR, true)
 AG_GST_CHECK_FEATURE(OPENEXR, [openexr library], openexr, [
   AG_GST_PKG_CHECK_MODULES(OPENEXR, OpenEXR)
+  if test "x$HAVE_OPENEXR" = "xyes"; then
+    AG_GST_PKG_CHECK_MODULES(OPENEXR240, OpenEXR >= 2.4.0)
+    if test "x$HAVE_OPENEXR240" = "xyes"; then
+      OPENEXR_STDCFLAGS=
+    else
+      OPENEXR_STDCFLAGS="-std=c++98"
+    fi
+    AC_SUBST([OPENEXR_STDCFLAGS])
+  fi
 ])
 
 dnl *** openh264 ***
@@ -2234,19 +2243,15 @@ AG_GST_CHECK_FEATURE(HLS, [http live streaming plugin], hls, [
     ],
     [
       dnl Try to find a valid crypto library
+      HAVE_HLS="yes"
       PKG_CHECK_MODULES(NETTLE, nettle, [
         AC_DEFINE(HAVE_NETTLE, 1, [Define if nettle is available])
-        HAVE_HLS="yes"
       ],[
         AM_PATH_LIBGCRYPT([1.2.0], [
           AC_DEFINE(HAVE_LIBGCRYPT, 1, [Define if libgcrypt is available])
-          HAVE_HLS="yes"
         ],[
           PKG_CHECK_MODULES(OPENSSL, openssl, [
             AC_DEFINE(HAVE_OPENSSL, 1, [Define if openssl is available])
-            HAVE_HLS="yes"
-          ],[
-            HAVE_HLS="no"
           ])
         ])
       ])
@@ -2727,4 +2732,3 @@ AC_OUTPUT
 
 AG_GST_OUTPUT_PLUGINS
 ORC_OUTPUT
-

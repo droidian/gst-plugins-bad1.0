@@ -174,8 +174,8 @@ am__v_lt_0 = --silent
 am__v_lt_1 = 
 libgstsctp_1_0_la_LINK = $(LIBTOOL) $(AM_V_lt) --tag=CC \
 	$(AM_LIBTOOLFLAGS) $(LIBTOOLFLAGS) --mode=link $(CCLD) \
-	$(libgstsctp_1_0_la_CFLAGS) $(CFLAGS) $(AM_LDFLAGS) $(LDFLAGS) \
-	-o $@
+	$(libgstsctp_1_0_la_CFLAGS) $(CFLAGS) \
+	$(libgstsctp_1_0_la_LDFLAGS) $(LDFLAGS) -o $@
 AM_V_P = $(am__v_P_@AM_V@)
 am__v_P_ = $(am__v_P_@AM_DEFAULT_V@)
 am__v_P_0 = false
@@ -547,8 +547,11 @@ OPENAL_LIBS = @OPENAL_LIBS@
 OPENCV_CFLAGS = @OPENCV_CFLAGS@
 OPENCV_LIBS = @OPENCV_LIBS@
 OPENCV_PREFIX = @OPENCV_PREFIX@
+OPENEXR240_CFLAGS = @OPENEXR240_CFLAGS@
+OPENEXR240_LIBS = @OPENEXR240_LIBS@
 OPENEXR_CFLAGS = @OPENEXR_CFLAGS@
 OPENEXR_LIBS = @OPENEXR_LIBS@
+OPENEXR_STDCFLAGS = @OPENEXR_STDCFLAGS@
 OPENH264_CFLAGS = @OPENH264_CFLAGS@
 OPENH264_LIBS = @OPENH264_LIBS@
 OPENJPEG_CFLAGS = @OPENJPEG_CFLAGS@
@@ -751,6 +754,11 @@ libgstsctp_1_0_la_CFLAGS = \
     $(GST_CFLAGS)
 
 libgstsctp_1_0_la_LIBADD = $(GST_LIBS) $(GST_BASE_LIBS)
+libgstsctp_1_0_la_LDFLAGS = \
+    $(GST_LIB_LDFLAGS) \
+    $(GST_ALL_LDFLAGS) \
+    $(GST_LT_LDFLAGS)
+
 libgstsctp_1_0_includedir = $(includedir)/gstreamer-1.0/gst/sctp
 libgstsctp_1_0_include_HEADERS = \
     sctpsendmeta.h \

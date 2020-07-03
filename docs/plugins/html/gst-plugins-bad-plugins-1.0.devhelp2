@@ -1039,7 +1039,7 @@
     <keyword type="property" name="The “sensitivity” property" link="gst-plugins-bad-plugins-motioncells.html#GstMotioncells--sensitivity"/>
     <keyword type="property" name="The “threshold” property" link="gst-plugins-bad-plugins-motioncells.html#GstMotioncells--threshold"/>
     <keyword type="property" name="The “usealpha” property" link="gst-plugins-bad-plugins-motioncells.html#GstMotioncells--usealpha"/>
-    <keyword type="struct" name="GstMpeg2enc" link="gst-plugins-bad-plugins-mpeg2enc.html#GstMpeg2enc"/>
+    <keyword type="struct" name="GstMpeg2enc" link="gst-plugins-bad-plugins-mpeg2enc.html#GstMpeg2enc-struct"/>
     <keyword type="property" name="The “altscan-mpeg2” property" link="gst-plugins-bad-plugins-mpeg2enc.html#GstMpeg2enc--altscan-mpeg2"/>
     <keyword type="property" name="The “aspect” property" link="gst-plugins-bad-plugins-mpeg2enc.html#GstMpeg2enc--aspect"/>
     <keyword type="property" name="The “b-per-refframe” property" link="gst-plugins-bad-plugins-mpeg2enc.html#GstMpeg2enc--b-per-refframe"/>
@@ -1080,7 +1080,7 @@
     <keyword type="struct" name="struct GstMpegvParse" link="gst-plugins-bad-plugins-mpegvideoparse.html#GstMpegvParse-struct"/>
     <keyword type="property" name="The “drop” property" link="gst-plugins-bad-plugins-mpegvideoparse.html#GstMpegvParse--drop"/>
     <keyword type="property" name="The “gop-split” property" link="gst-plugins-bad-plugins-mpegvideoparse.html#GstMpegvParse--gop-split"/>
-    <keyword type="struct" name="GstMplex" link="gst-plugins-bad-plugins-mplex.html#GstMplex"/>
+    <keyword type="struct" name="GstMplex" link="gst-plugins-bad-plugins-mplex.html#GstMplex-struct"/>
     <keyword type="property" name="The “bufsize” property" link="gst-plugins-bad-plugins-mplex.html#GstMplex--bufsize"/>
     <keyword type="property" name="The “format” property" link="gst-plugins-bad-plugins-mplex.html#GstMplex--format"/>
     <keyword type="property" name="The “mux-bitrate” property" link="gst-plugins-bad-plugins-mplex.html#GstMplex--mux-bitrate"/>

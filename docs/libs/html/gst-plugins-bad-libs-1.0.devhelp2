@@ -406,8 +406,8 @@
     <keyword type="function" name="gst_player_get_volume ()" link="GstPlayer.html#gst-player-get-volume"/>
     <keyword type="function" name="gst_player_get_mute ()" link="GstPlayer.html#gst-player-get-mute"/>
     <keyword type="function" name="gst_player_get_pipeline ()" link="GstPlayer.html#gst-player-get-pipeline"/>
-    <keyword type="function" name="gst_player_set_config ()" link="GstPlayer.html#gst-player-set-config"/>
-    <keyword type="function" name="gst_player_get_config ()" link="GstPlayer.html#gst-player-get-config"/>
+    <keyword type="function" name="gst_player_set_config ()" link="GstPlayer.html#gst-player-set-config" since="1.10"/>
+    <keyword type="function" name="gst_player_get_config ()" link="GstPlayer.html#gst-player-get-config" since="1.10"/>
     <keyword type="function" name="gst_player_state_get_name ()" link="GstPlayer.html#gst-player-state-get-name"/>
     <keyword type="function" name="gst_player_error_get_name ()" link="GstPlayer.html#gst-player-error-get-name"/>
     <keyword type="function" name="gst_player_get_media_info ()" link="GstPlayer.html#gst-player-get-media-info"/>
@@ -433,19 +433,19 @@
     <keyword type="function" name="gst_player_set_multiview_mode ()" link="GstPlayer.html#gst-player-set-multiview-mode" since="1.10"/>
     <keyword type="function" name="gst_player_get_multiview_flags ()" link="GstPlayer.html#gst-player-get-multiview-flags" since="1.10"/>
     <keyword type="function" name="gst_player_set_multiview_flags ()" link="GstPlayer.html#gst-player-set-multiview-flags" since="1.10"/>
-    <keyword type="function" name="gst_player_get_audio_video_offset ()" link="GstPlayer.html#gst-player-get-audio-video-offset"/>
-    <keyword type="function" name="gst_player_set_audio_video_offset ()" link="GstPlayer.html#gst-player-set-audio-video-offset"/>
-    <keyword type="function" name="gst_player_get_subtitle_video_offset ()" link="GstPlayer.html#gst-player-get-subtitle-video-offset"/>
-    <keyword type="function" name="gst_player_set_subtitle_video_offset ()" link="GstPlayer.html#gst-player-set-subtitle-video-offset"/>
+    <keyword type="function" name="gst_player_get_audio_video_offset ()" link="GstPlayer.html#gst-player-get-audio-video-offset" since="1.10"/>
+    <keyword type="function" name="gst_player_set_audio_video_offset ()" link="GstPlayer.html#gst-player-set-audio-video-offset" since="1.10"/>
+    <keyword type="function" name="gst_player_get_subtitle_video_offset ()" link="GstPlayer.html#gst-player-get-subtitle-video-offset" since="1.16"/>
+    <keyword type="function" name="gst_player_set_subtitle_video_offset ()" link="GstPlayer.html#gst-player-set-subtitle-video-offset" since="1.16"/>
     <keyword type="function" name="gst_player_get_rate ()" link="GstPlayer.html#gst-player-get-rate"/>
     <keyword type="function" name="gst_player_set_rate ()" link="GstPlayer.html#gst-player-set-rate"/>
-    <keyword type="function" name="gst_player_get_video_snapshot ()" link="GstPlayer.html#gst-player-get-video-snapshot"/>
-    <keyword type="function" name="gst_player_config_set_position_update_interval ()" link="GstPlayer.html#gst-player-config-set-position-update-interval"/>
-    <keyword type="function" name="gst_player_config_get_position_update_interval ()" link="GstPlayer.html#gst-player-config-get-position-update-interval"/>
-    <keyword type="function" name="gst_player_config_set_user_agent ()" link="GstPlayer.html#gst-player-config-set-user-agent"/>
-    <keyword type="function" name="gst_player_config_get_user_agent ()" link="GstPlayer.html#gst-player-config-get-user-agent"/>
+    <keyword type="function" name="gst_player_get_video_snapshot ()" link="GstPlayer.html#gst-player-get-video-snapshot" since="1.12"/>
+    <keyword type="function" name="gst_player_config_set_position_update_interval ()" link="GstPlayer.html#gst-player-config-set-position-update-interval" since="1.10"/>
+    <keyword type="function" name="gst_player_config_get_position_update_interval ()" link="GstPlayer.html#gst-player-config-get-position-update-interval" since="1.10"/>
+    <keyword type="function" name="gst_player_config_set_user_agent ()" link="GstPlayer.html#gst-player-config-set-user-agent" since="1.10"/>
+    <keyword type="function" name="gst_player_config_get_user_agent ()" link="GstPlayer.html#gst-player-config-get-user-agent" since="1.10"/>
     <keyword type="function" name="gst_player_config_set_seek_accurate ()" link="GstPlayer.html#gst-player-config-set-seek-accurate" since="1.12"/>
-    <keyword type="function" name="gst_player_config_get_seek_accurate ()" link="GstPlayer.html#gst-player-config-get-seek-accurate"/>
+    <keyword type="function" name="gst_player_config_get_seek_accurate ()" link="GstPlayer.html#gst-player-config-get-seek-accurate" since="1.12"/>
     <keyword type="struct" name="GstPlayer" link="GstPlayer.html#GstPlayer-struct"/>
     <keyword type="enum" name="enum GstPlayerState" link="GstPlayer.html#GstPlayerState"/>
     <keyword type="macro" name="GST_PLAYER_ERROR" link="GstPlayer.html#GST-PLAYER-ERROR:CAPS"/>
@@ -527,7 +527,7 @@
     <keyword type="struct" name="GstPlayerSubtitleInfo" link="GstPlayerMediaInfo.html#GstPlayerSubtitleInfo-struct"/>
     <keyword type="function" name="gst_player_g_main_context_signal_dispatcher_new ()" link="gst-plugins-bad-libs-GstPlayerGMainContextSignalDispatcher.html#gst-player-g-main-context-signal-dispatcher-new"/>
     <keyword type="function" name="gst_player_video_overlay_video_renderer_new ()" link="GstPlayerVideoOverlayVideoRenderer.html#gst-player-video-overlay-video-renderer-new"/>
-    <keyword type="function" name="gst_player_video_overlay_video_renderer_new_with_sink ()" link="GstPlayerVideoOverlayVideoRenderer.html#gst-player-video-overlay-video-renderer-new-with-sink"/>
+    <keyword type="function" name="gst_player_video_overlay_video_renderer_new_with_sink ()" link="GstPlayerVideoOverlayVideoRenderer.html#gst-player-video-overlay-video-renderer-new-with-sink" since="1.12"/>
     <keyword type="function" name="gst_player_video_overlay_video_renderer_get_window_handle ()" link="GstPlayerVideoOverlayVideoRenderer.html#gst-player-video-overlay-video-renderer-get-window-handle"/>
     <keyword type="function" name="gst_player_video_overlay_video_renderer_set_window_handle ()" link="GstPlayerVideoOverlayVideoRenderer.html#gst-player-video-overlay-video-renderer-set-window-handle"/>
     <keyword type="function" name="gst_player_video_overlay_video_renderer_expose ()" link="GstPlayerVideoOverlayVideoRenderer.html#gst-player-video-overlay-video-renderer-expose"/>
