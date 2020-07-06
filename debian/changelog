@@ -7,6 +7,13 @@ gst-plugins-bad1.0 (1.16.2-3) UNRELEASED; urgency=medium
 
  -- Debian Janitor <janitor@jelmer.uk>  Thu, 19 Dec 2019 10:41:38 +0000
 
+gst-plugins-bad1.0 (1.16.2-2.1) unstable; urgency=medium
+
+  * Non-maintainer upload.
+  * Upload patch to fix build with newer opencv (Closes: #922583)
+
+ -- Gianfranco Costamagna <locutusofborg@debian.org>  Wed, 05 Feb 2020 22:46:23 +0100
+
 gst-plugins-bad1.0 (1.16.2-2) unstable; urgency=medium
 
   * debian/build-deps.in,
