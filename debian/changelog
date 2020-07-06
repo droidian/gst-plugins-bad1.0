@@ -1,9 +1,18 @@
-gst-plugins-bad1.0 (1.16.2-3) UNRELEASED; urgency=medium
+gst-plugins-bad1.0 (1.17.2-1) experimental; urgency=medium
 
+  [ Debian Janitor ]
   * Trim trailing whitespace.
   * Use secure copyright file specification URI.
   * Set upstream metadata fields: Bug-Database, Name (from ./configure),
     Repository, Repository-Browse.
+
+  [ Laurent Bigonville ]
+  * Only build the opencv plugin on architecture where opencv is available
+  * Install the opencv haarcascades files in the opencv plugin package
+  * d/p/02_opencv-data-path.patch: Fix paths for the haarcascades files
+    (Closes: #956518)
+  * debian/control.in: Bump from Priority: extra to optional, the former is
+    deprecated
 
  -- Debian Janitor <janitor@jelmer.uk>  Thu, 19 Dec 2019 10:41:38 +0000
 
