@@ -50,6 +50,8 @@ Build-Depends: debhelper,
                libofa0-dev (>= 0.9.3),
                libopenal-dev (>= 1:1.14),
                libopencv-dev (>= 3.0.0) [amd64 arm64 armel armhf i386 mips64el mipsel ppc64el s390x powerpc ppc64 riscv64],
+               libwpebackend-fdo-1.0-dev (>= 1.6.0) [amd64 arm64 armel armhf hppa i386 mipsel ppc64 ppc64el s390x sparc64 x32],
+               libwpewebkit-1.0-dev (>= 2.28.0) [amd64 arm64 armel armhf hppa i386 mipsel ppc64 ppc64el s390x sparc64 x32],
                libopenexr-dev,
                libopenjp2-7-dev (>= 2.1),
                libopenmpt-dev,
@@ -170,6 +172,31 @@ Description: GStreamer OpenCV plugins
  real live maintainer, or some actual wide use.
  .
  This package contains the OpenCV plugins.
+
+Package: gstreamer1.0-wpe
+Architecture: amd64 arm64 armel armhf hppa i386 mipsel ppc64 ppc64el s390x sparc64 x32
+Multi-Arch: same
+Depends: ${misc:Depends},
+         ${shlibs:Depends},
+         gstreamer1.0-plugins-base,
+         libgstreamer-plugins-bad1.0-0 (= ${binary:Version}),
+XB-GStreamer-Version: ${gstreamer:Version}
+XB-GStreamer-Elements: ${gstreamer:Elements}
+XB-GStreamer-URI-Sources: ${gstreamer:URISources}
+Description: GStreamer WPEWebKit plugin
+ GStreamer is a streaming media framework, based on graphs of filters
+ which operate on media data.  Applications using this library can do
+ anything from real-time sound processing to playing videos, and just
+ about anything else media-related.  Its plugin-based architecture means
+ that new data types or processing capabilities can be added simply by
+ installing new plug-ins.
+ .
+ GStreamer Bad Plug-ins is a set of plug-ins that aren't up to par compared
+ to the rest. They might be close to being good quality, but they're missing
+ something - be it a good code review, some documentation, a set of tests, a
+ real live maintainer, or some actual wide use.
+ .
+ This package contains the WPEWebKit plugin.
 
 Package: libgstreamer-plugins-bad1.0-0
 Architecture: any
