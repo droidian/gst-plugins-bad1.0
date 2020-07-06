@@ -68,9 +68,8 @@
 GST_DEBUG_CATEGORY_STATIC (gst_face_blur_debug);
 #define GST_CAT_DEFAULT gst_face_blur_debug
 
-#define DEFAULT_PROFILE OPENCV_PREFIX G_DIR_SEPARATOR_S "share" \
-    G_DIR_SEPARATOR_S OPENCV_PATH_NAME G_DIR_SEPARATOR_S "haarcascades" \
-    G_DIR_SEPARATOR_S "haarcascade_frontalface_default.xml"
+#define HAAR_CASCADES_DIR "/usr/share/opencv4/haarcascades/"
+#define DEFAULT_PROFILE HAAR_CASCADES_DIR HAAR_CASCADES_DIR "haarcascade_frontalface_default.xml"
 #define DEFAULT_SCALE_FACTOR 1.25
 #if (CV_MAJOR_VERSION >= 4)
 #define DEFAULT_FLAGS CASCADE_DO_CANNY_PRUNING
