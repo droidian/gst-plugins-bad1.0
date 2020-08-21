@@ -26,6 +26,7 @@
 
 #include "gstvacaps.h"
 #include "gstvadisplay_wrapped.h"
+#include "gstvavideoformat.h"
 
 struct _GstVaDecoder
 {
@@ -165,7 +166,7 @@ gst_va_decoder_init (GstVaDecoder * self)
   self->profile = VAProfileNone;
   self->config = VA_INVALID_ID;
   self->context = VA_INVALID_ID;
-  self->rt_format = VA_RT_FORMAT_YUV420;
+  self->rt_format = 0;
   self->coded_width = 0;
   self->coded_height = 0;
 }
@@ -447,6 +448,50 @@ gst_va_decoder_get_mem_types (GstVaDecoder * self)
   return ret;
 }
 
+GArray *
+gst_va_decoder_get_surface_formats (GstVaDecoder * self)
+{
+  GArray *formats;
+  GstVideoFormat format;
+  VASurfaceAttrib *attribs;
+  guint i, attrib_count;
+
+  g_return_val_if_fail (GST_IS_VA_DECODER (self), NULL);
+
+  if (!gst_va_decoder_is_open (self))
+    return NULL;
+
+  attribs = gst_va_get_surface_attribs (self->display, self->config,
+      &attrib_count);
+  if (!attribs)
+    return NULL;
+
+  formats = g_array_new (FALSE, FALSE, sizeof (GstVideoFormat));
+
+  for (i = 0; i < attrib_count; i++) {
+    if (attribs[i].value.type != VAGenericValueTypeInteger)
+      continue;
+    switch (attribs[i].type) {
+      case VASurfaceAttribPixelFormat:
+        format = gst_va_video_format_from_va_fourcc (attribs[i].value.value.i);
+        if (format != GST_VIDEO_FORMAT_UNKNOWN)
+          g_array_append_val (formats, format);
+        break;
+      default:
+        break;
+    }
+  }
+
+  g_free (attribs);
+
+  if (formats->len == 0) {
+    g_array_unref (formats);
+    return NULL;
+  }
+
+  return formats;
+}
+
 gboolean
 gst_va_decoder_add_param_buffer (GstVaDecoder * self, GstVaDecodePicture * pic,
     gint type, gpointer data, gsize size)
@@ -626,11 +671,10 @@ gst_va_decoder_destroy_buffers (GstVaDecoder * self, GstVaDecodePicture * pic)
 
 
 GstVaDecodePicture *
-gst_va_decoder_new_decode_picture (GstVaDecoder * self, VASurfaceID surface)
+gst_va_decode_picture_new (VASurfaceID surface)
 {
   GstVaDecodePicture *pic;
 
-  g_return_val_if_fail (GST_IS_VA_DECODER (self), NULL);
   g_return_val_if_fail (surface != VA_INVALID_ID, NULL);
 
   pic = g_slice_new (GstVaDecodePicture);

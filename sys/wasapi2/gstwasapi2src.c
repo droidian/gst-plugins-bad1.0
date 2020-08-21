@@ -67,6 +67,7 @@ enum
   PROP_LOW_LATENCY,
   PROP_MUTE,
   PROP_VOLUME,
+  PROP_DISPATCHER,
 };
 
 struct _GstWasapi2Src
@@ -82,6 +83,7 @@ struct _GstWasapi2Src
   gboolean low_latency;
   gboolean mute;
   gdouble volume;
+  gpointer dispatcher;
 
   gboolean mute_changed;
   gboolean volume_changed;
@@ -153,6 +155,23 @@ gst_wasapi2_src_class_init (GstWasapi2SrcClass * klass)
           0.0, 1.0, DEFAULT_VOLUME,
           GST_PARAM_MUTABLE_PLAYING | G_PARAM_READWRITE |
           G_PARAM_STATIC_STRINGS));
+
+  /**
+   * GstWasapi2Src:dispatcher:
+   *
+   * ICoreDispatcher COM object used for activating device from UI thread.
+   *
+   * Since: 1.18
+   */
+  g_object_class_install_property (gobject_class, PROP_DISPATCHER,
+      g_param_spec_pointer ("dispatcher", "Dispatcher",
+          "ICoreDispatcher COM object to use. In order for application to ask "
+          "permission of audio device, device activation should be running "
+          "on UI thread via ICoreDispatcher. This element will increase "
+          "the reference count of given ICoreDispatcher and release it after "
+          "use. Therefore, caller does not need to consider additional "
+          "reference count management",
+          GST_PARAM_MUTABLE_READY | G_PARAM_WRITABLE | G_PARAM_STATIC_STRINGS));
 
   gst_element_class_add_static_pad_template (element_class, &src_template);
   gst_element_class_set_static_metadata (element_class, "Wasapi2Src",
@@ -230,6 +249,9 @@ gst_wasapi2_src_set_property (GObject * object, guint prop_id,
     case PROP_VOLUME:
       gst_wasapi2_src_set_volume (self, g_value_get_double (value));
       break;
+    case PROP_DISPATCHER:
+      self->dispatcher = g_value_get_pointer (value);
+      break;
     default:
       G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
       break;
@@ -267,13 +289,20 @@ gst_wasapi2_src_get_caps (GstBaseSrc * bsrc, GstCaps * filter)
   GstWasapi2Src *self = GST_WASAPI2_SRC (bsrc);
   GstCaps *caps = NULL;
 
-  /* store one caps here so that we can return device caps even if
-   * audioclient was closed due to unprepare() */
-  if (!self->cached_caps && self->client)
-    self->cached_caps = gst_wasapi2_client_get_caps (self->client);
+  /* In case of UWP, device activation might not be finished yet */
+  if (self->client && !gst_wasapi2_client_ensure_activation (self->client)) {
+    GST_ELEMENT_ERROR (self, RESOURCE, OPEN_WRITE, (NULL),
+        ("Failed to activate device"));
+    return NULL;
+  }
 
   if (self->client)
     caps = gst_wasapi2_client_get_caps (self->client);
+
+  /* store one caps here so that we can return device caps even if
+   * audioclient was closed due to unprepare() */
+  if (!self->cached_caps && caps)
+    self->cached_caps = gst_caps_ref (caps);
 
   if (!caps && self->cached_caps)
     caps = gst_caps_ref (self->cached_caps);
@@ -300,7 +329,7 @@ gst_wasapi2_src_open_unlocked (GstAudioSrc * asrc)
 
   self->client =
       gst_wasapi2_client_new (GST_WASAPI2_CLIENT_DEVICE_CLASS_CAPTURE,
-      self->low_latency, -1, self->device_id);
+      self->low_latency, -1, self->device_id, self->dispatcher);
 
   return ! !self->client;
 }
@@ -352,6 +381,11 @@ gst_wasapi2_src_prepare (GstAudioSrc * asrc, GstAudioRingBufferSpec * spec)
   GST_WASAPI2_SRC_LOCK (self);
   if (!self->client && !gst_wasapi2_src_open_unlocked (asrc)) {
     GST_ERROR_OBJECT (self, "No audio client was configured");
+    goto done;
+  }
+
+  if (!gst_wasapi2_client_ensure_activation (self->client)) {
+    GST_ERROR_OBJECT (self, "Couldn't activate audio device");
     goto done;
   }
 

@@ -50,7 +50,9 @@ public:
   void Release();
   bool IsValid() const;
   HRESULT Fill(HString &source_id,
-               const ComPtr<IMediaCaptureVideoProfileMediaDescription>& desc);
+               const ComPtr<IMediaCaptureVideoProfileMediaDescription>& desc,
+               unsigned int info_index,
+               unsigned int desc_index);
 
   GstWinRTMediaDescription& operator=(const GstWinRTMediaDescription& rhs)
   {
@@ -84,7 +86,8 @@ public:
   ~GstWinRTMediaFrameSourceGroup();
   void Release();
   bool Contain(const GstWinRTMediaDescription &desc);
-  HRESULT Fill(const ComPtr<IMediaFrameSourceGroup> &source_group);
+  HRESULT Fill(const ComPtr<IMediaFrameSourceGroup> &source_group,
+               unsigned int index);
 
   GstWinRTMediaFrameSourceGroup& operator=(const GstWinRTMediaFrameSourceGroup& rhs)
   {
@@ -117,7 +120,7 @@ typedef struct
 class MediaCaptureWrapper
 {
 public:
-  MediaCaptureWrapper();
+  MediaCaptureWrapper(gpointer dispatcher);
   ~MediaCaptureWrapper();
 
   void RegisterCb(const MediaCaptureWrapperCallbacks &cb,
@@ -163,55 +166,14 @@ private:
                          IMediaFrameArrivedEventArgs *args);
   HRESULT onCaptureFailed(IMediaCapture *capture,
                           IMediaCaptureFailedEventArgs *args);
-  void findCoreDispatcher();
   static HRESULT enumrateFrameSourceGroup(std::vector<GstWinRTMediaFrameSourceGroup> &list);
-
-  template <typename CB>
-  HRESULT runOnUIThread(DWORD timeout, CB && cb)
-  {
-    ComPtr<IAsyncAction> asyncAction;
-    HRESULT hr;
-    HRESULT hr_callback;
-    boolean can_now;
-    DWORD wait_ret;
-
-    if (!dispatcher_)
-      return cb();
-
-    hr = dispatcher_->get_HasThreadAccess (&can_now);
-
-    if (FAILED (hr))
-      return hr;
-
-    if (can_now)
-      return cb ();
-
-    Event event (CreateEventEx (NULL, NULL, CREATE_EVENT_MANUAL_RESET,
-        EVENT_ALL_ACCESS));
-
-    if (!event.IsValid())
-      return E_FAIL;
-
-    auto handler =
-        Callback<Implements<RuntimeClassFlags<ClassicCom>,
-            IDispatchedHandler, FtmBase>>([&hr_callback, &cb, &event] {
-          hr_callback = cb ();
-          SetEvent (event.Get());
-          return S_OK;
-        });
-
-    hr = dispatcher_->RunAsync(CoreDispatcherPriority_Normal,
-        handler.Get(), &asyncAction);
-
-    if (FAILED (hr))
-      return hr;
-
-    wait_ret = WaitForSingleObject(event.Get(), timeout);
-    if (wait_ret != WAIT_OBJECT_0)
-      return E_FAIL;
-
-    return hr_callback;
-  }
 };
+
+HRESULT
+FindCoreDispatcherForCurrentThread(ICoreDispatcher ** dispatcher);
+
+bool
+WinRTCapsCompareFunc(const GstWinRTMediaDescription & a,
+                     const GstWinRTMediaDescription & b);
 
 #endif /* __GST_MEDIA_CAPTURE_WRAPPER_H__ */

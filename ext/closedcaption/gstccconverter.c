@@ -621,6 +621,10 @@ cc_data_extract_cea608 (guint8 * cc_data, guint cc_data_len,
     gboolean cc_valid = (cc_data[i * 3] & 0x04) == 0x04;
     guint8 cc_type = cc_data[i * 3] & 0x03;
 
+    GST_TRACE ("0x%02x 0x%02x 0x%02x, valid: %u, type: 0b%u%u",
+        cc_data[i * 3 + 0], cc_data[i * 3 + 1], cc_data[i * 3 + 2], cc_valid,
+        cc_type & 0x2, cc_type & 0x1);
+
     if (cc_type == 0x00) {
       if (!cc_valid)
         continue;
@@ -1012,25 +1016,42 @@ convert_cea708_cc_data_cea708_cdp_internal (GstCCConverter * self,
   gst_byte_writer_put_uint16_be_unchecked (&bw, self->cdp_hdr_sequence_cntr);
 
   if (tc && tc->config.fps_n > 0) {
+    guint8 u8;
+
     gst_byte_writer_put_uint8_unchecked (&bw, 0x71);
-    gst_byte_writer_put_uint8_unchecked (&bw, 0xc0 |
-        (((tc->hours % 10) & 0x3) << 4) |
-        ((tc->hours - (tc->hours % 10)) & 0xf));
+    /* reserved 11 - 2 bits */
+    u8 = 0xc0;
+    /* tens of hours - 2 bits */
+    u8 |= ((tc->hours / 10) & 0x3) << 4;
+    /* units of hours - 4 bits */
+    u8 |= (tc->hours % 10) & 0xf;
+    gst_byte_writer_put_uint8_unchecked (&bw, u8);
 
-    gst_byte_writer_put_uint8_unchecked (&bw, 0x80 |
-        (((tc->minutes % 10) & 0x7) << 4) |
-        ((tc->minutes - (tc->minutes % 10)) & 0xf));
+    /* reserved 1 - 1 bit */
+    u8 = 0x80;
+    /* tens of minutes - 3 bits */
+    u8 |= ((tc->minutes / 10) & 0x7) << 4;
+    /* units of minutes - 4 bits */
+    u8 |= (tc->minutes % 10) & 0xf;
+    gst_byte_writer_put_uint8_unchecked (&bw, u8);
 
-    gst_byte_writer_put_uint8_unchecked (&bw,
-        (tc->field_count <
-            2 ? 0x00 : 0x80) | (((tc->seconds %
-                    10) & 0x7) << 4) | ((tc->seconds -
-                (tc->seconds % 10)) & 0xf));
+    /* field flag - 1 bit */
+    u8 = tc->field_count < 2 ? 0x00 : 0x80;
+    /* tens of seconds - 3 bits */
+    u8 |= ((tc->seconds / 10) & 0x7) << 4;
+    /* units of seconds - 4 bits */
+    u8 |= (tc->seconds % 10) & 0xf;
+    gst_byte_writer_put_uint8_unchecked (&bw, u8);
 
-    gst_byte_writer_put_uint8_unchecked (&bw,
-        ((tc->config.flags & GST_VIDEO_TIME_CODE_FLAGS_DROP_FRAME) ? 0x80 :
-            0x00) | (((tc->frames % 10) & 0x3) << 4) | ((tc->frames -
-                (tc->frames % 10)) & 0xf));
+    /* drop frame flag - 1 bit */
+    u8 = (tc->config.flags & GST_VIDEO_TIME_CODE_FLAGS_DROP_FRAME) ? 0x80 :
+        0x00;
+    /* reserved0 - 1 bit */
+    /* tens of frames - 2 bits */
+    u8 |= ((tc->frames / 10) & 0x3) << 4;
+    /* units of frames 4 bits */
+    u8 |= (tc->frames % 10) & 0xf;
+    gst_byte_writer_put_uint8_unchecked (&bw, u8);
   }
 
   gst_byte_writer_put_uint8_unchecked (&bw, 0x72);
@@ -1081,27 +1102,41 @@ convert_cea708_cdp_cea708_cc_data_internal (GstCCConverter * self,
   memset (tc, 0, sizeof (*tc));
 
   /* Header + footer length */
-  if (cdp_len < 11)
+  if (cdp_len < 11) {
+    GST_WARNING_OBJECT (self, "cdp packet too short (%u). expected at "
+        "least %u", cdp_len, 11);
     return 0;
+  }
 
   gst_byte_reader_init (&br, cdp, cdp_len);
   u16 = gst_byte_reader_get_uint16_be_unchecked (&br);
-  if (u16 != 0x9669)
+  if (u16 != 0x9669) {
+    GST_WARNING_OBJECT (self, "cdp packet does not have initial magic bytes "
+        "of 0x9669");
     return 0;
+  }
 
   u8 = gst_byte_reader_get_uint8_unchecked (&br);
-  if (u8 != cdp_len)
+  if (u8 != cdp_len) {
+    GST_WARNING_OBJECT (self, "cdp packet length (%u) does not match passed "
+        "in value (%u)", u8, cdp_len);
     return 0;
+  }
 
   u8 = gst_byte_reader_get_uint8_unchecked (&br);
   fps_entry = cdp_fps_entry_from_id (u8);
-  if (!fps_entry || fps_entry->fps_n == 0)
+  if (!fps_entry || fps_entry->fps_n == 0) {
+    GST_WARNING_OBJECT (self, "cdp packet does not have a valid framerate "
+        "id (0x%02x", u8);
     return 0;
+  }
 
   flags = gst_byte_reader_get_uint8_unchecked (&br);
   /* No cc_data? */
-  if ((flags & 0x40) == 0)
+  if ((flags & 0x40) == 0) {
+    GST_DEBUG_OBJECT (self, "cdp packet does have any cc_data");
     return 0;
+  }
 
   /* cdp_hdr_sequence_cntr */
   gst_byte_reader_skip_unchecked (&br, 2);
@@ -1111,20 +1146,32 @@ convert_cea708_cdp_cea708_cc_data_internal (GstCCConverter * self,
     guint8 hours, minutes, seconds, frames, fields;
     gboolean drop_frame;
 
-    if (gst_byte_reader_get_remaining (&br) < 5)
+    if (gst_byte_reader_get_remaining (&br) < 5) {
+      GST_WARNING_OBJECT (self, "cdp packet does not have enough data to "
+          "contain a timecode (%u). Need at least 5 bytes",
+          gst_byte_reader_get_remaining (&br));
       return 0;
-    if (gst_byte_reader_get_uint8_unchecked (&br) != 0x71)
+    }
+    u8 = gst_byte_reader_get_uint8_unchecked (&br);
+    if (u8 != 0x71) {
+      GST_WARNING_OBJECT (self, "cdp packet does not have timecode start byte "
+          "of 0x71, found 0x%02x", u8);
       return 0;
+    }
 
     u8 = gst_byte_reader_get_uint8_unchecked (&br);
-    if ((u8 & 0xc) != 0xc)
+    if ((u8 & 0xc0) != 0xc0) {
+      GST_WARNING_OBJECT (self, "reserved bits are not 0xc0, found 0x%02x", u8);
       return 0;
+    }
 
     hours = ((u8 >> 4) & 0x3) * 10 + (u8 & 0xf);
 
     u8 = gst_byte_reader_get_uint8_unchecked (&br);
-    if ((u8 & 0x80) != 0x80)
+    if ((u8 & 0x80) != 0x80) {
+      GST_WARNING_OBJECT (self, "reserved bit is not 0x80, found 0x%02x", u8);
       return 0;
+    }
     minutes = ((u8 >> 4) & 0x7) * 10 + (u8 & 0xf);
 
     u8 = gst_byte_reader_get_uint8_unchecked (&br);
@@ -1135,8 +1182,10 @@ convert_cea708_cdp_cea708_cc_data_internal (GstCCConverter * self,
     seconds = ((u8 >> 4) & 0x7) * 10 + (u8 & 0xf);
 
     u8 = gst_byte_reader_get_uint8_unchecked (&br);
-    if (u8 & 0x40)
+    if (u8 & 0x40) {
+      GST_WARNING_OBJECT (self, "reserved bit is not 0x0, found 0x%02x", u8);
       return 0;
+    }
 
     drop_frame = ! !(u8 & 0x80);
     frames = ((u8 >> 4) & 0x3) * 10 + (u8 & 0xf);
@@ -1151,14 +1200,22 @@ convert_cea708_cdp_cea708_cc_data_internal (GstCCConverter * self,
   if (flags & 0x40) {
     guint8 cc_count;
 
-    if (gst_byte_reader_get_remaining (&br) < 2)
+    if (gst_byte_reader_get_remaining (&br) < 2) {
+      GST_WARNING_OBJECT (self, "not enough data to contain valid cc_data");
       return 0;
-    if (gst_byte_reader_get_uint8_unchecked (&br) != 0x72)
+    }
+    u8 = gst_byte_reader_get_uint8_unchecked (&br);
+    if (u8 != 0x72) {
+      GST_WARNING_OBJECT (self, "missing cc_data start code of 0x72, "
+          "found 0x%02x", u8);
       return 0;
+    }
 
     cc_count = gst_byte_reader_get_uint8_unchecked (&br);
-    if ((cc_count & 0xe0) != 0xe0)
+    if ((cc_count & 0xe0) != 0xe0) {
+      GST_WARNING_OBJECT (self, "reserved bits are not 0xe0, found 0x%02x", u8);
       return 0;
+    }
     cc_count &= 0x1f;
 
     len = 3 * cc_count;
@@ -2063,10 +2120,9 @@ gst_cc_converter_transform (GstCCConverter * self, GstBuffer * inbuf,
       else
         get_framerate_output_scale (self, in_fps_entry, &scale_n, &scale_d);
 
-      if (tc_meta)
-        interpolate_time_code_with_framerate (self, &tc_meta->tc,
-            self->out_fps_n, self->out_fps_d, scale_n, scale_d,
-            &self->current_output_timecode);
+      interpolate_time_code_with_framerate (self, &tc_meta->tc,
+          self->out_fps_n, self->out_fps_d, scale_n, scale_d,
+          &self->current_output_timecode);
     }
   }
 

@@ -51,6 +51,7 @@ GstCaps *             gst_va_decoder_get_sinkpad_caps     (GstVaDecoder * self);
 gboolean              gst_va_decoder_has_profile          (GstVaDecoder * self,
 							   VAProfile profile);
 gint                  gst_va_decoder_get_mem_types        (GstVaDecoder * self);
+GArray *              gst_va_decoder_get_surface_formats  (GstVaDecoder * self);
 
 gboolean              gst_va_decoder_add_param_buffer     (GstVaDecoder * self,
 							   GstVaDecodePicture * pic,
@@ -68,8 +69,7 @@ gboolean              gst_va_decoder_decode               (GstVaDecoder * self,
 gboolean              gst_va_decoder_destroy_buffers      (GstVaDecoder * self,
                                                            GstVaDecodePicture * pic);
 
-GstVaDecodePicture *  gst_va_decoder_new_decode_picture   (GstVaDecoder * self,
-                                                           VASurfaceID surface);
+GstVaDecodePicture *  gst_va_decode_picture_new           (VASurfaceID surface);
 void                  gst_va_decode_picture_free          (GstVaDecodePicture * pic);
 
 G_END_DECLS

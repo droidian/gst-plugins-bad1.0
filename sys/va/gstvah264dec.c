@@ -33,6 +33,7 @@
 #include "gstvadisplay_drm.h"
 #include "gstvapool.h"
 #include "gstvaprofile.h"
+#include "gstvautils.h"
 #include "gstvavideoformat.h"
 
 GST_DEBUG_CATEGORY_STATIC (gst_va_h264dec_debug);
@@ -56,6 +57,7 @@ struct _GstVaH264Dec
 {
   GstH264Decoder parent;
 
+  GstVaDisplay *display;
   GstVaDecoder *decoder;
 
   GstBufferPool *other_pool;
@@ -86,6 +88,13 @@ struct CData
   GstCaps *sink_caps;
   GstCaps *src_caps;
 };
+
+/* *INDENT-OFF* */
+static const gchar *src_caps_str = GST_VIDEO_CAPS_MAKE_WITH_FEATURES ("memory:VAMemory",
+            "{ NV12, P010_10LE }") " ;" GST_VIDEO_CAPS_MAKE ("{ NV12, P010_10LE }");
+/* *INDENT-ON* */
+
+static const gchar *sink_caps_str = "video/x-h264";
 
 static gboolean
 gst_va_h264_dec_end_picture (GstH264Decoder * decoder, GstH264Picture * picture)
@@ -159,18 +168,15 @@ fail:
 
 static GstFlowReturn
 gst_va_h264_dec_output_picture (GstH264Decoder * decoder,
-    GstH264Picture * picture)
+    GstVideoCodecFrame * frame, GstH264Picture * picture)
 {
   GstVaH264Dec *self = GST_VA_H264_DEC (decoder);
-  GstVideoCodecFrame *frame = NULL;
 
   GST_LOG_OBJECT (self,
       "Outputting picture %p (poc %d)", picture, picture->pic_order_cnt);
 
-  frame = gst_video_decoder_get_frame (GST_VIDEO_DECODER (self),
-      picture->system_frame_number);
-
   if (self->last_ret != GST_FLOW_OK) {
+    gst_h264_picture_unref (picture);
     gst_video_decoder_drop_frame (GST_VIDEO_DECODER (self), frame);
     return self->last_ret;
   }
@@ -185,6 +191,8 @@ gst_va_h264_dec_output_picture (GstH264Decoder * decoder,
 
   GST_LOG_OBJECT (self, "Finish frame %" GST_TIME_FORMAT,
       GST_TIME_ARGS (GST_BUFFER_PTS (frame->output_buffer)));
+
+  gst_h264_picture_unref (picture);
 
   return gst_video_decoder_finish_frame (GST_VIDEO_DECODER (self), frame);
 }
@@ -518,26 +526,21 @@ fail:
 }
 
 static gboolean
-gst_va_h264_dec_new_picture (GstH264Decoder * decoder, GstH264Picture * picture)
+gst_va_h264_dec_new_picture (GstH264Decoder * decoder,
+    GstVideoCodecFrame * frame, GstH264Picture * picture)
 {
   GstVaH264Dec *self = GST_VA_H264_DEC (decoder);
   GstVaDecodePicture *pic;
-  GstVideoCodecFrame *frame;
   GstVideoDecoder *vdec = GST_VIDEO_DECODER (decoder);
   VASurfaceID surface;
 
-  frame = gst_video_decoder_get_frame (vdec, picture->system_frame_number);
-  if (!frame)
-    return FALSE;               /* something failed before */
   self->last_ret = gst_video_decoder_allocate_output_frame (vdec, frame);
   if (self->last_ret != GST_FLOW_OK)
     goto error;
 
   surface = gst_va_buffer_get_surface (frame->output_buffer, NULL);
 
-  gst_video_codec_frame_unref (frame);
-
-  pic = gst_va_decoder_new_decode_picture (self->decoder, surface);
+  pic = gst_va_decode_picture_new (surface);
   gst_h264_picture_set_user_data (picture, pic,
       (GDestroyNotify) gst_va_decode_picture_free);
 
@@ -547,7 +550,9 @@ gst_va_h264_dec_new_picture (GstH264Decoder * decoder, GstH264Picture * picture)
 
 error:
   {
-    gst_video_codec_frame_unref (frame);
+    GST_WARNING_OBJECT (self,
+        "Failed to allocated output buffer, return %s",
+        gst_flow_get_name (self->last_ret));
     return FALSE;
   }
 }
@@ -672,6 +677,39 @@ _format_changed (GstVaH264Dec * self, VAProfile new_profile, guint new_rtformat,
       && width == new_width && height == new_height);
 }
 
+static void
+_set_latency (GstVaH264Dec * self, const GstH264SPS * sps)
+{
+  GstClockTime duration, min, max;
+  gint fps_d, fps_n;
+  guint32 num_reorder_frames;
+
+  fps_d = self->output_state->info.fps_d;
+  fps_n = self->output_state->info.fps_n;
+
+  /* if 0/1 then 25/1 */
+  if (fps_n == 0) {
+    fps_n = 25;
+    fps_d = 1;
+  }
+
+  num_reorder_frames = 1;
+  if (sps->vui_parameters_present_flag
+      && sps->vui_parameters.bitstream_restriction_flag)
+    num_reorder_frames = sps->vui_parameters.num_reorder_frames;
+  if (num_reorder_frames > self->dpb_size)
+    num_reorder_frames = 1;
+
+  duration = gst_util_uint64_scale_int (GST_SECOND, fps_d, fps_n);
+  min = num_reorder_frames * duration;
+  max = self->dpb_size * duration;
+
+  GST_LOG_OBJECT (self,
+      "latency min %" G_GUINT64_FORMAT " max %" G_GUINT64_FORMAT, min, max);
+
+  gst_video_decoder_set_latency (GST_VIDEO_DECODER (self), min, max);
+}
+
 static gboolean
 gst_va_h264_dec_new_sequence (GstH264Decoder * decoder, const GstH264SPS * sps,
     gint max_dpb_size)
@@ -734,9 +772,9 @@ gst_va_h264_dec_new_sequence (GstH264Decoder * decoder, const GstH264SPS * sps,
       GST_ERROR_OBJECT (self, "Failed to negotiate with downstream");
       return FALSE;
     }
-  }
 
-  /* @TODO: check if it is required to copy surfaces to downstream */
+    _set_latency (self, sps);
+  }
 
   return TRUE;
 }
@@ -744,19 +782,15 @@ gst_va_h264_dec_new_sequence (GstH264Decoder * decoder, const GstH264SPS * sps,
 static gboolean
 gst_va_h264_dec_open (GstVideoDecoder * decoder)
 {
-  GstVaDisplay *display;
   GstVaH264Dec *self = GST_VA_H264_DEC (decoder);
   GstVaH264DecClass *klass = GST_VA_H264_DEC_GET_CLASS (decoder);
 
-  /* @XXX(victor): query pipeline's context */
-  display = gst_va_display_drm_new_from_path (klass->render_device_path);
-  if (!display)
+  if (!gst_va_ensure_element_data (decoder, klass->render_device_path,
+          &self->display))
     return FALSE;
 
   if (!self->decoder)
-    self->decoder = gst_va_decoder_new (display, H264);
-
-  gst_object_unref (display);
+    self->decoder = gst_va_decoder_new (self->display, H264);
 
   return (self->decoder != NULL);
 }
@@ -767,6 +801,7 @@ gst_va_h264_dec_close (GstVideoDecoder * decoder)
   GstVaH264Dec *self = GST_VA_H264_DEC (decoder);
 
   gst_clear_object (&self->decoder);
+  gst_clear_object (&self->display);
 
   return TRUE;
 }
@@ -834,6 +869,10 @@ gst_va_h264_dec_src_query (GstVideoDecoder * decoder, GstQuery * query)
   gboolean ret = FALSE;
 
   switch (GST_QUERY_TYPE (query)) {
+    case GST_QUERY_CONTEXT:{
+      return gst_va_handle_context_query (GST_ELEMENT_CAST (self), query,
+          self->display);
+    }
     case GST_QUERY_CAPS:{
       GstCaps *caps = NULL, *tmp, *filter = NULL;
 
@@ -862,6 +901,19 @@ gst_va_h264_dec_src_query (GstVideoDecoder * decoder, GstQuery * query)
   }
 
   return ret;
+}
+
+static gboolean
+gst_va_h264_dec_sink_query (GstVideoDecoder * decoder, GstQuery * query)
+{
+  GstVaH264Dec *self = GST_VA_H264_DEC (decoder);
+
+  if (GST_QUERY_TYPE (query) == GST_QUERY_CONTEXT) {
+    return gst_va_handle_context_query (GST_ELEMENT_CAST (self), query,
+        self->display);
+  }
+
+  return GST_VIDEO_DECODER_CLASS (parent_class)->sink_query (decoder, query);
 }
 
 static gboolean
@@ -1034,6 +1086,15 @@ _caps_is_dmabuf (GstVaH264Dec * self, GstCaps * caps)
       & VA_SURFACE_ATTRIB_MEM_TYPE_DRM_PRIME);
 }
 
+static inline gboolean
+_caps_is_va_memory (GstCaps * caps)
+{
+  GstCapsFeatures *features;
+
+  features = gst_caps_get_features (caps, 0);
+  return gst_caps_features_contains (features, "memory:VAMemory");
+}
+
 static inline void
 _shall_copy_frames (GstVaH264Dec * self, GstVideoInfo * info)
 {
@@ -1080,7 +1141,8 @@ _try_allocator (GstVaH264Dec * self, GstAllocator * allocator, GstCaps * caps,
   } else if (GST_IS_VA_ALLOCATOR (allocator)) {
     if (!gst_va_allocator_try (allocator, &params))
       return FALSE;
-    _shall_copy_frames (self, &params.info);
+    if (!_caps_is_va_memory (caps))
+      _shall_copy_frames (self, &params.info);
   } else {
     return FALSE;
   }
@@ -1101,8 +1163,11 @@ _create_allocator (GstVaH264Dec * self, GstCaps * caps, guint * size)
 
   if (_caps_is_dmabuf (self, caps))
     allocator = gst_va_dmabuf_allocator_new (display);
-  else
-    allocator = gst_va_allocator_new (display);
+  else {
+    GArray *surface_formats =
+        gst_va_decoder_get_surface_formats (self->decoder);
+    allocator = gst_va_allocator_new (display, surface_formats);
+  }
 
   gst_object_unref (display);
 
@@ -1170,6 +1235,8 @@ gst_va_h264_dec_decide_allocation (GstVideoDecoder * decoder, GstQuery * query)
             GST_BUFFER_POOL_OPTION_VIDEO_ALIGNMENT);
         if (!self->has_videometa || (!has_videoalignment
                 && self->need_cropping)) {
+          GST_DEBUG_OBJECT (self,
+              "keeping other pool for copy %" GST_PTR_FORMAT, pool);
           gst_object_replace ((GstObject **) & self->other_pool,
               (GstObject *) pool);
           gst_object_unref (pool);      /* decrease previous increase */
@@ -1185,7 +1252,7 @@ gst_va_h264_dec_decide_allocation (GstVideoDecoder * decoder, GstQuery * query)
   } else {
     size = GST_VIDEO_INFO_SIZE (&info);
 
-    if (!self->has_videometa) {
+    if (!self->has_videometa && !_caps_is_va_memory (caps)) {
       GST_DEBUG_OBJECT (self, "making new other pool for copy");
       self->other_pool = gst_video_buffer_pool_new ();
       config = gst_buffer_pool_get_config (self->other_pool);
@@ -1261,6 +1328,32 @@ wrong_caps:
 }
 
 static void
+gst_va_h264_dec_set_context (GstElement * element, GstContext * context)
+{
+  GstVaDisplay *old_display, *new_display;
+  GstVaH264Dec *self = GST_VA_H264_DEC (element);
+  GstVaH264DecClass *klass = GST_VA_H264_DEC_GET_CLASS (self);
+  gboolean ret;
+
+  old_display = self->display ? gst_object_ref (self->display) : NULL;
+  ret = gst_va_handle_set_context (element, context, klass->render_device_path,
+      &self->display);
+  new_display = self->display ? gst_object_ref (self->display) : NULL;
+
+  if (!ret
+      || (old_display && new_display && old_display != new_display
+          && self->decoder)) {
+    GST_ELEMENT_WARNING (element, RESOURCE, BUSY,
+        ("Can't replace VA display while operating"), (NULL));
+  }
+
+  gst_clear_object (&old_display);
+  gst_clear_object (&new_display);
+
+  GST_ELEMENT_CLASS (parent_class)->set_context (element, context);
+}
+
+static void
 gst_va_h264_dec_dispose (GObject * object)
 {
   gst_va_h264_dec_close (GST_VIDEO_DECODER (object));
@@ -1270,6 +1363,8 @@ gst_va_h264_dec_dispose (GObject * object)
 static void
 gst_va_h264_dec_class_init (gpointer g_class, gpointer class_data)
 {
+  GstCaps *src_doc_caps, *sink_doc_caps;
+  GstPadTemplate *sink_pad_templ, *src_pad_templ;
   GObjectClass *gobject_class = G_OBJECT_CLASS (g_class);
   GstElementClass *element_class = GST_ELEMENT_CLASS (g_class);
   GstH264DecoderClass *h264decoder_class = GST_H264_DECODER_CLASS (g_class);
@@ -1280,7 +1375,7 @@ gst_va_h264_dec_class_init (gpointer g_class, gpointer class_data)
 
   parent_class = g_type_class_peek_parent (g_class);
 
-  klass->render_device_path = cdata->render_device_path;
+  klass->render_device_path = g_strdup (cdata->render_device_path);
 
   if (cdata->description) {
     long_name = g_strdup_printf ("VA-API H.264 Decoder in %s",
@@ -1294,20 +1389,30 @@ gst_va_h264_dec_class_init (gpointer g_class, gpointer class_data)
       "VA-API based H.264 video decoder",
       "Víctor Jáquez <vjaquez@igalia.com>");
 
-  gst_element_class_add_pad_template (element_class,
-      gst_pad_template_new ("sink", GST_PAD_SINK, GST_PAD_ALWAYS,
-          cdata->sink_caps));
-  gst_element_class_add_pad_template (element_class,
-      gst_pad_template_new ("src", GST_PAD_SRC, GST_PAD_ALWAYS,
-          cdata->src_caps));
+  sink_pad_templ = gst_pad_template_new ("sink", GST_PAD_SINK, GST_PAD_ALWAYS,
+      cdata->sink_caps);
+  gst_element_class_add_pad_template (element_class, sink_pad_templ);
+  sink_doc_caps = gst_caps_from_string (sink_caps_str);
+  gst_pad_template_set_documentation_caps (sink_pad_templ, sink_doc_caps);
+  gst_caps_unref (sink_doc_caps);
+
+  src_pad_templ = gst_pad_template_new ("src", GST_PAD_SRC, GST_PAD_ALWAYS,
+      cdata->src_caps);
+  gst_element_class_add_pad_template (element_class, src_pad_templ);
+  src_doc_caps = gst_caps_from_string (src_caps_str);
+  gst_pad_template_set_documentation_caps (src_pad_templ, src_doc_caps);
+  gst_caps_unref (src_doc_caps);
 
   gobject_class->dispose = gst_va_h264_dec_dispose;
+
+  element_class->set_context = gst_va_h264_dec_set_context;
 
   decoder_class->open = GST_DEBUG_FUNCPTR (gst_va_h264_dec_open);
   decoder_class->close = GST_DEBUG_FUNCPTR (gst_va_h264_dec_close);
   decoder_class->stop = GST_DEBUG_FUNCPTR (gst_va_h264_dec_stop);
   decoder_class->getcaps = GST_DEBUG_FUNCPTR (gst_va_h264_dec_sink_getcaps);
   decoder_class->src_query = GST_DEBUG_FUNCPTR (gst_va_h264_dec_src_query);
+  decoder_class->sink_query = GST_DEBUG_FUNCPTR (gst_va_h264_dec_sink_query);
   decoder_class->negotiate = GST_DEBUG_FUNCPTR (gst_va_h264_dec_negotiate);
   decoder_class->decide_allocation =
       GST_DEBUG_FUNCPTR (gst_va_h264_dec_decide_allocation);
@@ -1328,6 +1433,7 @@ gst_va_h264_dec_class_init (gpointer g_class, gpointer class_data)
 
   g_free (long_name);
   g_free (cdata->description);
+  g_free (cdata->render_device_path);
   gst_caps_unref (cdata->src_caps);
   gst_caps_unref (cdata->sink_caps);
   g_free (cdata);

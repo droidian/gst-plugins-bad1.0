@@ -434,10 +434,10 @@ gst_rist_src_init (GstRistSrc * src)
       "sdes", sdes, NULL);
   gst_structure_free (sdes);
 
-  g_signal_connect_swapped (src->rtpbin, "request-pt-map",
-      G_CALLBACK (gst_rist_src_request_pt_map), src);
-  g_signal_connect_swapped (src->rtpbin, "request-aux-receiver",
-      G_CALLBACK (gst_rist_src_request_aux_receiver), src);
+  g_signal_connect_object (src->rtpbin, "request-pt-map",
+      G_CALLBACK (gst_rist_src_request_pt_map), src, G_CONNECT_SWAPPED);
+  g_signal_connect_object (src->rtpbin, "request-aux-receiver",
+      G_CALLBACK (gst_rist_src_request_aux_receiver), src, G_CONNECT_SWAPPED);
 
   src->rtxbin = gst_bin_new ("rist_recv_rtxbin");
   g_object_ref_sink (src->rtxbin);
@@ -454,12 +454,12 @@ gst_rist_src_init (GstRistSrc * src)
   gst_object_unref (pad);
   gst_element_add_pad (src->rtxbin, gpad);
 
-  g_signal_connect_swapped (src->rtpbin, "pad-added",
-      G_CALLBACK (gst_rist_src_pad_added), src);
-  g_signal_connect_swapped (src->rtpbin, "on-new-ssrc",
-      G_CALLBACK (gst_rist_src_on_new_ssrc), src);
-  g_signal_connect_swapped (src->rtpbin, "new-jitterbuffer",
-      G_CALLBACK (gst_rist_src_new_jitterbuffer), src);
+  g_signal_connect_object (src->rtpbin, "pad-added",
+      G_CALLBACK (gst_rist_src_pad_added), src, G_CONNECT_SWAPPED);
+  g_signal_connect_object (src->rtpbin, "on-new-ssrc",
+      G_CALLBACK (gst_rist_src_on_new_ssrc), src, G_CONNECT_SWAPPED);
+  g_signal_connect_object (src->rtpbin, "new-jitterbuffer",
+      G_CALLBACK (gst_rist_src_new_jitterbuffer), src, G_CONNECT_SWAPPED);
 
   bond = gst_rist_src_add_bond (src);
   if (!bond)
@@ -471,6 +471,22 @@ missing_plugin:
   {
     GST_ERROR_OBJECT (src, "'%s' plugin is missing.", src->missing_plugin);
     src->construct_failed = TRUE;
+  }
+}
+
+static void
+gst_rist_src_handle_message (GstBin * bin, GstMessage * message)
+{
+  switch (GST_MESSAGE_TYPE (message)) {
+    case GST_MESSAGE_STREAM_START:
+    case GST_MESSAGE_EOS:
+      /* drop stream-start & eos from our internal udp sink(s);
+         https://gitlab.freedesktop.org/gstreamer/gst-plugins-bad/-/issues/1368 */
+      gst_message_unref (message);
+      break;
+    default:
+      GST_BIN_CLASS (gst_rist_src_parent_class)->handle_message (bin, message);
+      break;
   }
 }
 
@@ -586,12 +602,30 @@ gst_rist_src_setup_rtcp_socket (GstRistSrc * src, RistReceiverBond * bond)
   GSocket *socket = NULL;
   GInetAddress *iaddr = NULL;
   guint port = bond->port + 1;
+  GError *error = NULL;
 
   g_object_get (bond->rtcp_src, "used-socket", &socket, NULL);
   if (!socket)
     return GST_STATE_CHANGE_FAILURE;
 
   iaddr = g_inet_address_new_from_string (bond->address);
+  if (!iaddr) {
+    GList *results;
+    GResolver *resolver = NULL;
+
+    resolver = g_resolver_get_default ();
+    results = g_resolver_lookup_by_name (resolver, bond->address, NULL, &error);
+
+    if (!results) {
+      g_object_unref (resolver);
+      goto dns_resolve_failed;
+    }
+
+    iaddr = G_INET_ADDRESS (g_object_ref (results->data));
+
+    g_resolver_free_addresses (results);
+    g_object_unref (resolver);
+  }
 
   if (g_inet_address_get_is_multicast (iaddr)) {
     /* mc-ttl is not supported by dynudpsink */
@@ -636,6 +670,14 @@ gst_rist_src_setup_rtcp_socket (GstRistSrc * src, RistReceiverBond * bond)
   gst_element_sync_state_with_parent (bond->rtcp_sink);
 
   return GST_STATE_CHANGE_SUCCESS;
+
+dns_resolve_failed:
+  GST_ELEMENT_ERROR (src, RESOURCE, NOT_FOUND,
+      ("Could not resolve hostname '%s'", GST_STR_NULL (bond->address)),
+      ("DNS resolver reported: %s", error->message));
+  g_error_free (error);
+  return GST_STATE_CHANGE_FAILURE;
+
 }
 
 static GstStateChangeReturn
@@ -1210,6 +1252,7 @@ gst_rist_src_finalize (GObject * object)
 static void
 gst_rist_src_class_init (GstRistSrcClass * klass)
 {
+  GstBinClass *bin_class = (GstBinClass *) klass;
   GstElementClass *element_class = (GstElementClass *) klass;
   GObjectClass *object_class = (GObjectClass *) klass;
 
@@ -1218,6 +1261,8 @@ gst_rist_src_class_init (GstRistSrcClass * klass)
       "Source that implements RIST TR-06-1 streaming specification",
       "Nicolas Dufresne <nicolas.dufresne@collabora.com");
   gst_element_class_add_static_pad_template (element_class, &src_templ);
+
+  bin_class->handle_message = gst_rist_src_handle_message;
 
   element_class->change_state = gst_rist_src_change_state;
 

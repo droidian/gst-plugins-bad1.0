@@ -93,7 +93,7 @@ struct _GstD3D11DecoderPrivate
   GUID decoder_profile;
 
   /* For device specific workaround */
-  gboolean is_xbox_device;
+  gboolean can_direct_rendering;
 
   /* for internal shader */
   GstD3D11ColorConverter *converter;
@@ -636,6 +636,7 @@ gst_d3d11_decoder_open (GstD3D11Decoder * decoder, GstD3D11Codec codec,
   gint i;
   guint aligned_width, aligned_height;
   guint alignment;
+  GstD3D11DeviceVendor vendor;
 
   g_return_val_if_fail (GST_IS_D3D11_DECODER (decoder), FALSE);
   g_return_val_if_fail (codec > GST_D3D11_CODEC_NONE, FALSE);
@@ -676,7 +677,22 @@ gst_d3d11_decoder_open (GstD3D11Decoder * decoder, GstD3D11Codec codec,
 
   gst_d3d11_decoder_reset_unlocked (decoder);
 
-  priv->is_xbox_device = gst_d3d11_is_xbox_device (priv->device);
+  priv->can_direct_rendering = TRUE;
+
+  vendor = gst_d3d11_get_device_vendor (priv->device);
+  switch (vendor) {
+    case GST_D3D11_DEVICE_VENDOR_XBOX:
+    case GST_D3D11_DEVICE_VENDOR_QUALCOMM:
+      /* FIXME: Need to figure out Xbox device's behavior
+       * https://gitlab.freedesktop.org/gstreamer/gst-plugins-bad/-/issues/1312
+       *
+       * Qualcomm driver seems to be buggy in zero-copy scenario
+       */
+      priv->can_direct_rendering = FALSE;
+      break;
+    default:
+      break;
+  }
 
   /* NOTE: other dxva implementations (ffmpeg and vlc) do this
    * and they say the required alignment were mentioned by dxva spec.
@@ -686,7 +702,7 @@ gst_d3d11_decoder_open (GstD3D11Decoder * decoder, GstD3D11Codec codec,
   switch (codec) {
     case GST_D3D11_CODEC_H265:
       /* See directx_va_Setup() impl. in vlc */
-      if (!priv->is_xbox_device)
+      if (vendor != GST_D3D11_DEVICE_VENDOR_XBOX)
         alignment = 128;
       else
         alignment = 16;
@@ -760,12 +776,18 @@ gst_d3d11_decoder_open (GstD3D11Decoder * decoder, GstD3D11Codec codec,
   GST_DEBUG_OBJECT (decoder, "ConfigDecoderSpecific 0x%x",
       best_config->ConfigDecoderSpecific);
 
+  /* FIXME: Revisit this at some point.
+   * Some 4K VP9 + super frame enabled streams would be broken with
+   * this configuration (driver crash) on Intel and Nvidia
+   */
+#if 0
   /* bit 14 is equal to 1b means this config support array of texture and
    * it's recommended type as per DXVA spec */
   if ((best_config->ConfigDecoderSpecific & 0x4000) == 0x4000) {
     GST_DEBUG_OBJECT (decoder, "Config support array of texture");
     priv->use_array_of_texture = TRUE;
   }
+#endif
 
   if (!gst_d3d11_decoder_prepare_output_view_pool (decoder,
           info, aligned_width, aligned_height, pool_size, &selected_profile)) {
@@ -1605,10 +1627,7 @@ gst_d3d11_decoder_supports_direct_rendering (GstD3D11Decoder * decoder)
 
   priv = decoder->priv;
 
-  /* FIXME: Need to figure out Xbox device's behavior
-   * https://gitlab.freedesktop.org/gstreamer/gst-plugins-bad/-/issues/1312
-   */
-  return !priv->is_xbox_device;
+  return priv->can_direct_rendering;
 }
 
 /* Keep sync with chromium and keep in sorted order.

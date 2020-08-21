@@ -90,7 +90,14 @@ struct _GstH264DecoderClass
                                      const GstH264SPS * sps,
                                      gint max_dpb_size);
 
+  /**
+   * GstH264Decoder:new_picture:
+   * @decoder: a #GstH264Decoder
+   * @frame: (transfer none): a #GstVideoCodecFrame
+   * @picture: (transfer none): a #GstH264Picture
+   */
   gboolean      (*new_picture)      (GstH264Decoder * decoder,
+                                     GstVideoCodecFrame * frame,
                                      GstH264Picture * picture);
 
   gboolean      (*start_picture)    (GstH264Decoder * decoder,
@@ -107,7 +114,14 @@ struct _GstH264DecoderClass
   gboolean      (*end_picture)      (GstH264Decoder * decoder,
                                      GstH264Picture * picture);
 
+  /**
+   * GstH264Decoder:output_picture:
+   * @decoder: a #GstH264Decoder
+   * @frame: (transfer full): a #GstVideoCodecFrame
+   * @picture: (transfer full): a #GstH264Picture
+   */
   GstFlowReturn (*output_picture)   (GstH264Decoder * decoder,
+                                     GstVideoCodecFrame * frame,
                                      GstH264Picture * picture);
 
   /*< private >*/
@@ -120,8 +134,12 @@ GST_CODECS_API
 GType gst_h264_decoder_get_type (void);
 
 GST_CODECS_API
-void gst_h264_decoder_set_process_ref_pic_lists (GstH264Decoder * self,
+void gst_h264_decoder_set_process_ref_pic_lists (GstH264Decoder * decoder,
                                                  gboolean process);
+
+GST_CODECS_API
+GstH264Picture * gst_h264_decoder_get_picture   (GstH264Decoder * decoder,
+                                                 guint32 system_frame_number);
 
 G_END_DECLS
 

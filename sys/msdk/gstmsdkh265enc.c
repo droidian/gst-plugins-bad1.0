@@ -42,29 +42,62 @@ GST_DEBUG_CATEGORY_EXTERN (gst_msdkh265enc_debug);
 
 enum
 {
+#ifndef GST_REMOVE_DEPRECATED
   PROP_LOW_POWER = GST_MSDKENC_PROP_MAX,
   PROP_TILE_ROW,
+#else
+  PROP_TILE_ROW = GST_MSDKENC_PROP_MAX,
+#endif
   PROP_TILE_COL,
   PROP_MAX_SLICE_SIZE,
+  PROP_TUNE_MODE,
+};
+
+enum
+{
+  GST_MSDK_FLAG_LOW_POWER = 1 << 0,
+  GST_MSDK_FLAG_TUNE_MODE = 1 << 1,
 };
 
 #define PROP_LOWPOWER_DEFAULT           FALSE
 #define PROP_TILE_ROW_DEFAULT           1
 #define PROP_TILE_COL_DEFAULT           1
 #define PROP_MAX_SLICE_SIZE_DEFAULT     0
+#define PROP_TUNE_MODE_DEFAULT          MFX_CODINGOPTION_UNKNOWN
 
 #define RAW_FORMATS "NV12, I420, YV12, YUY2, UYVY, BGRA, P010_10LE, VUYA"
 #define PROFILES    "main, main-10, main-444"
-
-#if (MFX_VERSION >= 1031)
-#define COMMON_FORMAT "{ " RAW_FORMATS ", Y410, Y210, P012_LE }"
-#define PRFOLIE_STR   "{ " PROFILES ", main-444-10, main-422-10, main-12 }"
-#elif (MFX_VERSION >= 1027)
-#define COMMON_FORMAT "{ " RAW_FORMATS ", Y410, Y210 }"
-#define PRFOLIE_STR   "{ " PROFILES ", main-444-10, main-422-10 }"
-#else
 #define COMMON_FORMAT "{ " RAW_FORMATS " }"
 #define PRFOLIE_STR   "{ " PROFILES " }"
+
+
+#if (MFX_VERSION >= 1027)
+#undef  COMMON_FORMAT
+#undef  PRFOLIE_STR
+#define FORMATS_1027    RAW_FORMATS ", Y410, Y210"
+#define PROFILES_1027   PROFILES ", main-444-10, main-422-10"
+#define COMMON_FORMAT   "{ " FORMATS_1027 " }"
+#define PRFOLIE_STR     "{ " PROFILES_1027 " }"
+#endif
+
+#if (MFX_VERSION >= 1031)
+#undef  COMMON_FORMAT
+#undef  PRFOLIE_STR
+#define FORMATS_1031    FORMATS_1027 ", P012_LE"
+#define PROFILES_1031   PROFILES_1027  ", main-12"
+#define COMMON_FORMAT   "{ " FORMATS_1031 " }"
+#define PRFOLIE_STR     "{ " PROFILES_1031 " }"
+#endif
+
+#if (MFX_VERSION >= 1032)
+#undef  COMMON_FORMAT
+#undef  PRFOLIE_STR
+#define FORMATS_1032    FORMATS_1031
+#define PROFILES_1032   PROFILES_1031  ", screen-extended-main, " \
+  "screen-extended-main-10, screen-extended-main-444, " \
+  "screen-extended-main-444-10"
+#define COMMON_FORMAT   "{ " FORMATS_1032 " }"
+#define PRFOLIE_STR     "{ " PROFILES_1032 " }"
 #endif
 
 static GstStaticPadTemplate sink_factory = GST_STATIC_PAD_TEMPLATE ("sink",
@@ -198,6 +231,42 @@ gst_msdkh265enc_pre_push (GstVideoEncoder * encoder, GstVideoCodecFrame * frame)
 static gboolean
 gst_msdkh265enc_set_format (GstMsdkEnc * encoder)
 {
+  GstMsdkH265Enc *thiz = GST_MSDKH265ENC (encoder);
+  GstCaps *template_caps, *allowed_caps;
+
+  g_free (thiz->profile_name);
+  thiz->profile_name = NULL;
+
+  allowed_caps = gst_pad_get_allowed_caps (GST_VIDEO_ENCODER_SRC_PAD (encoder));
+
+  if (!allowed_caps || gst_caps_is_empty (allowed_caps)) {
+    if (allowed_caps)
+      gst_caps_unref (allowed_caps);
+    return FALSE;
+  }
+
+  template_caps = gst_static_pad_template_get_caps (&src_factory);
+
+  if (gst_caps_is_equal (allowed_caps, template_caps)) {
+    GST_INFO_OBJECT (thiz,
+        "downstream have the same caps, profile set to auto");
+  } else {
+    GstStructure *s;
+    const gchar *profile;
+
+    allowed_caps = gst_caps_make_writable (allowed_caps);
+    allowed_caps = gst_caps_fixate (allowed_caps);
+    s = gst_caps_get_structure (allowed_caps, 0);
+    profile = gst_structure_get_string (s, "profile");
+
+    if (profile) {
+      thiz->profile_name = g_strdup (profile);
+    }
+  }
+
+  gst_caps_unref (allowed_caps);
+  gst_caps_unref (template_caps);
+
   return TRUE;
 }
 
@@ -220,23 +289,43 @@ gst_msdkh265enc_configure (GstMsdkEnc * encoder)
 
   encoder->param.mfx.CodecId = MFX_CODEC_HEVC;
 
-  switch (encoder->param.mfx.FrameInfo.FourCC) {
-    case MFX_FOURCC_P010:
+  if (h265enc->profile_name) {
+    encoder->param.mfx.CodecProfile = MFX_PROFILE_HEVC_MAIN;
+
+    if (!strcmp (h265enc->profile_name, "main-10"))
       encoder->param.mfx.CodecProfile = MFX_PROFILE_HEVC_MAIN10;
-      break;
-    case MFX_FOURCC_AYUV:
-    case MFX_FOURCC_YUY2:
+    else if (!strcmp (h265enc->profile_name, "main-444") ||
+        !strcmp (h265enc->profile_name, "main-422-10") ||
+        !strcmp (h265enc->profile_name, "main-444-10") ||
+        !strcmp (h265enc->profile_name, "main-12"))
+      encoder->param.mfx.CodecProfile = MFX_PROFILE_HEVC_REXT;
+
+#if (MFX_VERSION >= 1032)
+    else if (!strcmp (h265enc->profile_name, "screen-extended-main") ||
+        !strcmp (h265enc->profile_name, "screen-extended-main-10") ||
+        !strcmp (h265enc->profile_name, "screen-extended-main-444") ||
+        !strcmp (h265enc->profile_name, "screen-extended-main-444-10"))
+      encoder->param.mfx.CodecProfile = MFX_PROFILE_HEVC_SCC;
+#endif
+  } else {
+    switch (encoder->param.mfx.FrameInfo.FourCC) {
+      case MFX_FOURCC_P010:
+        encoder->param.mfx.CodecProfile = MFX_PROFILE_HEVC_MAIN10;
+        break;
+      case MFX_FOURCC_AYUV:
+      case MFX_FOURCC_YUY2:
 #if (MFX_VERSION >= 1027)
-    case MFX_FOURCC_Y410:
-    case MFX_FOURCC_Y210:
+      case MFX_FOURCC_Y410:
+      case MFX_FOURCC_Y210:
 #endif
 #if (MFX_VERSION >= 1031)
-    case MFX_FOURCC_P016:
+      case MFX_FOURCC_P016:
 #endif
-      encoder->param.mfx.CodecProfile = MFX_PROFILE_HEVC_REXT;
-      break;
-    default:
-      encoder->param.mfx.CodecProfile = MFX_PROFILE_HEVC_MAIN;
+        encoder->param.mfx.CodecProfile = MFX_PROFILE_HEVC_REXT;
+        break;
+      default:
+        encoder->param.mfx.CodecProfile = MFX_PROFILE_HEVC_MAIN;
+    }
   }
 
   /* IdrInterval field of MediaSDK HEVC encoder behaves differently
@@ -265,8 +354,7 @@ gst_msdkh265enc_configure (GstMsdkEnc * encoder)
           h265enc->num_tile_rows * h265enc->num_tile_cols;
   }
 
-  encoder->param.mfx.LowPower =
-      (h265enc->lowpower ? MFX_CODINGOPTION_ON : MFX_CODINGOPTION_OFF);
+  encoder->param.mfx.LowPower = h265enc->tune_mode;
 
   return TRUE;
 }
@@ -311,6 +399,7 @@ level_to_string (gint level)
 static GstCaps *
 gst_msdkh265enc_set_src_caps (GstMsdkEnc * encoder)
 {
+  GstMsdkH265Enc *thiz = GST_MSDKH265ENC (encoder);
   GstCaps *caps;
   GstStructure *structure;
   const gchar *level;
@@ -323,36 +412,44 @@ gst_msdkh265enc_set_src_caps (GstMsdkEnc * encoder)
 
   gst_structure_set (structure, "alignment", G_TYPE_STRING, "au", NULL);
 
-  switch (encoder->param.mfx.FrameInfo.FourCC) {
-    case MFX_FOURCC_P010:
-      gst_structure_set (structure, "profile", G_TYPE_STRING, "main-10", NULL);
-      break;
-    case MFX_FOURCC_AYUV:
-      gst_structure_set (structure, "profile", G_TYPE_STRING, "main-444", NULL);
-      break;
-    case MFX_FOURCC_YUY2:
-      /* The profile is main-422-10 for 8-bit 422 */
-      gst_structure_set (structure, "profile", G_TYPE_STRING, "main-422-10",
-          NULL);
-      break;
+  if (thiz->profile_name)
+    gst_structure_set (structure, "profile", G_TYPE_STRING, thiz->profile_name,
+        NULL);
+  else {
+    switch (encoder->param.mfx.FrameInfo.FourCC) {
+      case MFX_FOURCC_P010:
+        gst_structure_set (structure, "profile", G_TYPE_STRING, "main-10",
+            NULL);
+        break;
+      case MFX_FOURCC_AYUV:
+        gst_structure_set (structure, "profile", G_TYPE_STRING, "main-444",
+            NULL);
+        break;
+      case MFX_FOURCC_YUY2:
+        /* The profile is main-422-10 for 8-bit 422 */
+        gst_structure_set (structure, "profile", G_TYPE_STRING, "main-422-10",
+            NULL);
+        break;
 #if (MFX_VERSION >= 1027)
-    case MFX_FOURCC_Y410:
-      gst_structure_set (structure, "profile", G_TYPE_STRING, "main-444-10",
-          NULL);
-      break;
-    case MFX_FOURCC_Y210:
-      gst_structure_set (structure, "profile", G_TYPE_STRING, "main-422-10",
-          NULL);
-      break;
+      case MFX_FOURCC_Y410:
+        gst_structure_set (structure, "profile", G_TYPE_STRING, "main-444-10",
+            NULL);
+        break;
+      case MFX_FOURCC_Y210:
+        gst_structure_set (structure, "profile", G_TYPE_STRING, "main-422-10",
+            NULL);
+        break;
 #endif
 #if (MFX_VERSION >= 1031)
-    case MFX_FOURCC_P016:
-      gst_structure_set (structure, "profile", G_TYPE_STRING, "main-12", NULL);
-      break;
+      case MFX_FOURCC_P016:
+        gst_structure_set (structure, "profile", G_TYPE_STRING, "main-12",
+            NULL);
+        break;
 #endif
-    default:
-      gst_structure_set (structure, "profile", G_TYPE_STRING, "main", NULL);
-      break;
+      default:
+        gst_structure_set (structure, "profile", G_TYPE_STRING, "main", NULL);
+        break;
+    }
   }
 
   level = level_to_string (encoder->param.mfx.CodecLevel);
@@ -372,6 +469,8 @@ gst_msdkh265enc_finalize (GObject * object)
   if (thiz->cc_sei_array)
     g_array_unref (thiz->cc_sei_array);
 
+  g_free (thiz->profile_name);
+
   G_OBJECT_CLASS (parent_class)->finalize (object);
 }
 
@@ -387,9 +486,18 @@ gst_msdkh265enc_set_property (GObject * object, guint prop_id,
   GST_OBJECT_LOCK (thiz);
 
   switch (prop_id) {
+#ifndef GST_REMOVE_DEPRECATED
     case PROP_LOW_POWER:
       thiz->lowpower = g_value_get_boolean (value);
+      thiz->prop_flag |= GST_MSDK_FLAG_LOW_POWER;
+
+      /* Ignore it if user set tune mode explicitly */
+      if (!(thiz->prop_flag & GST_MSDK_FLAG_TUNE_MODE))
+        thiz->tune_mode =
+            thiz->lowpower ? MFX_CODINGOPTION_ON : MFX_CODINGOPTION_OFF;
+
       break;
+#endif
 
     case PROP_TILE_ROW:
       thiz->num_tile_rows = g_value_get_uint (value);
@@ -401,6 +509,11 @@ gst_msdkh265enc_set_property (GObject * object, guint prop_id,
 
     case PROP_MAX_SLICE_SIZE:
       thiz->max_slice_size = g_value_get_uint (value);
+      break;
+
+    case PROP_TUNE_MODE:
+      thiz->tune_mode = g_value_get_enum (value);
+      thiz->prop_flag |= GST_MSDK_FLAG_TUNE_MODE;
       break;
 
     default:
@@ -421,9 +534,11 @@ gst_msdkh265enc_get_property (GObject * object, guint prop_id, GValue * value,
 
   GST_OBJECT_LOCK (thiz);
   switch (prop_id) {
+#ifndef GST_REMOVE_DEPRECATED
     case PROP_LOW_POWER:
       g_value_set_boolean (value, thiz->lowpower);
       break;
+#endif
 
     case PROP_TILE_ROW:
       g_value_set_uint (value, thiz->num_tile_rows);
@@ -435,6 +550,10 @@ gst_msdkh265enc_get_property (GObject * object, guint prop_id, GValue * value,
 
     case PROP_MAX_SLICE_SIZE:
       g_value_set_uint (value, thiz->max_slice_size);
+      break;
+
+    case PROP_TUNE_MODE:
+      g_value_set_enum (value, thiz->tune_mode);
       break;
 
     default:
@@ -483,7 +602,8 @@ gst_msdkh265enc_need_conversion (GstMsdkEnc * encoder, GstVideoInfo * info,
 
     case GST_VIDEO_FORMAT_YUY2:
 #if (MFX_VERSION >= 1027)
-      if (encoder->codename >= MFX_PLATFORM_ICELAKE && !h265enc->lowpower)
+      if (encoder->codename >= MFX_PLATFORM_ICELAKE &&
+          h265enc->tune_mode == MFX_CODINGOPTION_OFF)
         return FALSE;
 #endif
     default:
@@ -523,9 +643,13 @@ gst_msdkh265enc_class_init (GstMsdkH265EncClass * klass)
 
   gst_msdkenc_install_common_properties (encoder_class);
 
+#ifndef GST_REMOVE_DEPRECATED
   g_object_class_install_property (gobject_class, PROP_LOW_POWER,
-      g_param_spec_boolean ("low-power", "Low power", "Enable low power mode",
-          PROP_LOWPOWER_DEFAULT, G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
+      g_param_spec_boolean ("low-power", "Low power",
+          "Enable low power mode (DEPRECATED, use tune instead)",
+          PROP_LOWPOWER_DEFAULT,
+          G_PARAM_DEPRECATED | G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
+#endif
 
   g_object_class_install_property (gobject_class, PROP_TILE_ROW,
       g_param_spec_uint ("num-tile-rows", "number of rows for tiled encoding",
@@ -543,6 +667,12 @@ gst_msdkh265enc_class_init (GstMsdkH265EncClass * klass)
       g_param_spec_uint ("max-slice-size", "Max Slice Size",
           "Maximum slice size in bytes (if enabled MSDK will ignore the control over num-slices)",
           0, G_MAXUINT32, PROP_MAX_SLICE_SIZE_DEFAULT,
+          G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
+
+  g_object_class_install_property (gobject_class, PROP_TUNE_MODE,
+      g_param_spec_enum ("tune", "Encoder tuning",
+          "Encoder tuning option",
+          gst_msdkenc_tune_mode_get_type (), PROP_TUNE_MODE_DEFAULT,
           G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
 
   gst_element_class_set_static_metadata (element_class,
@@ -563,5 +693,6 @@ gst_msdkh265enc_init (GstMsdkH265Enc * thiz)
   thiz->num_tile_rows = PROP_TILE_ROW_DEFAULT;
   thiz->num_tile_cols = PROP_TILE_COL_DEFAULT;
   thiz->max_slice_size = PROP_MAX_SLICE_SIZE_DEFAULT;
+  thiz->tune_mode = PROP_TUNE_MODE_DEFAULT;
   msdk_enc->num_extra_frames = 1;
 }

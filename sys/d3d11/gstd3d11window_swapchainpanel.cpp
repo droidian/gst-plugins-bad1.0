@@ -49,7 +49,7 @@ GST_DEBUG_CATEGORY_EXTERN (gst_d3d11_window_debug);
 }
 
 /* timeout to wait busy UI thread */
-#define DEFAULT_ASYNC_TIMEOUT (5 * 1000)
+#define DEFAULT_ASYNC_TIMEOUT (10 * 1000)
 
 typedef struct _SwapChainPanelWinRTStorage
 {
@@ -384,7 +384,7 @@ gst_d3d11_window_swap_chain_panel_create_swap_chain (GstD3D11Window * window,
     return FALSE;
 
   hr = run_async (storage->dispatcher,
-      storage->cancellable, DEFAULT_ASYNC_TIMEOUT,
+      storage->cancellable, INFINITE,
       [panel_native, new_swapchain] {
         return panel_native->SetSwapChain(new_swapchain.Get());
       });
@@ -476,7 +476,7 @@ gst_d3d11_window_swap_chain_panel_on_resize (GstD3D11Window * window,
       GST_D3D11_WINDOW_SWAP_CHAIN_PANEL (window);
   SwapChainPanelWinRTStorage *storage = self->storage;
 
-  run_async (storage->dispatcher, storage->cancellable, DEFAULT_ASYNC_TIMEOUT,
+  run_async (storage->dispatcher, storage->cancellable, INFINITE,
       [window] {
         gst_d3d11_window_swap_chain_panel_on_resize_sync (window);
         return S_OK;

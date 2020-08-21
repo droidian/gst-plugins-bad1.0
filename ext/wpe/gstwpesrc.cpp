@@ -108,14 +108,16 @@ struct _GstWpeSrc
 {
   GstGLBaseSrc parent;
 
-  WPEThreadedView *view;
-
   /* properties */
   gchar *location;
   gboolean draw_background;
 
   GBytes *bytes;
   gboolean gl_enabled;
+
+  gint64 n_frames;              /* total frames sent */
+
+  WPEView *view;
 };
 
 static void gst_wpe_src_uri_handler_init (gpointer iface, gpointer data);
@@ -153,9 +155,12 @@ static GstStaticPadTemplate src_factory = GST_STATIC_PAD_TEMPLATE ("src",
 static GstFlowReturn
 gst_wpe_src_create (GstBaseSrc * bsrc, guint64 offset, guint length, GstBuffer ** buf)
 {
+  GstGLBaseSrc *gl_src = GST_GL_BASE_SRC (bsrc);
   GstWpeSrc *src = GST_WPE_SRC (bsrc);
   GstFlowReturn ret = GST_FLOW_ERROR;
   GstBuffer *locked_buffer;
+  GstClockTime next_time;
+  gint64 ts_offset = 0;
 
   GST_OBJECT_LOCK (src);
   if (src->gl_enabled) {
@@ -166,9 +171,30 @@ gst_wpe_src_create (GstBaseSrc * bsrc, guint64 offset, guint length, GstBuffer *
   locked_buffer = src->view->buffer ();
 
   if (locked_buffer != NULL) {
-    *buf = gst_buffer_ref (locked_buffer);
+    *buf = gst_buffer_copy_deep (locked_buffer);
     ret = GST_FLOW_OK;
   }
+
+  g_object_get(gl_src, "timestamp-offset", &ts_offset, NULL);
+
+  /* The following code mimics the behaviour of GLBaseSrc::fill */
+  GST_BUFFER_TIMESTAMP (*buf) = ts_offset + gl_src->running_time;
+  GST_BUFFER_OFFSET (*buf) = src->n_frames;
+  src->n_frames++;
+  GST_BUFFER_OFFSET_END (*buf) = src->n_frames;
+  if (gl_src->out_info.fps_n) {
+    next_time = gst_util_uint64_scale_int (src->n_frames * GST_SECOND,
+        gl_src->out_info.fps_d, gl_src->out_info.fps_n);
+    GST_BUFFER_DURATION (*buf) = next_time - gl_src->running_time;
+  } else {
+    next_time = ts_offset;
+    GST_BUFFER_DURATION (*buf) = GST_CLOCK_TIME_NONE;
+  }
+
+  GST_LOG_OBJECT (src, "Created buffer from SHM %" GST_PTR_FORMAT, *buf);
+
+  gl_src->running_time = next_time;
+
   GST_OBJECT_UNLOCK (src);
   return ret;
 }
@@ -211,7 +237,6 @@ static gboolean
 gst_wpe_src_gl_start (GstGLBaseSrc * base_src)
 {
   GstWpeSrc *src = GST_WPE_SRC (base_src);
-  gboolean result = TRUE;
   GstCapsFeatures *caps_features;
   GstGLContext *context = NULL;
   GstGLDisplay *display = NULL;
@@ -230,10 +255,17 @@ gst_wpe_src_gl_start (GstGLBaseSrc * base_src)
 
   GST_DEBUG_OBJECT (src, "Will fill GLMemories: %d\n", src->gl_enabled);
 
-  src->view = new WPEThreadedView;
-  result = src->view->initialize (src, context, display,
-    GST_VIDEO_INFO_WIDTH (&base_src->out_info),
-    GST_VIDEO_INFO_HEIGHT (&base_src->out_info));
+  auto & thread = WPEContextThread::singleton ();
+  src->view = thread.createWPEView (src, context, display,
+      GST_VIDEO_INFO_WIDTH (&base_src->out_info),
+      GST_VIDEO_INFO_HEIGHT (&base_src->out_info));
+
+  if (!src->view) {
+    GST_OBJECT_UNLOCK (src);
+    GST_ELEMENT_ERROR (src, RESOURCE, FAILED,
+        ("WPEBackend-FDO EGL display initialisation failed"), (NULL));
+    return FALSE;
+  }
 
   if (src->bytes != NULL) {
     src->view->loadData (src->bytes);
@@ -241,12 +273,9 @@ gst_wpe_src_gl_start (GstGLBaseSrc * base_src)
     src->bytes = NULL;
   }
 
+  src->n_frames = 0;
   GST_OBJECT_UNLOCK (src);
-  if (!result) {
-    GST_ELEMENT_ERROR (src, RESOURCE, FAILED,
-        ("WPEBackend-FDO EGL display initialisation failed"), (NULL));
-  }
-  return result;
+  return TRUE;
 }
 
 static void
@@ -413,8 +442,7 @@ gst_wpe_src_event (GstPad * pad, GstObject * parent, GstEvent * event)
           wpe_event.pressed =
               gst_navigation_event_get_type (event) ==
               GST_NAVIGATION_EVENT_KEY_PRESS;
-          wpe_view_backend_dispatch_keyboard_event (src->view->backend (),
-              &wpe_event);
+          src->view->dispatchKeyboardEvent (wpe_event);
           ret = TRUE;
         }
         break;
@@ -442,8 +470,7 @@ gst_wpe_src_event (GstPad * pad, GstObject * parent, GstEvent * event)
           wpe_event.state =
               gst_navigation_event_get_type (event) ==
               GST_NAVIGATION_EVENT_MOUSE_BUTTON_PRESS;
-          wpe_view_backend_dispatch_pointer_event (src->view->backend (),
-              &wpe_event);
+          src->view->dispatchPointerEvent (wpe_event);
           ret = TRUE;
         }
         break;
@@ -454,8 +481,7 @@ gst_wpe_src_event (GstPad * pad, GstObject * parent, GstEvent * event)
           wpe_event.type = wpe_input_pointer_event_type_motion;
           wpe_event.x = (int) x;
           wpe_event.y = (int) y;
-          wpe_view_backend_dispatch_pointer_event (src->view->backend (),
-              &wpe_event);
+          src->view->dispatchPointerEvent (wpe_event);
           ret = TRUE;
         }
         break;
@@ -472,12 +498,12 @@ gst_wpe_src_event (GstPad * pad, GstObject * parent, GstEvent * event)
           wpe_event.base.time =
               GST_TIME_AS_MSECONDS (GST_EVENT_TIMESTAMP (event));
           wpe_event.base.type =
-              static_cast<wpe_input_axis_event_type>(wpe_input_axis_event_type_mask_2d |
+              static_cast < wpe_input_axis_event_type >
+              (wpe_input_axis_event_type_mask_2d |
               wpe_input_axis_event_type_motion_smooth);
           wpe_event.base.x = (int) x;
           wpe_event.base.y = (int) y;
-          wpe_view_backend_dispatch_axis_event (src->view->backend (),
-              &wpe_event.base);
+          src->view->dispatchAxisEvent (wpe_event.base);
 #else
           struct wpe_input_axis_event wpe_event;
           if (delta_x) {
@@ -491,8 +517,7 @@ gst_wpe_src_event (GstPad * pad, GstObject * parent, GstEvent * event)
           wpe_event.type = wpe_input_axis_event_type_motion;
           wpe_event.x = (int) x;
           wpe_event.y = (int) y;
-          wpe_view_backend_dispatch_axis_event (src->view->backend (),
-              &wpe_event);
+          src->view->dispatchAxisEvent (wpe_event);
 #endif
           ret = TRUE;
         }
