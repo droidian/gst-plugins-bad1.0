@@ -1,5 +1,5 @@
 project('gst-plugins-bad', 'c', 'cpp',
-  version : '1.17.2',
+  version : '1.17.90',
   meson_version : '>= 0.49',
   default_options : [ 'warning_level=1',
                       'buildtype=debugoptimized' ])
@@ -33,8 +33,15 @@ plugins = []
 
 cc = meson.get_compiler('c')
 cxx = meson.get_compiler('cpp')
+host_system = host_machine.system()
 
-have_objc = add_languages('objc', native: false, required: false)
+if host_system in ['ios', 'darwin']
+  have_objc = add_languages('objc', native: false)
+  have_objcpp = add_languages('objcpp', native: false)
+else
+  have_objc = false
+  have_objcpp = false
+endif
 
 cdata = configuration_data()
 
@@ -243,7 +250,6 @@ cdata.set_quoted('GST_PACKAGE_NAME', gst_package_name)
 cdata.set_quoted('GST_PACKAGE_ORIGIN', get_option('package-origin'))
 
 # FIXME: This should be exposed as a configuration option
-host_system = host_machine.system()
 if host_system == 'linux'
   cdata.set_quoted('DEFAULT_VIDEOSRC', 'v4l2src')
 elif ['darwin', 'ios'].contains(host_system)
@@ -294,6 +300,11 @@ gstcheck_dep = dependency('gstreamer-check-1.0', version : gst_req,
 # GStreamer OpenGL
 gstgl_dep = dependency('gstreamer-gl-1.0', version : gst_req,
     fallback : ['gst-plugins-base', 'gstgl_dep'], required: get_option('gl'))
+gstglproto_dep = dependency('gstreamer-gl-prototypes-1.0', version : gst_req,
+    fallback : ['gst-plugins-base', 'gstglproto_dep'], required: get_option('gl'))
+gstglx11_dep = dependency('', required : false)
+gstglwayland_dep = dependency('', required : false)
+gstglegl_dep = dependency('', required : false)
 
 if gstgl_dep.found()
   if gstgl_dep.type_name() == 'pkgconfig'
@@ -321,11 +332,24 @@ if gstgl_dep.found()
 
   foreach api : ['gl', 'gles2']
     set_variable('gst_gl_have_api_@0@'.format(api), gst_gl_apis.contains(api))
-    # temporary backwards compat for older meson-generated .pc file with 'opengl' instead of 'gl'
-    if gst_gl_apis.contains('opengl')
-      gst_gl_have_api_gl = true
-    endif
   endforeach
+
+  # Behind specific checks because meson fails at optional dependencies with a
+  # fallback to the same subproject.  On the first failure, meson will never
+  # check the system again even if the fallback never existed.
+  # Last checked with meson 0.54.3
+  if gst_gl_have_window_x11
+    gstglx11_dep = dependency('gstreamer-gl-x11-1.0', version : gst_req,
+        fallback : ['gst-plugins-base', 'gstglx11_dep'], required: true)
+  endif
+  if gst_gl_have_window_wayland
+    gstglwayland_dep = dependency('gstreamer-gl-wayland-1.0', version : gst_req,
+        fallback : ['gst-plugins-base', 'gstglwayland_dep'], required: true)
+  endif
+  if gst_gl_have_platform_egl
+    gstglegl_dep = dependency('gstreamer-gl-egl-1.0', version : gst_req,
+        fallback : ['gst-plugins-base', 'gstglegl_dep'], required: true)
+  endif
 endif
 
 libm = cc.find_library('m', required : false)
@@ -369,10 +393,10 @@ if ['darwin', 'ios'].contains(host_system)
 #    cdata.set('HAVE_VIDEOTOOLBOX_10_9_6', 1)
 #  endif
 endif
-have_objcpp = add_languages('objcpp', native: false, required: false)
 
 have_orcc = false
 orcc_args = []
+orc_targets = []
 # Used by various libraries/elements that use Orc code
 orc_dep = dependency('orc-0.4', version : orc_req, required : get_option('orc'),
     fallback : ['orc', 'orc_dep'])
@@ -446,10 +470,47 @@ subdir('data')
 subdir('tools')
 subdir('pkgconfig')
 
+if have_orcc
+  update_orc_dist_files = find_program('scripts/update-orc-dist-files.py')
+
+  orc_update_targets = []
+  foreach t : orc_targets
+    orc_name = t.get('name')
+    orc_file = t.get('orc-source')
+    header = t.get('header')
+    source = t.get('source')
+    # alias_target() only works with build targets, so can't use run_target() here
+    orc_update_targets += [
+      custom_target('update-orc-@0@'.format(orc_name),
+        input: [header, source],
+        command: [update_orc_dist_files, orc_file, header, source],
+        output: ['@0@-dist.c'.format(orc_name)]) # not entirely true
+    ]
+  endforeach
+
+  if meson.version().version_compare('>= 0.52') and orc_update_targets.length() > 0
+    update_orc_dist_target = alias_target('update-orc-dist', orc_update_targets)
+  endif
+endif
+
 # xgettext is optional (on Windows for instance)
 if find_program('xgettext', required : get_option('nls')).found()
   cdata.set('ENABLE_NLS', 1)
   subdir('po')
+endif
+
+# Set release date
+if gst_version_nano == 0
+  extract_release_date = find_program('scripts/extract-release-date-from-doap-file.py')
+  run_result = run_command(extract_release_date, gst_version, files('gst-plugins-bad.doap'))
+  if run_result.returncode() == 0
+    release_date = run_result.stdout().strip()
+    cdata.set_quoted('GST_PACKAGE_RELEASE_DATETIME', release_date)
+    message('Package release date: ' + release_date)
+  else
+    # Error out if our release can't be found in the .doap file
+    error(run_result.stderr())
+  endif
 endif
 
 configure_file(output : 'config.h', configuration : cdata)
@@ -457,3 +518,18 @@ configure_file(output : 'config.h', configuration : cdata)
 run_command(python3, '-c', 'import shutil; shutil.copy("hooks/pre-commit.hook", ".git/hooks/pre-commit")')
 
 subdir('docs')
+
+if meson.version().version_compare('>= 0.54')
+  plugin_names = []
+  foreach plugin: plugins
+    # FIXME: Use str.subtring() when we can depend on Meson 0.56
+    split = plugin.name().split('gst')
+    if split.length() == 2
+      plugin_names += [split[1]]
+    else
+      warning('Need substring API in meson >= 0.56 to properly parse plugin name: ' + plugin.name())
+      plugin_names += [plugin.name()]
+    endif
+  endforeach
+  summary({'Plugins':plugin_names}, list_sep: ', ')
+endif

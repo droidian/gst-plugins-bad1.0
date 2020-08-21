@@ -389,6 +389,7 @@ gst_base_ts_mux_create_stream (GstBaseTsMux * mux, GstBaseTsMuxPad * ts_pad)
   guint32 max_rate = 0;
   guint8 color_spec = 0;
   j2k_private_data *private_data = NULL;
+  const gchar *stream_format = NULL;
 
   pad = GST_PAD (ts_pad);
   caps = gst_pad_get_current_caps (pad);
@@ -404,6 +405,8 @@ gst_base_ts_mux_create_stream (GstBaseTsMux * mux, GstBaseTsMuxPad * ts_pad)
   value = gst_structure_get_value (s, "codec_data");
   if (value != NULL)
     codec_data = gst_value_get_buffer (value);
+
+  stream_format = gst_structure_get_string (s, "stream-format");
 
   if (strcmp (mt, "video/x-dirac") == 0) {
     st = TSMUX_ST_VIDEO_DIRAC;
@@ -426,23 +429,50 @@ gst_base_ts_mux_create_stream (GstBaseTsMux * mux, GstBaseTsMuxPad * ts_pad)
     }
 
     switch (mpegversion) {
-      case 1:
-        st = TSMUX_ST_AUDIO_MPEG1;
+      case 1:{
+        int mpegaudioversion = 1;       /* Assume mpegaudioversion=1 for backwards compatibility */
+        (void) gst_structure_get_int (s, "mpegaudioversion", &mpegaudioversion);
+
+        if (mpegaudioversion == 1)
+          st = TSMUX_ST_AUDIO_MPEG1;
+        else
+          st = TSMUX_ST_AUDIO_MPEG2;
         break;
-      case 2:
-        st = TSMUX_ST_AUDIO_MPEG2;
+      }
+      case 2:{
+        /* mpegversion=2 in GStreamer refers to MPEG-2 Part 7 audio,  */
+
+        st = TSMUX_ST_AUDIO_AAC;
+
+        /* Check the stream format. If raw, make dummy internal codec data from the caps */
+        if (g_strcmp0 (stream_format, "raw") == 0) {
+          ts_pad->codec_data =
+              gst_base_ts_mux_aac_mpeg2_make_codec_data (mux, caps);
+          ts_pad->prepare_func = gst_base_ts_mux_prepare_aac_mpeg2;
+          if (ts_pad->codec_data == NULL) {
+            GST_ERROR_OBJECT (mux, "Invalid or incomplete caps for MPEG-2 AAC");
+            goto not_negotiated;
+          }
+        }
         break;
+      }
       case 4:
       {
         st = TSMUX_ST_AUDIO_AAC;
-        if (codec_data) {       /* TODO - Check stream format - codec data should only come with RAW stream */
-          GST_DEBUG_OBJECT (pad,
-              "we have additional codec data (%" G_GSIZE_FORMAT " bytes)",
-              gst_buffer_get_size (codec_data));
-          ts_pad->codec_data = gst_buffer_ref (codec_data);
-          ts_pad->prepare_func = gst_base_ts_mux_prepare_aac;
-        } else {
-          ts_pad->codec_data = NULL;
+
+        /* Check the stream format. We need codec_data with RAW streams and mpegversion=4 */
+        if (g_strcmp0 (stream_format, "raw") == 0) {
+          if (codec_data) {
+            GST_DEBUG_OBJECT (pad,
+                "we have additional codec data (%" G_GSIZE_FORMAT " bytes)",
+                gst_buffer_get_size (codec_data));
+            ts_pad->codec_data = gst_buffer_ref (codec_data);
+            ts_pad->prepare_func = gst_base_ts_mux_prepare_aac_mpeg4;
+          } else {
+            ts_pad->codec_data = NULL;
+            GST_ERROR_OBJECT (mux, "Need codec_data for raw MPEG-4 AAC");
+            goto not_negotiated;
+          }
         }
         break;
       }
@@ -844,29 +874,6 @@ new_packet_common_init (GstBaseTsMux * mux, GstBuffer * buf, guint8 * data,
 }
 
 static GstFlowReturn
-finish_buffer_list (GstBaseTsMux * mux, GstBufferList * list)
-{
-  guint i;
-  guint l = gst_buffer_list_length (list);
-  GstFlowReturn ret = GST_FLOW_OK;
-
-  for (i = 0; i < l; i++) {
-    GstBuffer *buf = gst_buffer_list_get (list, i);
-
-    ret =
-        gst_aggregator_finish_buffer (GST_AGGREGATOR (mux),
-        gst_buffer_ref (buf));
-
-    if (ret != GST_FLOW_OK)
-      break;
-  }
-
-  gst_buffer_list_unref (list);
-
-  return ret;
-}
-
-static GstFlowReturn
 gst_base_ts_mux_push_packets (GstBaseTsMux * mux, gboolean force)
 {
   GstBufferList *buffer_list;
@@ -887,7 +894,8 @@ gst_base_ts_mux_push_packets (GstBaseTsMux * mux, gboolean force)
   /* no alignment, just push all available data */
   if (align == 0) {
     buffer_list = gst_adapter_take_buffer_list (mux->out_adapter, av);
-    return finish_buffer_list (mux, buffer_list);
+    return gst_aggregator_finish_buffer_list (GST_AGGREGATOR (mux),
+        buffer_list);
   }
 
   align *= packet_size;
@@ -963,7 +971,7 @@ gst_base_ts_mux_push_packets (GstBaseTsMux * mux, gboolean force)
     gst_buffer_list_add (buffer_list, buf);
   }
 
-  return finish_buffer_list (mux, buffer_list);
+  return gst_aggregator_finish_buffer_list (GST_AGGREGATOR (mux), buffer_list);
 }
 
 static GstFlowReturn
@@ -1292,13 +1300,15 @@ gst_base_ts_mux_release_pad (GstElement * element, GstPad * pad)
     GstBaseTsMuxPad *ts_pad = GST_BASE_TS_MUX_PAD (pad);
     gint pid = ts_pad->pid;
 
-    if (ts_pad->prog->pcr_stream == ts_pad->stream) {
-      tsmux_stream_pcr_unref (ts_pad->prog->pcr_stream);
-      ts_pad->prog->pcr_stream = NULL;
+    if (ts_pad->prog) {
+      if (ts_pad->prog->pcr_stream == ts_pad->stream) {
+        tsmux_program_set_pcr_stream (ts_pad->prog, NULL);
+      }
+      if (tsmux_remove_stream (mux->tsmux, pid, ts_pad->prog)) {
+        g_hash_table_remove (mux->programs, GINT_TO_POINTER (ts_pad->prog_id));
+      }
     }
-    if (tsmux_remove_stream (mux->tsmux, pid, ts_pad->prog)) {
-      g_hash_table_remove (mux->programs, GINT_TO_POINTER (ts_pad->prog_id));
-    }
+
     tsmux_resend_pat (mux->tsmux);
     tsmux_resend_si (mux->tsmux);
 

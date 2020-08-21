@@ -125,11 +125,62 @@ static struct srt_constant_params srt_params[] = {
 
 static gint srt_init_refcount = 0;
 
+static GSocketAddress *
+gst_srt_object_resolve (GstSRTObject * srtobject, const gchar * address,
+    guint port, GCancellable * cancellable, GError ** err_out)
+{
+  GError *err = NULL;
+  GSocketAddress *saddr;
+  GResolver *resolver;
+
+  saddr = g_inet_socket_address_new_from_string (address, port);
+  if (!saddr) {
+    GList *results;
+
+    GST_DEBUG_OBJECT (srtobject->element, "resolving IP address for host %s",
+        address);
+    resolver = g_resolver_get_default ();
+    results = g_resolver_lookup_by_name (resolver, address, cancellable, &err);
+    if (!results)
+      goto name_resolve;
+
+    saddr = g_inet_socket_address_new (G_INET_ADDRESS (results->data), port);
+
+    g_resolver_free_addresses (results);
+    g_object_unref (resolver);
+  }
+#ifndef GST_DISABLE_GST_DEBUG
+  {
+    gchar *ip =
+        g_inet_address_to_string (g_inet_socket_address_get_address
+        (G_INET_SOCKET_ADDRESS (saddr)));
+
+    GST_DEBUG_OBJECT (srtobject->element, "IP address for host %s is %s",
+        address, ip);
+    g_free (ip);
+  }
+#endif
+
+  return saddr;
+
+name_resolve:
+  {
+    GST_WARNING_OBJECT (srtobject->element, "Failed to resolve %s: %s", address,
+        err->message);
+    g_set_error (err_out, GST_RESOURCE_ERROR, GST_RESOURCE_ERROR_OPEN_READ,
+        "Failed to resolve host '%s': %s", address, err->message);
+    g_clear_error (&err);
+    g_object_unref (resolver);
+    return NULL;
+  }
+}
+
 static gboolean
 gst_srt_object_set_common_params (SRTSOCKET sock, GstSRTObject * srtobject,
     GError ** error)
 {
   struct srt_constant_params *params = srt_params;
+  const gchar *passphrase;
 
   GST_OBJECT_LOCK (srtobject->element);
 
@@ -142,11 +193,12 @@ gst_srt_object_set_common_params (SRTSOCKET sock, GstSRTObject * srtobject,
     }
   }
 
-  if (srtobject->passphrase != NULL && srtobject->passphrase[0] != '\0') {
+  passphrase = gst_structure_get_string (srtobject->parameters, "passphrase");
+  if (passphrase != NULL && passphrase[0] != '\0') {
     gint pbkeylen;
 
-    if (srt_setsockopt (sock, 0, SRTO_PASSPHRASE, srtobject->passphrase,
-            strlen (srtobject->passphrase))) {
+    if (srt_setsockopt (sock, 0, SRTO_PASSPHRASE, passphrase,
+            strlen (passphrase))) {
       g_set_error (error, GST_LIBRARY_ERROR, GST_LIBRARY_ERROR_SETTINGS,
           "failed to set passphrase (reason: %s)", srt_getlasterror_str ());
 
@@ -213,11 +265,7 @@ gst_srt_object_new (GstElement * element)
 
   srtobject = g_new0 (GstSRTObject, 1);
   srtobject->element = element;
-  srtobject->parameters = gst_structure_new ("application/x-srt-params",
-      "poll-timeout", G_TYPE_INT, GST_SRT_DEFAULT_POLL_TIMEOUT,
-      "latency", G_TYPE_INT, GST_SRT_DEFAULT_LATENCY,
-      "mode", GST_TYPE_SRT_CONNECTION_MODE, GST_SRT_DEFAULT_MODE, NULL);
-
+  srtobject->parameters = gst_structure_new_empty ("application/x-srt-params");
   srtobject->sock = SRT_INVALID_SOCK;
   srtobject->poll_id = srt_epoll_create ();
   srtobject->listener_sock = SRT_INVALID_SOCK;
@@ -243,8 +291,6 @@ gst_srt_object_destroy (GstSRTObject * srtobject)
 
   GST_DEBUG_OBJECT (srtobject->element, "Destroying srtobject");
   gst_structure_free (srtobject->parameters);
-
-  g_free (srtobject->passphrase);
 
   if (g_atomic_int_dec_and_test (&srt_init_refcount)) {
     srt_cleanup ();
@@ -282,8 +328,7 @@ gst_srt_object_set_property_helper (GstSRTObject * srtobject,
       gst_structure_set_value (srtobject->parameters, "localport", value);
       break;
     case PROP_PASSPHRASE:
-      g_free (srtobject->passphrase);
-      srtobject->passphrase = g_value_dup_string (value);
+      gst_structure_set_value (srtobject->parameters, "passphrase", value);
       break;
     case PROP_PBKEYLEN:
       gst_structure_set_value (srtobject->parameters, "pbkeylen", value);
@@ -540,10 +585,7 @@ gst_srt_object_set_enum_value (GstStructure * s, GType enum_type,
   enum_value = g_enum_get_value_by_nick (enum_class, value);
 
   if (enum_value) {
-    GValue v = G_VALUE_INIT;
-    g_value_init (&v, enum_type);
-    g_value_set_enum (&v, enum_value->value);
-    gst_structure_set_value (s, key, &v);
+    gst_structure_set (s, key, enum_type, enum_value->value, NULL);
   }
 
   g_type_class_unref (enum_class);
@@ -553,22 +595,23 @@ static void
 gst_srt_object_set_string_value (GstStructure * s, const gchar * key,
     const gchar * value)
 {
-  GValue v = G_VALUE_INIT;
-  g_value_init (&v, G_TYPE_STRING);
-  g_value_set_static_string (&v, value);
-  gst_structure_set_value (s, key, &v);
-  g_value_unset (&v);
+  gst_structure_set (s, key, G_TYPE_STRING, value, NULL);
 }
 
 static void
 gst_srt_object_set_uint_value (GstStructure * s, const gchar * key,
     const gchar * value)
 {
-  GValue v = G_VALUE_INIT;
-  g_value_init (&v, G_TYPE_UINT);
-  g_value_set_uint (&v, (guint) strtoul (value, NULL, 10));
-  gst_structure_set_value (s, key, &v);
-  g_value_unset (&v);
+  gst_structure_set (s, key, G_TYPE_UINT,
+      (guint) g_ascii_strtoll (value, NULL, 10), NULL);
+}
+
+static void
+gst_srt_object_set_int_value (GstStructure * s, const gchar * key,
+    const gchar * value)
+{
+  gst_structure_set (s, key, G_TYPE_INT,
+      (gint) g_ascii_strtoll (value, NULL, 10), NULL);
 }
 
 static void
@@ -629,6 +672,11 @@ gst_srt_object_set_uri (GstSRTObject * srtobject, const gchar * uri,
   g_clear_pointer (&srtobject->uri, gst_uri_unref);
   srtobject->uri = gst_uri_from_string (uri);
 
+  g_clear_pointer (&srtobject->parameters, gst_structure_free);
+  srtobject->parameters = gst_structure_new ("application/x-srt-params",
+      "poll-timeout", G_TYPE_INT, GST_SRT_DEFAULT_POLL_TIMEOUT,
+      "latency", G_TYPE_INT, GST_SRT_DEFAULT_LATENCY, NULL);
+
   query_table = gst_uri_get_query_table (srtobject->uri);
 
   GST_DEBUG_OBJECT (srtobject->element,
@@ -655,13 +703,16 @@ gst_srt_object_set_uri (GstSRTObject * srtobject, const gchar * uri,
       } else if (!g_strcmp0 ("localport", key)) {
         gst_srt_object_set_uint_value (srtobject->parameters, key, value);
       } else if (!g_strcmp0 ("passphrase", key)) {
-        g_free (srtobject->passphrase);
-        srtobject->passphrase = g_strdup (value);
+        gst_srt_object_set_string_value (srtobject->parameters, key, value);
       } else if (!g_strcmp0 ("pbkeylen", key)) {
         gst_srt_object_set_enum_value (srtobject->parameters,
             GST_TYPE_SRT_KEY_LENGTH, key, value);
       } else if (!g_strcmp0 ("streamid", key)) {
         gst_srt_object_set_string_value (srtobject->parameters, key, value);
+      } else if (!g_strcmp0 ("latency", key)) {
+        gst_srt_object_set_int_value (srtobject->parameters, key, value);
+      } else if (!g_strcmp0 ("poll-timeout", key)) {
+        gst_srt_object_set_int_value (srtobject->parameters, key, value);
       }
     }
 
@@ -767,16 +818,18 @@ thread_func (gpointer data)
 
 static gboolean
 gst_srt_object_wait_connect (GstSRTObject * srtobject,
-    GCancellable * cancellable, gpointer sa, size_t sa_len, GError ** error)
+    GCancellable * cancellable, GSocketFamily sa_family, gpointer sa,
+    size_t sa_len, GError ** error)
 {
   SRTSOCKET sock = SRT_INVALID_SOCK;
   const gchar *local_address = NULL;
   guint local_port = 0;
   gint sock_flags = SRT_EPOLL_ERR | SRT_EPOLL_IN;
 
+  GSocketFamily bind_sa_family;
   gpointer bind_sa;
   gsize bind_sa_len;
-  GSocketAddress *bind_addr;
+  GSocketAddress *bind_addr = NULL;
 
   GST_OBJECT_LOCK (srtobject->element);
 
@@ -789,9 +842,16 @@ gst_srt_object_wait_connect (GstSRTObject * srtobject,
 
   GST_OBJECT_UNLOCK (srtobject->element);
 
-  bind_addr = g_inet_socket_address_new_from_string (local_address, local_port);
+  bind_addr =
+      gst_srt_object_resolve (srtobject, local_address, local_port, cancellable,
+      error);
+  if (!bind_addr) {
+    goto failed;
+  }
+
   bind_sa_len = g_socket_address_get_native_size (bind_addr);
   bind_sa = g_alloca (bind_sa_len);
+  bind_sa_family = g_socket_address_get_family (bind_addr);
 
   if (!g_socket_address_to_native (bind_addr, bind_sa, bind_sa_len, error)) {
     goto failed;
@@ -799,7 +859,7 @@ gst_srt_object_wait_connect (GstSRTObject * srtobject,
 
   g_clear_object (&bind_addr);
 
-  sock = srt_socket (AF_INET, SOCK_DGRAM, 0);
+  sock = srt_socket (bind_sa_family, SOCK_DGRAM, 0);
   if (sock == SRT_INVALID_SOCK) {
     g_set_error (error, GST_LIBRARY_ERROR, GST_LIBRARY_ERROR_INIT, "%s",
         srt_getlasterror_str ());
@@ -865,9 +925,9 @@ failed:
 }
 
 static gboolean
-gst_srt_object_connect (GstSRTObject * srtobject,
-    GstSRTConnectionMode connection_mode, gpointer sa, size_t sa_len,
-    GError ** error)
+gst_srt_object_connect (GstSRTObject * srtobject, GCancellable * cancellable,
+    GstSRTConnectionMode connection_mode, GSocketFamily sa_family, gpointer sa,
+    size_t sa_len, GError ** error)
 {
   SRTSOCKET sock;
   gint option_val = -1;
@@ -875,7 +935,7 @@ gst_srt_object_connect (GstSRTObject * srtobject,
   guint local_port = 0;
   const gchar *local_address = NULL;
 
-  sock = srt_socket (AF_INET, SOCK_DGRAM, 0);
+  sock = srt_socket (sa_family, SOCK_DGRAM, 0);
   if (sock == SRT_INVALID_SOCK) {
     g_set_error (error, GST_LIBRARY_ERROR, GST_LIBRARY_ERROR_INIT, "%s",
         srt_getlasterror_str ());
@@ -926,8 +986,12 @@ gst_srt_object_connect (GstSRTObject * srtobject,
     gsize bind_sa_len;
 
     GSocketAddress *bind_addr =
-        g_inet_socket_address_new_from_string (local_address,
-        local_port);
+        gst_srt_object_resolve (srtobject, local_address,
+        local_port, cancellable, error);
+
+    if (!bind_addr) {
+      goto failed;
+    }
 
     bind_sa_len = g_socket_address_get_native_size (bind_addr);
     bind_sa = g_alloca (bind_sa_len);
@@ -985,16 +1049,18 @@ failed:
 static gboolean
 gst_srt_object_open_connection (GstSRTObject * srtobject,
     GCancellable * cancellable, GstSRTConnectionMode connection_mode,
-    gpointer sa, size_t sa_len, GError ** error)
+    GSocketFamily sa_family, gpointer sa, size_t sa_len, GError ** error)
 {
   gboolean ret = FALSE;
 
   if (connection_mode == GST_SRT_CONNECTION_MODE_LISTENER) {
     ret =
-        gst_srt_object_wait_connect (srtobject, cancellable, sa, sa_len, error);
+        gst_srt_object_wait_connect (srtobject, cancellable, sa_family, sa,
+        sa_len, error);
   } else {
     ret =
-        gst_srt_object_connect (srtobject, connection_mode, sa, sa_len, error);
+        gst_srt_object_connect (srtobject, cancellable, connection_mode,
+        sa_family, sa, sa_len, error);
   }
 
   return ret;
@@ -1005,8 +1071,9 @@ gst_srt_object_open_internal (GstSRTObject * srtobject,
     GCancellable * cancellable, GError ** error)
 {
   GSocketAddress *socket_address = NULL;
-  GstSRTConnectionMode connection_mode = GST_SRT_CONNECTION_MODE_NONE;
+  GstSRTConnectionMode connection_mode;
 
+  GSocketFamily sa_family;
   gpointer sa;
   size_t sa_len;
   const gchar *addr_str;
@@ -1017,8 +1084,16 @@ gst_srt_object_open_internal (GstSRTObject * srtobject,
 
   srtobject->opened = FALSE;
 
+  if (!gst_structure_get_enum (srtobject->parameters,
+          "mode", GST_TYPE_SRT_CONNECTION_MODE, (gint *) & connection_mode)) {
+    GST_WARNING_OBJECT (srtobject->element,
+        "Cannot get connection mode information." " Use default mode");
+    connection_mode = GST_SRT_DEFAULT_MODE;
+  }
+
   addr_str = gst_uri_get_host (srtobject->uri);
   if (addr_str == NULL) {
+    connection_mode = GST_SRT_CONNECTION_MODE_LISTENER;
     addr_str = GST_SRT_DEFAULT_LOCALADDRESS;
     GST_DEBUG_OBJECT (srtobject->element,
         "Given uri doesn't have hostname or address. Use any (%s) and"
@@ -1031,30 +1106,15 @@ gst_srt_object_open_internal (GstSRTObject * srtobject,
       "Opening SRT socket with parameters: %" GST_PTR_FORMAT,
       srtobject->parameters);
 
-  if (!gst_structure_get_enum (srtobject->parameters,
-          "mode", GST_TYPE_SRT_CONNECTION_MODE, (gint *) & connection_mode)) {
-    GST_WARNING_OBJECT (srtobject->element,
-        "Cannot get connection mode information." " Use default mode");
-    connection_mode = GST_TYPE_SRT_CONNECTION_MODE;
-  }
-
   GST_OBJECT_UNLOCK (srtobject->element);
 
-  socket_address = g_inet_socket_address_new_from_string (addr_str, port);
-
+  socket_address =
+      gst_srt_object_resolve (srtobject, addr_str, port, cancellable, error);
   if (socket_address == NULL) {
-    g_set_error (error, GST_RESOURCE_ERROR, GST_RESOURCE_ERROR_OPEN_READ,
-        "Invalid host");
     goto out;
   }
 
-  /* FIXME: Unfortunately, SRT doesn't support IPv6 currently. */
-  if (g_socket_address_get_family (socket_address) != G_SOCKET_FAMILY_IPV4) {
-    g_set_error (error, GST_RESOURCE_ERROR, GST_RESOURCE_ERROR_OPEN_READ,
-        "SRT supports IPv4 only");
-    goto out;
-  }
-
+  sa_family = g_socket_address_get_family (socket_address);
   sa_len = g_socket_address_get_native_size (socket_address);
   sa = g_alloca (sa_len);
 
@@ -1066,7 +1126,7 @@ gst_srt_object_open_internal (GstSRTObject * srtobject,
 
   ret =
       gst_srt_object_open_connection
-      (srtobject, cancellable, connection_mode, sa, sa_len, error);
+      (srtobject, cancellable, connection_mode, sa_family, sa, sa_len, error);
 
   GST_OBJECT_LOCK (srtobject->element);
   srtobject->opened = ret;
@@ -1147,7 +1207,7 @@ gst_srt_object_close (GstSRTObject * srtobject)
 
 static gboolean
 gst_srt_object_wait_caller (GstSRTObject * srtobject,
-    GCancellable * cancellable, GError ** errorj)
+    GCancellable * cancellable, GError ** error)
 {
   gboolean ret;
 
@@ -1158,19 +1218,23 @@ gst_srt_object_wait_caller (GstSRTObject * srtobject,
 
     while (!g_cancellable_is_cancelled (cancellable)) {
       ret = (srtobject->callers != NULL);
-      if (ret)
+      if (ret) {
+        GST_DEBUG_OBJECT (srtobject->element, "Got a connection");
         break;
+      }
 
       g_cond_wait (&srtobject->sock_cond, &srtobject->sock_lock);
     }
-
-    GST_DEBUG_OBJECT (srtobject->element, "Got %s connection",
-        ret ? "a" : "no");
   } else {
     ret = TRUE;
   }
 
   g_mutex_unlock (&srtobject->sock_lock);
+
+  if (!ret) {
+    g_set_error (error, GST_RESOURCE_ERROR, GST_RESOURCE_ERROR_FAILED,
+        "Canceled waiting for a connection.");
+  }
 
   return ret;
 }

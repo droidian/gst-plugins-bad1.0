@@ -184,17 +184,9 @@ gst_rtp_src_set_property (GObject * object, guint prop_id,
       break;
     }
     case PROP_ADDRESS:{
-      GInetAddress *addr;
-
       gst_uri_set_host (self->uri, g_value_get_string (value));
       g_object_set_property (G_OBJECT (self->rtp_src), "address", value);
-
-      addr = g_inet_address_new_from_string (gst_uri_get_host (self->uri));
-      if (g_inet_address_get_is_multicast (addr)) {
-        g_object_set (self->rtcp_src, "address", gst_uri_get_host (self->uri),
-            NULL);
-      }
-      g_object_unref (addr);
+      g_object_set_property (G_OBJECT (self->rtcp_src), "address", value);
       break;
     }
     case PROP_PORT:{
@@ -301,15 +293,33 @@ gst_rtp_src_finalize (GObject * gobject)
 }
 
 static void
+gst_rtp_src_handle_message (GstBin * bin, GstMessage * message)
+{
+  switch (GST_MESSAGE_TYPE (message)) {
+    case GST_MESSAGE_STREAM_START:
+    case GST_MESSAGE_EOS:
+      /* drop stream-start & eos from our internal udp sink(s);
+         https://gitlab.freedesktop.org/gstreamer/gst-plugins-bad/-/issues/1368 */
+      gst_message_unref (message);
+      break;
+    default:
+      GST_BIN_CLASS (parent_class)->handle_message (bin, message);
+      break;
+  }
+}
+
+static void
 gst_rtp_src_class_init (GstRtpSrcClass * klass)
 {
   GObjectClass *gobject_class = G_OBJECT_CLASS (klass);
   GstElementClass *gstelement_class = GST_ELEMENT_CLASS (klass);
+  GstBinClass *gstbin_class = GST_BIN_CLASS (klass);
 
   gobject_class->set_property = gst_rtp_src_set_property;
   gobject_class->get_property = gst_rtp_src_get_property;
   gobject_class->finalize = gst_rtp_src_finalize;
   gstelement_class->change_state = gst_rtp_src_change_state;
+  gstbin_class->handle_message = gst_rtp_src_handle_message;
 
   /**
    * GstRtpSrc:uri:
@@ -555,8 +565,9 @@ gst_rtp_src_start (GstRtpSrc * self)
 {
   GstPad *pad;
   GSocket *socket;
-  GInetAddress *addr;
+  GInetAddress *iaddr;
   GstCaps *caps;
+  GError *error = NULL;
 
   /* Should not be NULL */
   g_return_val_if_fail (self->uri != NULL, FALSE);
@@ -567,13 +578,33 @@ gst_rtp_src_start (GstRtpSrc * self)
     GST_WARNING_OBJECT (self, "Could not retrieve RTCP src socket.");
   }
 
-  addr = g_inet_address_new_from_string (gst_uri_get_host (self->uri));
-  if (g_inet_address_get_is_multicast (addr)) {
+  iaddr = g_inet_address_new_from_string (gst_uri_get_host (self->uri));
+  if (!iaddr) {
+    GList *results;
+    GResolver *resolver = NULL;
+
+    resolver = g_resolver_get_default ();
+    results =
+        g_resolver_lookup_by_name (resolver, gst_uri_get_host (self->uri), NULL,
+        &error);
+
+    if (!results) {
+      g_object_unref (resolver);
+      goto dns_resolve_failed;
+    }
+
+    iaddr = G_INET_ADDRESS (g_object_ref (results->data));
+
+    g_resolver_free_addresses (results);
+    g_object_unref (resolver);
+  }
+
+  if (g_inet_address_get_is_multicast (iaddr)) {
     /* mc-ttl is not supported by dynudpsink */
     g_socket_set_multicast_ttl (socket, self->ttl_mc);
     /* In multicast, send RTCP to the multicast group */
     self->rtcp_send_addr =
-        g_inet_socket_address_new (addr, gst_uri_get_port (self->uri) + 1);
+        g_inet_socket_address_new (iaddr, gst_uri_get_port (self->uri) + 1);
 
     /* set multicast-iface on the udpsrc and udpsink elements */
     g_object_set (self->rtcp_src, "multicast-iface", self->multi_iface, NULL);
@@ -588,7 +619,7 @@ gst_rtp_src_start (GstRtpSrc * self)
         gst_rtp_src_on_recv_rtcp, self, NULL);
     gst_object_unref (pad);
   }
-  g_object_unref (addr);
+  g_object_unref (iaddr);
 
   /* no need to set address if unicast */
   caps = gst_caps_new_empty_simple ("application/x-rtcp");
@@ -608,6 +639,13 @@ gst_rtp_src_start (GstRtpSrc * self)
   gst_element_sync_state_with_parent (self->rtcp_sink);
 
   return TRUE;
+
+dns_resolve_failed:
+  GST_ELEMENT_ERROR (self, RESOURCE, NOT_FOUND,
+      ("Could not resolve hostname '%s'", gst_uri_get_host (self->uri)),
+      ("DNS resolver reported: %s", error->message));
+  g_error_free (error);
+  return FALSE;
 }
 
 static void
@@ -705,16 +743,16 @@ gst_rtp_src_init (GstRtpSrc * self)
   gst_bin_add (GST_BIN (self), self->rtpbin);
 
   /* Add rtpbin callbacks to monitor the operation of rtpbin */
-  g_signal_connect (self->rtpbin, "pad-added",
-      G_CALLBACK (gst_rtp_src_rtpbin_pad_added_cb), self);
-  g_signal_connect (self->rtpbin, "pad-removed",
-      G_CALLBACK (gst_rtp_src_rtpbin_pad_removed_cb), self);
-  g_signal_connect (self->rtpbin, "request-pt-map",
-      G_CALLBACK (gst_rtp_src_rtpbin_request_pt_map_cb), self);
-  g_signal_connect (self->rtpbin, "on-new-ssrc",
-      G_CALLBACK (gst_rtp_src_rtpbin_on_new_ssrc_cb), self);
-  g_signal_connect (self->rtpbin, "on-ssrc-collision",
-      G_CALLBACK (gst_rtp_src_rtpbin_on_ssrc_collision_cb), self);
+  g_signal_connect_object (self->rtpbin, "pad-added",
+      G_CALLBACK (gst_rtp_src_rtpbin_pad_added_cb), self, 0);
+  g_signal_connect_object (self->rtpbin, "pad-removed",
+      G_CALLBACK (gst_rtp_src_rtpbin_pad_removed_cb), self, 0);
+  g_signal_connect_object (self->rtpbin, "request-pt-map",
+      G_CALLBACK (gst_rtp_src_rtpbin_request_pt_map_cb), self, 0);
+  g_signal_connect_object (self->rtpbin, "on-new-ssrc",
+      G_CALLBACK (gst_rtp_src_rtpbin_on_new_ssrc_cb), self, 0);
+  g_signal_connect_object (self->rtpbin, "on-ssrc-collision",
+      G_CALLBACK (gst_rtp_src_rtpbin_on_ssrc_collision_cb), self, 0);
 
   self->rtp_src = gst_element_factory_make ("udpsrc", "rtp_rtp_udpsrc0");
   if (self->rtp_src == NULL) {

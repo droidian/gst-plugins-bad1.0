@@ -42,17 +42,13 @@
 
 #include "gstmfvideosrc.h"
 #include "gstmfutils.h"
-#if GST_MF_WINAPI_ONLY_APP
-#include "gstmfcapturewinrt.h"
-#else /* GST_MF_WINAPI_ONLY_APP */
-#include "gstmfsourcereader.h"
-#endif /* !GST_MF_WINAPI_ONLY_APP */
+#include "gstmfsourceobject.h"
 #include <string.h>
 
 GST_DEBUG_CATEGORY (gst_mf_video_src_debug);
 #define GST_CAT_DEFAULT gst_mf_video_src_debug
 
-#if GST_MF_WINAPI_ONLY_APP
+#if (GST_MF_WINAPI_APP && !GST_MF_WINAPI_DESKTOP)
 /* FIXME: need support JPEG for UWP */
 #define SRC_TEMPLATE_CAPS \
     GST_VIDEO_CAPS_MAKE (GST_MF_VIDEO_FORMATS)
@@ -84,6 +80,7 @@ struct _GstMFVideoSrc
   gchar *device_path;
   gchar *device_name;
   gint device_index;
+  gpointer dispatcher;
 };
 
 enum
@@ -92,6 +89,7 @@ enum
   PROP_DEVICE_PATH,
   PROP_DEVICE_NAME,
   PROP_DEVICE_INDEX,
+  PROP_DISPATCHER,
 };
 
 #define DEFAULT_DEVICE_PATH     NULL
@@ -145,6 +143,25 @@ gst_mf_video_src_class_init (GstMFVideoSrcClass * klass)
           "The zero-based device index", -1, G_MAXINT, DEFAULT_DEVICE_INDEX,
           G_PARAM_READWRITE | GST_PARAM_MUTABLE_READY |
           G_PARAM_STATIC_STRINGS));
+#if GST_MF_WINAPI_APP
+  /**
+   * GstMFVideoSrc:dispatcher:
+   *
+   * ICoreDispatcher COM object used for activating device from UI thread.
+   *
+   * Since: 1.18
+   */
+  g_object_class_install_property (gobject_class, PROP_DISPATCHER,
+      g_param_spec_pointer ("dispatcher", "Dispatcher",
+          "ICoreDispatcher COM object to use. In order for application to ask "
+          "permission of capture device, device activation should be running "
+          "on UI thread via ICoreDispatcher. This element will increase "
+          "the reference count of given ICoreDispatcher and release it after "
+          "use. Therefore, caller does not need to consider additional "
+          "reference count management",
+          GST_PARAM_CONDITIONALLY_AVAILABLE | GST_PARAM_MUTABLE_READY |
+          G_PARAM_WRITABLE | G_PARAM_STATIC_STRINGS));
+#endif
 
   gst_element_class_set_static_metadata (element_class,
       "Media Foundation Video Source",
@@ -229,6 +246,11 @@ gst_mf_video_src_set_property (GObject * object, guint prop_id,
     case PROP_DEVICE_INDEX:
       self->device_index = g_value_get_int (value);
       break;
+#if GST_MF_WINAPI_APP
+    case PROP_DISPATCHER:
+      self->dispatcher = g_value_get_pointer (value);
+      break;
+#endif
     default:
       G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
       break;
@@ -242,13 +264,8 @@ gst_mf_video_src_start (GstBaseSrc * src)
 
   GST_DEBUG_OBJECT (self, "Start");
 
-#if GST_MF_WINAPI_ONLY_APP
-  self->source = gst_mf_capture_winrt_new (GST_MF_SOURCE_TYPE_VIDEO,
-      self->device_index, self->device_name, self->device_path);
-#else /* GST_MF_WINAPI_ONLY_APP */
-  self->source = gst_mf_source_reader_new (GST_MF_SOURCE_TYPE_VIDEO,
-      self->device_index, self->device_name, self->device_path);
-#endif /* GST_MF_WINAPI_ONLY_APP */
+  self->source = gst_mf_source_object_new (GST_MF_SOURCE_TYPE_VIDEO,
+      self->device_index, self->device_name, self->device_path, NULL);
 
   self->first_pts = GST_CLOCK_TIME_NONE;
   self->n_frames = 0;

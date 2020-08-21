@@ -73,7 +73,7 @@ gst_d3d11_handle_set_context (GstElement * element, GstContext * context,
   if (g_strcmp0 (context_type, GST_D3D11_DEVICE_HANDLE_CONTEXT_TYPE) == 0) {
     const GstStructure *str;
     GstD3D11Device *other_device = NULL;
-    gint other_adapter = 0;
+    guint other_adapter = 0;
 
     /* If we had device already, will not replace it */
     if (*device)
@@ -82,8 +82,8 @@ gst_d3d11_handle_set_context (GstElement * element, GstContext * context,
     str = gst_context_get_structure (context);
 
     if (gst_structure_get (str, "device", GST_TYPE_D3D11_DEVICE,
-            &other_device, "adapter", G_TYPE_INT, &other_adapter, NULL)) {
-      if (adapter == -1 || adapter == other_adapter) {
+            &other_device, "adapter", G_TYPE_UINT, &other_adapter, NULL)) {
+      if (adapter == -1 || (guint) adapter == other_adapter) {
         GST_CAT_DEBUG_OBJECT (GST_CAT_CONTEXT,
             element, "Found D3D11 device context");
         *device = other_device;
@@ -102,11 +102,17 @@ static void
 context_set_d3d11_device (GstContext * context, GstD3D11Device * device)
 {
   GstStructure *s;
-  gint adapter;
+  guint adapter = 0;
+  guint device_id = 0;
+  guint vendor_id = 0;
+  gboolean hardware = FALSE;
+  gchar *desc = NULL;
 
   g_return_if_fail (context != NULL);
 
-  g_object_get (G_OBJECT (device), "adapter", &adapter, NULL);
+  g_object_get (G_OBJECT (device), "adapter", &adapter, "device-id", &device_id,
+      "vendor_id", &vendor_id, "hardware", &hardware, "description", &desc,
+      NULL);
 
   GST_CAT_LOG (GST_CAT_CONTEXT,
       "setting GstD3D11Device(%" GST_PTR_FORMAT
@@ -114,8 +120,13 @@ context_set_d3d11_device (GstContext * context, GstD3D11Device * device)
       device, adapter, context);
 
   s = gst_context_writable_structure (context);
-  gst_structure_set (s, "device", GST_TYPE_D3D11_DEVICE,
-      device, "adapter", G_TYPE_INT, adapter, NULL);
+  gst_structure_set (s, "device", GST_TYPE_D3D11_DEVICE, device,
+      "adapter", G_TYPE_UINT, adapter,
+      "device-id", G_TYPE_UINT, device_id,
+      "vendor-id", G_TYPE_UINT, vendor_id,
+      "hardware", G_TYPE_BOOLEAN, hardware,
+      "description", G_TYPE_STRING, GST_STR_NULL (desc), NULL);
+  g_free (desc);
 }
 
 /**
@@ -346,48 +357,44 @@ gst_d3d11_is_windows_8_or_greater (void)
   return ret;
 }
 
-gboolean
-gst_d3d11_is_xbox_device (GstD3D11Device * device)
+GstD3D11DeviceVendor
+gst_d3d11_get_device_vendor (GstD3D11Device * device)
 {
   guint device_id = 0;
   guint vendor_id = 0;
   gchar *desc = NULL;
-  gboolean ret = FALSE;
+  GstD3D11DeviceVendor vendor = GST_D3D11_DEVICE_VENDOR_UNKNOWN;
 
   g_return_val_if_fail (GST_IS_D3D11_DEVICE (device), FALSE);
 
   g_object_get (device, "device-id", &device_id, "vendor-id", &vendor_id,
       "description", &desc, NULL);
 
-  if (device_id == 0 && vendor_id == 0 && desc && g_strrstr (desc, "SraKmd"))
-    ret = TRUE;
+  switch (vendor_id) {
+    case 0:
+      if (device_id == 0 && desc && g_strrstr (desc, "SraKmd"))
+        vendor = GST_D3D11_DEVICE_VENDOR_XBOX;
+      break;
+    case 0x1002:
+    case 0x1022:
+      vendor = GST_D3D11_DEVICE_VENDOR_AMD;
+      break;
+    case 0x8086:
+      vendor = GST_D3D11_DEVICE_VENDOR_INTEL;
+      break;
+    case 0x10de:
+      vendor = GST_D3D11_DEVICE_VENDOR_NVIDIA;
+      break;
+    case 0x4d4f4351:
+      vendor = GST_D3D11_DEVICE_VENDOR_QUALCOMM;
+      break;
+    default:
+      break;
+  }
 
   g_free (desc);
 
-  return ret;
-}
-
-static gchar *
-gst_d3d11_hres_to_string (HRESULT hr)
-{
-  DWORD flags;
-  gchar *ret_text;
-  LPTSTR error_text = NULL;
-
-  flags = FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_ALLOCATE_BUFFER
-      | FORMAT_MESSAGE_IGNORE_INSERTS;
-  FormatMessage (flags, NULL, hr, MAKELANGID (LANG_NEUTRAL, SUBLANG_DEFAULT),
-      (LPTSTR) & error_text, 0, NULL);
-
-#ifdef UNICODE
-  /* If UNICODE is defined, LPTSTR is LPWSTR which is UTF-16 */
-  ret_text = g_utf16_to_utf8 (error_text, 0, NULL, NULL, NULL);
-#else
-  ret_text = g_strdup (error_text);
-#endif
-
-  LocalFree (error_text);
-  return ret_text;
+  return vendor;
 }
 
 gboolean
@@ -400,9 +407,13 @@ _gst_d3d11_result (HRESULT hr, GstD3D11Device * device, GstDebugCategory * cat,
   if (FAILED (hr)) {
     gchar *error_text = NULL;
 
-    error_text = gst_d3d11_hres_to_string (hr);
+    error_text = g_win32_error_message ((guint) hr);
+    /* g_win32_error_message() doesn't cover all HERESULT return code,
+     * so it could be empty string, or null if there was an error
+     * in g_utf16_to_utf8() */
     gst_debug_log (cat, GST_LEVEL_WARNING, file, function, line,
-        NULL, "D3D11 call failed: 0x%x, %s", (guint) hr, error_text);
+        NULL, "D3D11 call failed: 0x%x, %s", (guint) hr,
+        GST_STR_NULL (error_text));
     g_free (error_text);
 
     ret = FALSE;

@@ -22,6 +22,7 @@
 #define __GST_VULKAN_FWD_H__
 
 #include <gst/gst.h>
+#include <gst/vulkan/vulkan-prelude.h>
 
 G_BEGIN_DECLS
 
@@ -48,8 +49,6 @@ typedef struct _GstVulkanCommandPoolPrivate GstVulkanCommandPoolPrivate;
 typedef struct _GstVulkanCommandBuffer GstVulkanCommandBuffer;
 
 typedef struct _GstVulkanDescriptorSet GstVulkanDescriptorSet;
-typedef struct _GstVulkanDescriptorSetClass GstVulkanDescriptorSetClass;
-typedef struct _GstVulkanDescriptorSetPrivate GstVulkanDescriptorSetPrivate;
 
 typedef struct _GstVulkanDescriptorPool GstVulkanDescriptorPool;
 typedef struct _GstVulkanDescriptorPoolClass GstVulkanDescriptorPoolClass;

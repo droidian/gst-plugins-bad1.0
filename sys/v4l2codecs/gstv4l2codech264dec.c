@@ -46,7 +46,7 @@ GST_STATIC_PAD_TEMPLATE (GST_VIDEO_DECODER_SINK_NAME,
 static GstStaticPadTemplate src_template =
 GST_STATIC_PAD_TEMPLATE (GST_VIDEO_DECODER_SRC_NAME,
     GST_PAD_SRC, GST_PAD_ALWAYS,
-    GST_STATIC_CAPS (GST_VIDEO_CAPS_MAKE ("{ NV12, YUY2 }")));
+    GST_STATIC_CAPS (GST_VIDEO_CAPS_MAKE ("{ NV12, YUY2, NV12_32L32 }")));
 
 struct _GstV4l2CodecH264Dec
 {
@@ -544,7 +544,7 @@ gst_v4l2_codec_h264_dec_fill_slice_params (GstV4l2CodecH264Dec * self,
     .flags = (slice->header.field_pic_flag ? V4L2_H264_SLICE_FLAG_FIELD_PIC : 0) |
              (slice->header.bottom_field_flag ? V4L2_H264_SLICE_FLAG_BOTTOM_FIELD : 0) |
              (slice->header.direct_spatial_mv_pred_flag ? V4L2_H264_SLICE_FLAG_DIRECT_SPATIAL_MV_PRED : 0) |
-             (slice->header.sp_for_switch_flag ? V4L2_H264_SLICE_FLAG_SP_FOR_SWITCH : 0), 
+             (slice->header.sp_for_switch_flag ? V4L2_H264_SLICE_FLAG_SP_FOR_SWITCH : 0),
   };
   /* *INDENT-ON* */
 
@@ -843,12 +843,12 @@ gst_v4l2_codec_h264_dec_wait (GstV4l2CodecH264Dec * self,
 
 static GstFlowReturn
 gst_v4l2_codec_h264_dec_output_picture (GstH264Decoder * decoder,
-    GstH264Picture * picture)
+    GstVideoCodecFrame * frame, GstH264Picture * picture)
 {
   GstV4l2CodecH264Dec *self = GST_V4L2_CODEC_H264_DEC (decoder);
+  GstVideoDecoder *vdec = GST_VIDEO_DECODER (decoder);
   GstV4l2Request *request = gst_h264_picture_get_user_data (picture);
   guint32 frame_num;
-  GstVideoCodecFrame *frame, *other_frame;
   GstH264Picture *other_pic;
   GstV4l2Request *other_request;
 
@@ -858,33 +858,28 @@ gst_v4l2_codec_h264_dec_output_picture (GstH264Decoder * decoder,
     goto finish_frame;
 
   if (!gst_v4l2_codec_h264_dec_wait (self, request))
-    return FALSE;
+    goto error;
 
   while (TRUE) {
     if (!gst_v4l2_decoder_dequeue_src (self->decoder, &frame_num)) {
       GST_ELEMENT_ERROR (self, STREAM, DECODE,
           ("Decoder did not produce a frame"), (NULL));
-      return GST_FLOW_ERROR;
+      goto error;
     }
 
     if (frame_num == picture->system_frame_number)
       break;
 
-    other_frame = gst_video_decoder_get_frame (GST_VIDEO_DECODER (self),
-        frame_num);
-    g_return_val_if_fail (other_frame, GST_FLOW_ERROR);
-
-    other_pic = gst_video_codec_frame_get_user_data (other_frame);
-    other_request = gst_h264_picture_get_user_data (other_pic);
-    gst_v4l2_request_set_done (other_request);
-    gst_video_codec_frame_unref (other_frame);
+    other_pic = gst_h264_decoder_get_picture (decoder, frame_num);
+    if (other_pic) {
+      other_request = gst_h264_picture_get_user_data (other_pic);
+      gst_v4l2_request_set_done (other_request);
+      gst_h264_picture_unref (other_pic);
+    }
   }
 
 finish_frame:
   gst_v4l2_request_set_done (request);
-  frame = gst_video_decoder_get_frame (GST_VIDEO_DECODER (self),
-      picture->system_frame_number);
-  g_return_val_if_fail (frame, GST_FLOW_ERROR);
   g_return_val_if_fail (frame->output_buffer, GST_FLOW_ERROR);
 
   /* Hold on reference buffers for the rest of the picture lifetime */
@@ -894,7 +889,15 @@ finish_frame:
   if (self->copy_frames)
     gst_v4l2_codec_h264_dec_copy_output_buffer (self, frame);
 
-  return gst_video_decoder_finish_frame (GST_VIDEO_DECODER (self), frame);
+  gst_h264_picture_unref (picture);
+
+  return gst_video_decoder_finish_frame (vdec, frame);
+
+error:
+  gst_video_decoder_drop_frame (vdec, frame);
+  gst_h264_picture_unref (picture);
+
+  return GST_FLOW_ERROR;
 }
 
 static void

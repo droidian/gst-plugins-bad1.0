@@ -26,6 +26,9 @@
 #include "gstmfsourcereader.h"
 #include <string.h>
 #include <wrl.h>
+#include <string>
+#include <vector>
+#include <algorithm>
 
 using namespace Microsoft::WRL;
 
@@ -49,11 +52,23 @@ typedef struct _GstMFStreamMediaType
   GstCaps *caps;
 } GstMFStreamMediaType;
 
+typedef struct
+{
+  IMFActivate *handle;
+  guint index;
+  gchar *name;
+  gchar *path;
+} GstMFDeviceActivate;
+
 struct _GstMFSourceReader
 {
   GstMFSourceObject parent;
 
+  GThread *thread;
   GMutex lock;
+  GCond cond;
+  GMainContext *context;
+  GMainLoop *loop;
 
   /* protected by lock */
   GQueue *queue;
@@ -69,13 +84,11 @@ struct _GstMFSourceReader
   gboolean flushing;
 };
 
+static void gst_mf_source_reader_constructed (GObject * object);
 static void gst_mf_source_reader_finalize (GObject * object);
 
-static gboolean gst_mf_source_reader_open (GstMFSourceObject * object,
-    IMFActivate * activate);
 static gboolean gst_mf_source_reader_start (GstMFSourceObject * object);
 static gboolean gst_mf_source_reader_stop  (GstMFSourceObject * object);
-static gboolean gst_mf_source_reader_close (GstMFSourceObject * object);
 static GstFlowReturn gst_mf_source_reader_fill (GstMFSourceObject * object,
     GstBuffer * buffer);
 static GstFlowReturn gst_mf_source_reader_create (GstMFSourceObject * object,
@@ -85,6 +98,14 @@ static gboolean gst_mf_source_reader_unlock_stop (GstMFSourceObject * object);
 static GstCaps * gst_mf_source_reader_get_caps (GstMFSourceObject * object);
 static gboolean gst_mf_source_reader_set_caps (GstMFSourceObject * object,
     GstCaps * caps);
+
+static gboolean gst_mf_source_reader_open (GstMFSourceReader * object,
+    IMFActivate * activate);
+static gboolean gst_mf_source_reader_close (GstMFSourceReader * object);
+static gpointer gst_mf_source_reader_thread_func (GstMFSourceReader * self);
+static gboolean gst_mf_source_enum_device_activate (GstMFSourceReader * self,
+    GstMFSourceType source_type, GList ** device_activates);
+static void gst_mf_device_activate_free (GstMFDeviceActivate * activate);
 
 #define gst_mf_source_reader_parent_class parent_class
 G_DEFINE_TYPE (GstMFSourceReader, gst_mf_source_reader,
@@ -96,12 +117,11 @@ gst_mf_source_reader_class_init (GstMFSourceReaderClass * klass)
   GObjectClass *gobject_class = G_OBJECT_CLASS (klass);
   GstMFSourceObjectClass *source_class = GST_MF_SOURCE_OBJECT_CLASS (klass);
 
+  gobject_class->constructed = gst_mf_source_reader_constructed;
   gobject_class->finalize = gst_mf_source_reader_finalize;
 
-  source_class->open = GST_DEBUG_FUNCPTR (gst_mf_source_reader_open);
   source_class->start = GST_DEBUG_FUNCPTR (gst_mf_source_reader_start);
   source_class->stop = GST_DEBUG_FUNCPTR (gst_mf_source_reader_stop);
-  source_class->close = GST_DEBUG_FUNCPTR (gst_mf_source_reader_close);
   source_class->fill = GST_DEBUG_FUNCPTR (gst_mf_source_reader_fill);
   source_class->create = GST_DEBUG_FUNCPTR (gst_mf_source_reader_create);
   source_class->unlock = GST_DEBUG_FUNCPTR (gst_mf_source_reader_unlock);
@@ -116,6 +136,24 @@ gst_mf_source_reader_init (GstMFSourceReader * self)
 {
   self->queue = g_queue_new ();
   g_mutex_init (&self->lock);
+  g_cond_init (&self->cond);
+}
+
+static void
+gst_mf_source_reader_constructed (GObject * object)
+{
+  GstMFSourceReader *self = GST_MF_SOURCE_READER (object);
+
+  self->context = g_main_context_new ();
+  self->loop = g_main_loop_new (self->context, FALSE);
+
+  /* Create a new thread to ensure that COM thread can be MTA thread */
+  g_mutex_lock (&self->lock);
+  self->thread = g_thread_new ("GstMFSourceReader",
+      (GThreadFunc) gst_mf_source_reader_thread_func, self);
+  while (!g_main_loop_is_running (self->loop))
+    g_cond_wait (&self->cond, &self->lock);
+  g_mutex_unlock (&self->lock);
 }
 
 static gboolean
@@ -125,6 +163,7 @@ gst_mf_enum_media_type_from_source_reader (IMFSourceReader * source_reader,
   gint i, j;
   HRESULT hr;
   GList *list = NULL;
+  std::vector<std::string> unhandled_caps;
 
   g_return_val_if_fail (source_reader != NULL, FALSE);
   g_return_val_if_fail (media_types != NULL, FALSE);
@@ -138,12 +177,27 @@ gst_mf_enum_media_type_from_source_reader (IMFSourceReader * source_reader,
       if (SUCCEEDED (hr)) {
         GstMFStreamMediaType *mtype;
         GstCaps *caps = NULL;
+        GstStructure *s;
+        std::string name;
 
         caps = gst_mf_media_type_to_caps (media_type.Get ());
 
         /* unknown format */
         if (!caps)
           continue;
+
+        s = gst_caps_get_structure (caps, 0);
+        name = gst_structure_get_name (s);
+        if (name != "video/x-raw" && name != "image/jpeg") {
+          auto it =
+              std::find(unhandled_caps.begin(), unhandled_caps.end(), name);
+          if (it == unhandled_caps.end()) {
+            GST_FIXME ("Skip not supported format %s", name.c_str());
+            unhandled_caps.push_back(name);
+          }
+          gst_caps_unref (caps);
+          continue;
+        }
 
         mtype = g_new0 (GstMFStreamMediaType, 1);
 
@@ -190,10 +244,20 @@ gst_mf_stream_media_type_free (GstMFStreamMediaType * media_type)
   g_free (media_type);
 }
 
-static gboolean
-gst_mf_source_reader_open (GstMFSourceObject * object, IMFActivate * activate)
+static gint
+compare_caps_func (gconstpointer a, gconstpointer b)
 {
-  GstMFSourceReader *self = GST_MF_SOURCE_READER (object);
+  GstMFStreamMediaType *m1, *m2;
+
+  m1 = (GstMFStreamMediaType *) a;
+  m2 = (GstMFStreamMediaType *) b;
+
+  return gst_mf_source_object_caps_compare (m1->caps, m2->caps);
+}
+
+static gboolean
+gst_mf_source_reader_open (GstMFSourceReader * self, IMFActivate * activate)
+{
   GList *iter;
   HRESULT hr;
   ComPtr<IMFSourceReader> reader;
@@ -227,13 +291,15 @@ gst_mf_source_reader_open (GstMFSourceObject * object, IMFActivate * activate)
   self->source = source.Detach ();
   self->reader = reader.Detach ();
 
+  self->media_types = g_list_sort (self->media_types,
+      (GCompareFunc) compare_caps_func);
+
+  self->supported_caps = gst_caps_new_empty ();
+
   for (iter = self->media_types; iter; iter = g_list_next (iter)) {
     GstMFStreamMediaType *mtype = (GstMFStreamMediaType *) iter->data;
-    if (!self->supported_caps)
-      self->supported_caps = gst_caps_ref (mtype->caps);
-    else
-      self->supported_caps =
-          gst_caps_merge (self->supported_caps, gst_caps_ref (mtype->caps));
+
+    gst_caps_append (self->supported_caps, gst_caps_copy (mtype->caps));
   }
 
   GST_DEBUG_OBJECT (self, "Available output caps %" GST_PTR_FORMAT,
@@ -243,10 +309,8 @@ gst_mf_source_reader_open (GstMFSourceObject * object, IMFActivate * activate)
 }
 
 static gboolean
-gst_mf_source_reader_close (GstMFSourceObject * object)
+gst_mf_source_reader_close (GstMFSourceReader * self)
 {
-  GstMFSourceReader *self = GST_MF_SOURCE_READER (object);
-
   gst_clear_caps (&self->supported_caps);
 
   if (self->media_types) {
@@ -274,8 +338,15 @@ gst_mf_source_reader_finalize (GObject * object)
 {
   GstMFSourceReader *self = GST_MF_SOURCE_READER (object);
 
+  g_main_loop_quit (self->loop);
+  g_thread_join (self->thread);
+  g_main_loop_unref (self->loop);
+  g_main_context_unref (self->context);
+
   g_queue_free (self->queue);
+  gst_clear_caps (&self->supported_caps);
   g_mutex_clear (&self->lock);
+  g_cond_clear (&self->cond);
 
   G_OBJECT_CLASS (parent_class)->finalize (object);
 }
@@ -543,6 +614,201 @@ gst_mf_source_reader_set_caps (GstMFSourceObject * object, GstCaps * caps)
   gst_video_info_from_caps (&self->info, best_type->caps);
 
   return TRUE;
+}
+
+static gboolean
+gst_mf_source_reader_main_loop_running_cb (GstMFSourceReader * self)
+{
+  GST_INFO_OBJECT (self, "Main loop running now");
+
+  g_mutex_lock (&self->lock);
+  g_cond_signal (&self->cond);
+  g_mutex_unlock (&self->lock);
+
+  return G_SOURCE_REMOVE;
+}
+
+static gpointer
+gst_mf_source_reader_thread_func (GstMFSourceReader * self)
+{
+  GstMFSourceObject *object = GST_MF_SOURCE_OBJECT (self);
+  GSource *source;
+  GList *activate_list = NULL;
+  GstMFDeviceActivate *target = NULL;
+  GList *iter;
+
+  CoInitializeEx (NULL, COINIT_MULTITHREADED);
+
+  g_main_context_push_thread_default (self->context);
+
+  source = g_idle_source_new ();
+  g_source_set_callback (source,
+      (GSourceFunc) gst_mf_source_reader_main_loop_running_cb, self, NULL);
+  g_source_attach (source, self->context);
+  g_source_unref (source);
+
+  if (!gst_mf_source_enum_device_activate (self,
+          object->source_type, &activate_list)) {
+    GST_WARNING_OBJECT (self, "No available video capture device");
+    goto run_loop;
+  }
+#ifndef GST_DISABLE_GST_DEBUG
+  for (iter = activate_list; iter; iter = g_list_next (iter)) {
+    GstMFDeviceActivate *activate = (GstMFDeviceActivate *) iter->data;
+
+    GST_DEBUG_OBJECT (self, "device %d, name: \"%s\", path: \"%s\"",
+        activate->index, GST_STR_NULL (activate->name),
+        GST_STR_NULL (activate->path));
+  }
+#endif
+
+  GST_DEBUG_OBJECT (self,
+      "Requested device index: %d, name: \"%s\", path \"%s\"",
+      object->device_index, GST_STR_NULL (object->device_name),
+      GST_STR_NULL (object->device_path));
+
+  for (iter = activate_list; iter; iter = g_list_next (iter)) {
+    GstMFDeviceActivate *activate = (GstMFDeviceActivate *) iter->data;
+    gboolean match;
+
+    if (object->device_path) {
+      match = g_ascii_strcasecmp (activate->path, object->device_path) == 0;
+    } else if (object->device_name) {
+      match = g_ascii_strcasecmp (activate->name, object->device_name) == 0;
+    } else if (object->device_index >= 0) {
+      match = activate->index == object->device_index;
+    } else {
+      /* pick the first entry */
+      match = TRUE;
+    }
+
+    if (match) {
+      target = activate;
+      break;
+    }
+  }
+
+  if (target) {
+    object->opened = gst_mf_source_reader_open (self, target->handle);
+
+    g_free (object->device_path);
+    object->device_path = g_strdup (target->path);
+
+    g_free (object->device_name);
+    object->device_name = g_strdup (target->name);
+
+    object->device_index = target->index;
+  }
+
+  if (activate_list)
+    g_list_free_full (activate_list,
+        (GDestroyNotify) gst_mf_device_activate_free);
+
+run_loop:
+  GST_DEBUG_OBJECT (self, "Starting main loop");
+  g_main_loop_run (self->loop);
+  GST_DEBUG_OBJECT (self, "Stopped main loop");
+
+  gst_mf_source_reader_stop (object);
+  gst_mf_source_reader_close (self);
+
+  g_main_context_pop_thread_default (self->context);
+
+  CoUninitialize ();
+
+  return NULL;
+}
+
+static gboolean
+gst_mf_source_enum_device_activate (GstMFSourceReader * self,
+    GstMFSourceType source_type, GList ** device_sources)
+{
+  HRESULT hr;
+  GList *ret = NULL;
+  ComPtr<IMFAttributes> attr;
+  IMFActivate **devices = NULL;
+  UINT32 i, count = 0;
+
+  hr = MFCreateAttributes (&attr, 1);
+  if (!gst_mf_result (hr)) {
+    return FALSE;
+  }
+
+  switch (source_type) {
+    case GST_MF_SOURCE_TYPE_VIDEO:
+      hr = attr->SetGUID (MF_DEVSOURCE_ATTRIBUTE_SOURCE_TYPE,
+          MF_DEVSOURCE_ATTRIBUTE_SOURCE_TYPE_VIDCAP_GUID);
+      break;
+    default:
+      GST_ERROR_OBJECT (self, "Unknown source type %d", source_type);
+      return FALSE;
+  }
+
+  if (!gst_mf_result (hr))
+    return FALSE;
+
+  hr = MFEnumDeviceSources (attr.Get (), &devices, &count);
+  if (!gst_mf_result (hr))
+    return FALSE;
+
+  for (i = 0; i < count; i++) {
+    GstMFDeviceActivate *entry;
+    LPWSTR name;
+    UINT32 name_len;
+    IMFActivate *activate = devices[i];
+
+    switch (source_type) {
+      case GST_MF_SOURCE_TYPE_VIDEO:
+        hr = activate->GetAllocatedString (
+            MF_DEVSOURCE_ATTRIBUTE_SOURCE_TYPE_VIDCAP_SYMBOLIC_LINK,
+            &name, &name_len);
+        break;
+      default:
+        g_assert_not_reached ();
+        goto done;
+    }
+
+    entry = g_new0 (GstMFDeviceActivate, 1);
+    entry->index = i;
+    entry->handle = activate;
+
+    if (gst_mf_result (hr)) {
+      entry->path = g_utf16_to_utf8 ((const gunichar2 *) name,
+          -1, NULL, NULL, NULL);
+      CoTaskMemFree (name);
+    }
+
+    hr = activate->GetAllocatedString (MF_DEVSOURCE_ATTRIBUTE_FRIENDLY_NAME,
+        &name, &name_len);
+    if (gst_mf_result (hr)) {
+      entry->name = g_utf16_to_utf8 ((const gunichar2 *) name,
+          -1, NULL, NULL, NULL);
+      CoTaskMemFree (name);
+    }
+
+    ret = g_list_prepend (ret, entry);
+  }
+
+done:
+  ret = g_list_reverse (ret);
+  CoTaskMemFree (devices);
+
+  *device_sources = ret;
+
+  return ! !ret;
+}
+
+static void
+gst_mf_device_activate_free (GstMFDeviceActivate * activate)
+{
+  g_return_if_fail (activate != NULL);
+
+  if (activate->handle)
+    activate->handle->Release ();
+
+  g_free (activate->name);
+  g_free (activate->path);
+  g_free (activate);
 }
 
 GstMFSourceObject *

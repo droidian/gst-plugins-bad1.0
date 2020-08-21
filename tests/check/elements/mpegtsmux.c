@@ -79,10 +79,11 @@ setup_src_pad (GstElement * element,
    * task of tsmux if it just happens to iterate over the pads */
   fail_unless (gst_pad_link (srcpad, sinkpad) == GST_PAD_LINK_OK,
       "Could not link source and %s sink pads", GST_ELEMENT_NAME (element));
-  gst_object_unref (sinkpad);   /* because we got it higher up */
 
   if (padname)
     *padname = g_strdup (GST_PAD_NAME (sinkpad));
+
+  gst_object_unref (sinkpad);   /* because we got it higher up */
 
   return srcpad;
 }
@@ -371,15 +372,47 @@ GST_START_TEST (test_reappearing_pad)
 
   pad = gst_element_get_static_pad (mux, padname);
   gst_pad_set_active (mysrcpad, FALSE);
-  gst_object_unref (pad);
   teardown_src_pad (mux, padname);
   gst_element_release_request_pad (mux, pad);
+  gst_object_unref (pad);
   g_free (padname);
 
   mysrcpad = setup_src_pad (mux, &video_src_template, "sink_%d", &padname);
   gst_pad_set_active (mysrcpad, TRUE);
 
   check_tsmux_pad_given_muxer (mux, VIDEO_CAPS_STRING, 0xE0, 0x1b, NULL, 1, 1);
+
+  cleanup_tsmux (mux, padname);
+  g_free (padname);
+}
+
+GST_END_TEST;
+
+GST_START_TEST (test_unused_pad)
+{
+  gchar *padname;
+  GstElement *mux;
+  GstPad *pad;
+
+  mux = gst_check_setup_element ("mpegtsmux");
+  mysrcpad = setup_src_pad (mux, &video_src_template, "sink_%d", &padname);
+  mysinkpad = gst_check_setup_sink_pad (mux, &sink_template);
+  gst_pad_set_active (mysrcpad, TRUE);
+  gst_pad_set_active (mysinkpad, TRUE);
+
+  fail_unless (gst_element_set_state (mux,
+          GST_STATE_PLAYING) == GST_STATE_CHANGE_SUCCESS,
+      "could not set to playing");
+
+  pad = gst_element_get_static_pad (mux, padname);
+  gst_pad_set_active (mysrcpad, FALSE);
+  teardown_src_pad (mux, padname);
+  gst_element_release_request_pad (mux, pad);
+  gst_object_unref (pad);
+  g_free (padname);
+
+  mysrcpad = setup_src_pad (mux, &video_src_template, "sink_%d", &padname);
+  gst_pad_set_active (mysrcpad, TRUE);
 
   cleanup_tsmux (mux, padname);
   g_free (padname);
@@ -525,6 +558,7 @@ mpegtsmux_suite (void)
   tcase_add_test (tc_chain, test_align);
   tcase_add_test (tc_chain, test_keyframe_flag_propagation);
   tcase_add_test (tc_chain, test_reappearing_pad);
+  tcase_add_test (tc_chain, test_unused_pad);
 
   return s;
 }

@@ -98,6 +98,9 @@ gst_cc_combiner_collect_captions (GstCCCombiner * self, gboolean timeout)
     GST_LOG_OBJECT (self, "No caption pad, passing through video");
     video_buf = self->current_video_buffer;
     self->current_video_buffer = NULL;
+    gst_aggregator_selected_samples (GST_AGGREGATOR_CAST (self),
+        GST_BUFFER_PTS (video_buf), GST_BUFFER_DTS (video_buf),
+        GST_BUFFER_DURATION (video_buf), NULL);
     goto done;
   }
 
@@ -202,6 +205,11 @@ gst_cc_combiner_collect_captions (GstCCCombiner * self, gboolean timeout)
     g_array_append_val (self->current_frame_captions, caption_data);
     gst_aggregator_pad_drop_buffer (caption_pad);
   } while (TRUE);
+
+  gst_aggregator_selected_samples (GST_AGGREGATOR_CAST (self),
+      GST_BUFFER_PTS (self->current_video_buffer),
+      GST_BUFFER_DTS (self->current_video_buffer),
+      GST_BUFFER_DURATION (self->current_video_buffer), NULL);
 
   if (self->current_frame_captions->len > 0) {
     guint i;
@@ -415,6 +423,15 @@ gst_cc_combiner_sink_event (GstAggregator * aggregator,
 
       break;
     }
+    case GST_EVENT_SEGMENT:{
+      if (strcmp (GST_OBJECT_NAME (agg_pad), "sink") == 0) {
+        const GstSegment *segment;
+
+        gst_event_parse_segment (event, &segment);
+        gst_aggregator_update_segment (aggregator, segment);
+      }
+      break;
+    }
     default:
       break;
   }
@@ -504,6 +521,7 @@ gst_cc_combiner_src_query (GstAggregator * aggregator, GstQuery * query)
       gst_query_parse_accept_caps (query, &caps);
       gst_query_set_accept_caps_result (query, gst_caps_is_subset (caps,
               templ));
+      gst_caps_unref (templ);
       ret = TRUE;
       break;
     }
@@ -536,7 +554,8 @@ gst_cc_combiner_sink_query (GstAggregator * aggregator,
         ret = gst_pad_peer_query (srcpad, query);
       } else {
         ret =
-            GST_AGGREGATOR_CLASS (parent_class)->src_query (aggregator, query);
+            GST_AGGREGATOR_CLASS (parent_class)->sink_query (aggregator,
+            aggpad, query);
       }
       break;
     case GST_QUERY_CAPS:
@@ -570,17 +589,70 @@ gst_cc_combiner_sink_query (GstAggregator * aggregator,
         gst_query_parse_accept_caps (query, &caps);
         gst_query_set_accept_caps_result (query, gst_caps_is_subset (caps,
                 templ));
+        gst_caps_unref (templ);
         ret = TRUE;
       }
       break;
     default:
-      ret = GST_AGGREGATOR_CLASS (parent_class)->src_query (aggregator, query);
+      ret = GST_AGGREGATOR_CLASS (parent_class)->sink_query (aggregator,
+          aggpad, query);
       break;
   }
 
   gst_object_unref (video_sinkpad);
 
   return ret;
+}
+
+static GstSample *
+gst_cc_combiner_peek_next_sample (GstAggregator * agg,
+    GstAggregatorPad * aggpad)
+{
+  GstAggregatorPad *caption_pad, *video_pad;
+  GstCCCombiner *self = GST_CCCOMBINER (agg);
+  GstSample *res = NULL;
+
+  caption_pad =
+      GST_AGGREGATOR_PAD_CAST (gst_element_get_static_pad (GST_ELEMENT_CAST
+          (self), "caption"));
+  video_pad =
+      GST_AGGREGATOR_PAD_CAST (gst_element_get_static_pad (GST_ELEMENT_CAST
+          (self), "sink"));
+
+  if (aggpad == caption_pad) {
+    if (self->current_frame_captions->len > 0) {
+      GstCaps *caps = gst_pad_get_current_caps (GST_PAD (aggpad));
+      GstBufferList *buflist = gst_buffer_list_new ();
+      guint i;
+
+      for (i = 0; i < self->current_frame_captions->len; i++) {
+        CaptionData *caption_data =
+            &g_array_index (self->current_frame_captions, CaptionData, i);
+        gst_buffer_list_add (buflist, gst_buffer_ref (caption_data->buffer));
+      }
+
+      res = gst_sample_new (NULL, caps, &aggpad->segment, NULL);
+      gst_caps_unref (caps);
+
+      gst_sample_set_buffer_list (res, buflist);
+      gst_buffer_list_unref (buflist);
+    }
+  } else if (aggpad == video_pad) {
+    if (self->current_video_buffer) {
+      GstCaps *caps = gst_pad_get_current_caps (GST_PAD (aggpad));
+      res = gst_sample_new (self->current_video_buffer,
+          caps, &aggpad->segment, NULL);
+      gst_caps_unref (caps);
+    }
+  }
+
+  if (caption_pad)
+    gst_object_unref (caption_pad);
+
+  if (video_pad)
+    gst_object_unref (video_pad);
+
+  return res;
 }
 
 static void
@@ -618,6 +690,7 @@ gst_cc_combiner_class_init (GstCCCombinerClass * klass)
   aggregator_class->get_next_time = gst_aggregator_simple_get_next_time;
   aggregator_class->src_query = gst_cc_combiner_src_query;
   aggregator_class->sink_query = gst_cc_combiner_sink_query;
+  aggregator_class->peek_next_sample = gst_cc_combiner_peek_next_sample;
 
   GST_DEBUG_CATEGORY_INIT (gst_cc_combiner_debug, "cccombiner",
       0, "Closed Caption combiner");

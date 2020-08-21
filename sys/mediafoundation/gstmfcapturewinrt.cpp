@@ -27,6 +27,7 @@
 #include "mediacapturewrapper.h"
 #include <memorybuffer.h>
 #include <memory>
+#include <algorithm>
 
 using namespace Microsoft::WRL;
 using namespace Microsoft::WRL::Wrappers;
@@ -40,6 +41,12 @@ GST_DEBUG_CATEGORY_EXTERN (gst_mf_source_object_debug);
 #define GST_CAT_DEFAULT gst_mf_source_object_debug
 
 G_END_DECLS
+
+enum
+{
+  PROP_0,
+  PROP_DISPATCHER,
+};
 
 struct _GstMFCaptureWinRT
 {
@@ -60,10 +67,16 @@ struct _GstMFCaptureWinRT
   GstVideoInfo info;
   gboolean flushing;
   gboolean got_error;
+
+  gpointer dispatcher;
 };
 
 static void gst_mf_capture_winrt_constructed (GObject * object);
 static void gst_mf_capture_winrt_finalize (GObject * object);
+static void gst_mf_capture_winrt_get_property (GObject * object, guint prop_id,
+    GValue * value, GParamSpec * pspec);
+static void gst_mf_capture_winrt_set_property (GObject * object, guint prop_id,
+    const GValue * value, GParamSpec * pspec);
 
 static gboolean gst_mf_capture_winrt_start (GstMFSourceObject * object);
 static gboolean gst_mf_capture_winrt_stop  (GstMFSourceObject * object);
@@ -93,6 +106,14 @@ gst_mf_capture_winrt_class_init (GstMFCaptureWinRTClass * klass)
 
   gobject_class->constructed = gst_mf_capture_winrt_constructed;
   gobject_class->finalize = gst_mf_capture_winrt_finalize;
+  gobject_class->get_property = gst_mf_capture_winrt_get_property;
+  gobject_class->set_property = gst_mf_capture_winrt_set_property;
+
+  g_object_class_install_property (gobject_class, PROP_DISPATCHER,
+      g_param_spec_pointer ("dispatcher", "Dispatcher",
+          "ICoreDispatcher COM object to use",
+          (GParamFlags) (G_PARAM_READWRITE | G_PARAM_CONSTRUCT_ONLY |
+          G_PARAM_STATIC_STRINGS)));
 
   source_class->start = GST_DEBUG_FUNCPTR (gst_mf_capture_winrt_start);
   source_class->stop = GST_DEBUG_FUNCPTR (gst_mf_capture_winrt_stop);
@@ -128,7 +149,6 @@ gst_mf_capture_winrt_constructed (GObject * object)
     g_cond_wait (&self->cond, &self->lock);
   g_mutex_unlock (&self->lock);
 
-done:
   G_OBJECT_CLASS (parent_class)->constructed (object);
 }
 
@@ -148,6 +168,38 @@ gst_mf_capture_winrt_finalize (GObject * object)
   g_cond_clear (&self->cond);
 
   G_OBJECT_CLASS (parent_class)->finalize (object);
+}
+
+static void
+gst_mf_capture_winrt_get_property (GObject * object, guint prop_id,
+    GValue * value, GParamSpec * pspec)
+{
+  GstMFCaptureWinRT *self = GST_MF_CAPTURE_WINRT (object);
+
+  switch (prop_id) {
+    case PROP_DISPATCHER:
+      g_value_set_pointer (value, self->dispatcher);
+      break;
+    default:
+      G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
+      break;
+  }
+}
+
+static void
+gst_mf_capture_winrt_set_property (GObject * object, guint prop_id,
+    const GValue * value, GParamSpec * pspec)
+{
+  GstMFCaptureWinRT *self = GST_MF_CAPTURE_WINRT (object);
+
+  switch (prop_id) {
+    case PROP_DISPATCHER:
+      self->dispatcher = g_value_get_pointer (value);
+      break;
+    default:
+      G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
+      break;
+  }
 }
 
 static gboolean
@@ -175,7 +227,7 @@ gst_mf_capture_winrt_thread_func (GstMFCaptureWinRT * self)
 
   RoInitializeWrapper init_wrapper (RO_INIT_MULTITHREADED);
 
-  self->capture = new MediaCaptureWrapper;
+  self->capture = new MediaCaptureWrapper(self->dispatcher);
   callbacks.frame_arrived = gst_mf_capture_winrt_on_frame;
   callbacks.failed = gst_mf_capture_winrt_on_failed;
   self->capture->RegisterCb (callbacks, self);
@@ -233,30 +285,33 @@ gst_mf_capture_winrt_thread_func (GstMFCaptureWinRT * self)
     goto run_loop;
   }
 
+  if (target_group->source_list_.empty ()) {
+    GST_WARNING_OBJECT (self, "No available source list");
+    goto run_loop;
+  }
+
   self->capture->SetSourceGroup(*target_group);
 
-  for (auto iter: target_group->source_list_) {
-    if (!self->supported_caps)
-      self->supported_caps = gst_caps_ref (iter.caps_);
-    else
-      self->supported_caps =
-          gst_caps_merge (self->supported_caps, gst_caps_ref (iter.caps_));
-  }
+  std::sort (target_group->source_list_.begin (),
+      target_group->source_list_.end (), WinRTCapsCompareFunc);
+
+  self->supported_caps = gst_caps_new_empty ();
+
+  for (auto iter: target_group->source_list_)
+    gst_caps_append (self->supported_caps, gst_caps_copy (iter.caps_));
 
   GST_DEBUG_OBJECT (self, "Available output caps %" GST_PTR_FORMAT,
       self->supported_caps);
 
-  source->opened = !!self->supported_caps;
+  source->opened = TRUE;
 
-  if (source->opened) {
-    g_free (source->device_path);
-    source->device_path = g_strdup (target_group->id_.c_str());
+  g_free (source->device_path);
+  source->device_path = g_strdup (target_group->id_.c_str());
 
-    g_free (source->device_name);
-    source->device_name = g_strdup (target_group->display_name_.c_str());
+  g_free (source->device_name);
+  source->device_name = g_strdup (target_group->display_name_.c_str());
 
-    source->device_index = index;
-  }
+  source->device_index = index;
 
 run_loop:
   GST_DEBUG_OBJECT (self, "Starting main loop");
@@ -577,24 +632,47 @@ gst_mf_capture_winrt_set_caps (GstMFSourceObject * object, GstCaps * caps)
 
 GstMFSourceObject *
 gst_mf_capture_winrt_new (GstMFSourceType type, gint device_index,
-    const gchar * device_name, const gchar * device_path)
+    const gchar * device_name, const gchar * device_path, gpointer dispatcher)
 {
   GstMFSourceObject *self;
+  ComPtr<ICoreDispatcher> core_dispatcher;
+  /* Multiple COM init is allowed */
+  RoInitializeWrapper init_wrapper (RO_INIT_MULTITHREADED);
 
   /* TODO: Add audio capture support */
   g_return_val_if_fail (type == GST_MF_SOURCE_TYPE_VIDEO, NULL);
 
+  /* If application didn't pass ICoreDispatcher object,
+   * try to get dispatcher object for the current thread */
+  if (!dispatcher) {
+    HRESULT hr;
+
+    hr = FindCoreDispatcherForCurrentThread (&core_dispatcher);
+    if (gst_mf_result (hr)) {
+      GST_DEBUG ("UI dispatcher is available");
+      dispatcher = core_dispatcher.Get ();
+    } else {
+      GST_DEBUG ("UI dispatcher is unavailable");
+    }
+  } else {
+    GST_DEBUG ("Use user passed UI dispatcher");
+  }
+
   self = (GstMFSourceObject *) g_object_new (GST_TYPE_MF_CAPTURE_WINRT,
       "source-type", type, "device-index", device_index, "device-name",
-      device_name, "device-path", device_path, NULL);
+      device_name, "device-path", device_path, "dispatcher", dispatcher, NULL);
 
-  gst_object_ref_sink (self);
+  /* Reset explicitly to ensure that it happens before
+   * RoInitializeWrapper dtor is called */
+  core_dispatcher.Reset ();
 
   if (!self->opened) {
     GST_WARNING_OBJECT (self, "Couldn't open device");
     gst_object_unref (self);
     return NULL;
   }
+
+  gst_object_ref_sink (self);
 
   return self;
 }

@@ -61,8 +61,8 @@ static struct
   {MFVideoFormat_YV12,   MAKE_RAW_FORMAT_CAPS ("YV12"),  GST_VIDEO_FORMAT_YV12},
   {MFVideoFormat_I420,   MAKE_RAW_FORMAT_CAPS ("I420"),  GST_VIDEO_FORMAT_I420},
   {MFVideoFormat_IYUV,   MAKE_RAW_FORMAT_CAPS ("I420"),  GST_VIDEO_FORMAT_I420},
-  {MFVideoFormat_P010,   MAKE_RAW_FORMAT_CAPS ("P010"),  GST_VIDEO_FORMAT_P010_10LE},
-  {MFVideoFormat_P016,   MAKE_RAW_FORMAT_CAPS ("P016"),  GST_VIDEO_FORMAT_P016_LE},
+  {MFVideoFormat_P010,   MAKE_RAW_FORMAT_CAPS ("P010_10LE"),  GST_VIDEO_FORMAT_P010_10LE},
+  {MFVideoFormat_P016,   MAKE_RAW_FORMAT_CAPS ("P016_LE"),  GST_VIDEO_FORMAT_P016_LE},
   {MFVideoFormat_v210,   MAKE_RAW_FORMAT_CAPS ("v210"),  GST_VIDEO_FORMAT_v210},
   {MFVideoFormat_v216,   MAKE_RAW_FORMAT_CAPS ("v216"),  GST_VIDEO_FORMAT_v216},
   {MFVideoFormat_Y16,    MAKE_RAW_FORMAT_CAPS ("GRAY16_LE"),  GST_VIDEO_FORMAT_GRAY16_LE},
@@ -306,7 +306,7 @@ gst_mf_media_type_to_video_caps (IMFMediaType * media_type)
 
   hr = media_type->GetUINT32 (MF_MT_VIDEO_CHROMA_SITING, &val);
   if (SUCCEEDED (hr)) {
-    GST_LOG ("have chroma site 0x%x", val);
+    gboolean known_value = TRUE;
 
     if ((val & MFVideoChromaSubsampling_MPEG2) ==
         MFVideoChromaSubsampling_MPEG2) {
@@ -318,8 +318,11 @@ gst_mf_media_type_to_video_caps (IMFMediaType * media_type)
         MFVideoChromaSubsampling_Cosited) {
       chroma_site = GST_VIDEO_CHROMA_SITE_COSITED;
     } else {
-      GST_FIXME ("unhandled chroma site 0x%x", val);
+      known_value = FALSE;
     }
+
+    GST_LOG ("have %s chroma site value 0x%x",
+        known_value ? "known" : "unknown", val);
   }
 
   if (chroma_site != GST_VIDEO_CHROMA_SITE_UNKNOWN)
@@ -356,29 +359,6 @@ gst_mf_media_type_release (IMFMediaType * media_type)
     media_type->Release ();
 }
 
-static gchar *
-gst_mf_hr_to_string (HRESULT hr)
-{
-  DWORD flags;
-  gchar *ret_text;
-  LPTSTR error_text = NULL;
-
-  flags = FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_ALLOCATE_BUFFER
-      | FORMAT_MESSAGE_IGNORE_INSERTS;
-  FormatMessage (flags, NULL, hr, MAKELANGID (LANG_NEUTRAL, SUBLANG_DEFAULT),
-      (LPTSTR) & error_text, 0, NULL);
-
-#ifdef UNICODE
-  ret_text = g_utf16_to_utf8 ((const gunichar2  *) error_text,
-      -1, NULL, NULL, NULL);
-#else
-  ret_text = g_strdup (error_text);
-#endif
-
-  LocalFree (error_text);
-  return ret_text;
-}
-
 gboolean
 _gst_mf_result (HRESULT hr, GstDebugCategory * cat, const gchar * file,
     const gchar * function, gint line)
@@ -389,9 +369,13 @@ _gst_mf_result (HRESULT hr, GstDebugCategory * cat, const gchar * file,
   if (FAILED (hr)) {
     gchar *error_text = NULL;
 
-    error_text = gst_mf_hr_to_string (hr);
+    error_text = g_win32_error_message ((gint) hr);
+    /* g_win32_error_message() doesn't cover all HERESULT return code,
+     * so it could be empty string, or null if there was an error
+     * in g_utf16_to_utf8() */
     gst_debug_log (cat, GST_LEVEL_WARNING, file, function, line,
-        NULL, "MediaFoundation call failed: 0x%x, %s", (guint) hr, error_text);
+        NULL, "MediaFoundation call failed: 0x%x, %s", (guint) hr,
+        GST_STR_NULL (error_text));
     g_free (error_text);
 
     ret = FALSE;
@@ -569,7 +553,7 @@ gst_mf_guid_to_static_string (const GUID& guid)
   /* WAVE_FORMAT_MPEG_ADTS_AAC */
   GST_MF_IF_EQUAL_RETURN(guid, MFAudioFormat_ADTS);
 
-#if !GST_MF_WINAPI_ONLY_APP
+#if GST_MF_WINAPI_DESKTOP
   GST_MF_IF_EQUAL_RETURN(guid, MF_MT_CUSTOM_VIDEO_PRIMARIES);
   GST_MF_IF_EQUAL_RETURN(guid, MF_MT_AM_FORMAT_TYPE);
   GST_MF_IF_EQUAL_RETURN(guid, MF_MT_ARBITRARY_HEADER);
