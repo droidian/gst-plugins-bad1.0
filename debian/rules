@@ -34,7 +34,7 @@ conf_flags += -Dpackage-name=$(GST_PACKAGE_NAME) -Dpackage-origin=$(GST_PACKAGE_
 conf_flags += -Dsctp-internal-usrsctp=enabled
 
 %:
-	dh $@ --buildsystem=meson
+	dh $@ --with gir --buildsystem=meson
 
 override_dh_auto_configure:
 	dh_auto_configure -- --default-library shared $(conf_flags)
