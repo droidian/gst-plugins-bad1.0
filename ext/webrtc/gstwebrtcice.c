@@ -286,7 +286,7 @@ _parse_userinfo (const gchar * userinfo, gchar ** user, gchar ** pass)
 
   colon = g_strstr_len (userinfo, -1, ":");
   if (!colon) {
-    *user = g_strdup (userinfo);
+    *user = g_uri_unescape_string (userinfo, NULL);
     *pass = NULL;
     return;
   }
@@ -297,8 +297,8 @@ _parse_userinfo (const gchar * userinfo, gchar ** user, gchar ** pass)
         "first ':' delineates user:pass. You should escape the user and pass "
         "before adding to the URI.", userinfo);
 
-  *user = g_strndup (userinfo, colon - userinfo);
-  *pass = g_strdup (&colon[1]);
+  *user = g_uri_unescape_segment (userinfo, colon, NULL);
+  *pass = g_uri_unescape_string (&colon[1], NULL);
 }
 
 static gchar *
@@ -372,8 +372,8 @@ _add_turn_server (GstWebRTCICE * ice, struct NiceStreamItem *item,
   for (i = 0; i < relay_n; i++) {
     ret = nice_agent_set_relay_info (ice->priv->nice_agent,
         item->nice_stream_id, NICE_COMPONENT_TYPE_RTP,
-        gst_uri_get_host (turn_server), gst_uri_get_port (turn_server), user,
-        pass, relays[i]);
+        gst_uri_get_host (turn_server), gst_uri_get_port (turn_server),
+        user, pass, relays[i]);
     if (!ret) {
       gchar *uri = gst_uri_to_string (turn_server);
       GST_ERROR_OBJECT (ice, "Failed to set TURN server '%s'", uri);
@@ -382,8 +382,8 @@ _add_turn_server (GstWebRTCICE * ice, struct NiceStreamItem *item,
     }
     ret = nice_agent_set_relay_info (ice->priv->nice_agent,
         item->nice_stream_id, NICE_COMPONENT_TYPE_RTCP,
-        gst_uri_get_host (turn_server), gst_uri_get_port (turn_server), user,
-        pass, relays[i]);
+        gst_uri_get_host (turn_server), gst_uri_get_port (turn_server),
+        user, pass, relays[i]);
     if (!ret) {
       gchar *uri = gst_uri_to_string (turn_server);
       GST_ERROR_OBJECT (ice, "Failed to set TURN server '%s'", uri);
