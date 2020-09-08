@@ -40,6 +40,9 @@ G_BEGIN_DECLS
 typedef struct _GstCCConverter GstCCConverter;
 typedef struct _GstCCConverterClass GstCCConverterClass;
 
+#define MAX_CDP_PACKET_LEN 256
+#define MAX_CEA608_LEN 32
+
 struct _GstCCConverter
 {
   GstBaseTransform parent;
@@ -50,7 +53,24 @@ struct _GstCCConverter
   /* CDP sequence numbers when outputting CDP */
   guint16 cdp_hdr_sequence_cntr;
 
-  gint fps_n, fps_d;
+  gint in_fps_n, in_fps_d;
+  gint out_fps_n, out_fps_d;
+
+  /* for framerate differences, we need to keep previous/next frames in order
+   * to split/merge data across multiple input or output buffers.  The data is
+   * stored as cc_data */
+  guint8    scratch_cea608_1[MAX_CEA608_LEN];
+  guint     scratch_cea608_1_len;
+  guint8    scratch_cea608_2[MAX_CEA608_LEN];
+  guint     scratch_cea608_2_len;
+  guint8    scratch_ccp[MAX_CDP_PACKET_LEN];
+  guint     scratch_ccp_len;
+
+  guint     input_frames;
+  guint     output_frames;
+  GstVideoTimeCode current_output_timecode;
+  /* previous buffer for copying metas onto */
+  GstBuffer *previous_buffer;
 };
 
 struct _GstCCConverterClass

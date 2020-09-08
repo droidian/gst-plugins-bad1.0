@@ -56,7 +56,7 @@
  * An application can request multiple RTP and RTCP pads to protect,
  * but every sink pad requested must receive packets from the same
  * source (identical SSRC). If a packet received contains a different
- * SSRC, a warning is emited and the valid SSRC is forced on the packet.
+ * SSRC, a warning is emitted and the valid SSRC is forced on the packet.
  *
  * This element uses libsrtp library. When receiving the first packet,
  * the library is initialized with a new stream (based on the SSRC). It
@@ -335,7 +335,7 @@ gst_srtp_enc_class_init (GstSrtpEncClass * klass)
    * GstSrtpEnc::soft-limit:
    * @gstsrtpenc: the element on which the signal is emitted
    *
-   * Signal emited when the stream with @ssrc has reached the soft
+   * Signal emitted when the stream with @ssrc has reached the soft
    * limit of utilisation of it's master encryption key. User should
    * provide a new key by setting the #GstSrtpEnc:key property.
    */
@@ -484,7 +484,7 @@ done:
   return ret;
 }
 
-/* Release ressources and set default values
+/* Release resources and set default values
  */
 static void
 gst_srtp_enc_reset_no_lock (GstSrtpEnc * filter)
@@ -820,6 +820,16 @@ get_rtp_other_pad (GstPad * pad)
   return GST_PAD (gst_pad_get_element_private (pad));
 }
 
+static void
+gst_srtp_enc_add_ssrc (GstSrtpEnc * filter, guint ssrc)
+{
+  gboolean is_added =
+      g_hash_table_add (filter->ssrcs_set, GUINT_TO_POINTER (ssrc));
+  if (is_added) {
+    GST_DEBUG_OBJECT (filter, "Added ssrc %u", ssrc);
+  }
+}
+
 /* Release a sink pad and it's linked source pad
  */
 static void
@@ -872,7 +882,7 @@ gst_srtp_enc_sink_setcaps (GstPad * pad, GstSrtpEnc * filter,
   if (gst_structure_has_field_typed (ps, "ssrc", G_TYPE_UINT)) {
     guint ssrc;
     gst_structure_get_uint (ps, "ssrc", &ssrc);
-    g_hash_table_add (filter->ssrcs_set, GUINT_TO_POINTER (ssrc));
+    gst_srtp_enc_add_ssrc (filter, ssrc);
   }
 
   if (HAS_CRYPTO (filter))
@@ -1097,6 +1107,18 @@ gst_srtp_enc_check_set_caps (GstSrtpEnc * filter, GstPad * pad,
   return GST_FLOW_OK;
 }
 
+static void
+gst_srtp_enc_ensure_ssrc (GstSrtpEnc * filter, GstBuffer * buf)
+{
+  GstRTPBuffer rtpbuf = GST_RTP_BUFFER_INIT;
+  if (gst_rtp_buffer_map (buf,
+          GST_MAP_READ | GST_RTP_BUFFER_MAP_FLAG_SKIP_PADDING, &rtpbuf)) {
+    guint32 ssrc = gst_rtp_buffer_get_ssrc (&rtpbuf);
+    gst_srtp_enc_add_ssrc (filter, ssrc);
+    gst_rtp_buffer_unmap (&rtpbuf);
+  }
+}
+
 static GstFlowReturn
 gst_srtp_enc_process_buffer (GstSrtpEnc * filter, GstPad * pad,
     GstBuffer * buf, gboolean is_rtcp, GstBuffer ** outbuf_ptr)
@@ -1126,6 +1148,9 @@ gst_srtp_enc_process_buffer (GstSrtpEnc * filter, GstPad * pad,
     ret = GST_FLOW_FLUSHING;
     goto fail;
   }
+
+  gst_srtp_enc_ensure_ssrc (filter, buf);
+
 #ifdef HAVE_SRTP2
   if (is_rtcp)
     err = srtp_protect_rtcp_mki (filter->session, mapout.data, &size,

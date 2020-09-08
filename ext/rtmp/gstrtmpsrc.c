@@ -43,7 +43,7 @@
 #include "config.h"
 #endif
 
-#include <glib/gi18n-lib.h>
+#include <gst/gst-i18n-plugin.h>
 
 #include "gstrtmpsrc.h"
 
@@ -243,15 +243,11 @@ gst_rtmp_src_uri_set_uri (GstURIHandler * handler, const gchar * uri,
       GST_ERROR_OBJECT (src, "Failed to parse URI %s", uri);
       g_set_error (error, GST_URI_ERROR, GST_URI_ERROR_BAD_URI,
           "Could not parse RTMP URI");
-#ifndef _MSC_VER
       /* FIXME: we should not be freeing RTMP internals to avoid leaking */
       free (playpath.av_val);
-#endif
       return FALSE;
     }
-#ifndef _MSC_VER
     free (playpath.av_val);
-#endif
     src->uri = g_strdup (uri);
   }
 
@@ -583,7 +579,7 @@ success:
   /* This is set here so that the call to create() above doesn't clear it */
   src->discont = TRUE;
 
-  GST_DEBUG_OBJECT (src, "Seek to %" GST_TIME_FORMAT " successfull",
+  GST_DEBUG_OBJECT (src, "Seek to %" GST_TIME_FORMAT " successful",
       GST_TIME_ARGS (segment->start));
 
   return TRUE;

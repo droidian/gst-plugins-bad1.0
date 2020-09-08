@@ -92,7 +92,7 @@ gst_msdkvc1dec_configure (GstMsdkDec * decoder)
     decoder->param.mfx.CodecProfile = MFX_PROFILE_VC1_MAIN;
   else {
     decoder->param.mfx.CodecProfile = MFX_PROFILE_VC1_ADVANCED;
-    /* asf advanced profile codec-data has 1 byte in the begining
+    /* asf advanced profile codec-data has 1 byte in the beginning
      * which is the ASF binding byte. MediaSDK can't recognize this
      * byte, so discard it */
     if (decoder->input_state->codec_data) {
@@ -102,15 +102,13 @@ gst_msdkvc1dec_configure (GstMsdkDec * decoder)
       gst_adapter_push (decoder->adapter, buffer);
     }
 
-    decoder->is_packetized = FALSE;
+    gst_video_decoder_set_packetized (GST_VIDEO_DECODER (decoder), FALSE);
   }
 
   /* This is a deprecated attribute in msdk-2017 version, but some
    * customers still using this for low-latency streaming of non-b-frame
    * encoded streams */
   decoder->param.mfx.DecodedOrder = vc1dec->output_order;
-  return TRUE;
-
   return TRUE;
 }
 

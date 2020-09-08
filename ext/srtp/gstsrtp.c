@@ -196,6 +196,10 @@ rtcp_buffer_get_ssrc (GstBuffer * buf, guint32 * ssrc)
           *ssrc = gst_rtcp_packet_app_get_ssrc (&packet);
           ret = TRUE;
           break;
+        case GST_RTCP_TYPE_BYE:
+          *ssrc = gst_rtcp_packet_bye_get_nth_ssrc (&packet, 0);
+          ret = TRUE;
+          break;
         default:
           break;
       }
@@ -304,6 +308,9 @@ plugin_init (GstPlugin * plugin)
 
   if (!gst_srtp_dec_plugin_init (plugin))
     return FALSE;
+
+  gst_type_mark_as_plugin_api (GST_TYPE_SRTP_AUTH_TYPE, 0);
+  gst_type_mark_as_plugin_api (GST_TYPE_SRTP_CIPHER_TYPE, 0);
 
   return TRUE;
 }

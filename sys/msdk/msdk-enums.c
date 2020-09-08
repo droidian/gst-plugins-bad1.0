@@ -176,8 +176,28 @@ gst_msdkenc_adaptive_b_get_type (void)
   return type;
 }
 
+GType
+gst_msdkenc_tune_mode_get_type (void)
+{
+  static GType type = 0;
+
+  static const GEnumValue values[] = {
+    {MFX_CODINGOPTION_UNKNOWN, "Auto ", "auto"},
+    {MFX_CODINGOPTION_OFF, "None ", "none"},
+    {MFX_CODINGOPTION_ON, "Low power mode ", "low-power"},
+    {0, NULL, NULL}
+  };
+
+  if (!type) {
+    type = g_enum_register_static ("GstMsdkEncTuneMode", values);
+  }
+
+  return type;
+}
+
 /*========= MSDK VPP Enums =========================*/
 
+#ifndef GST_REMOVE_DEPRECATED
 GType
 gst_msdkvpp_rotation_get_type (void)
 {
@@ -196,6 +216,7 @@ gst_msdkvpp_rotation_get_type (void)
   }
   return type;
 }
+#endif
 
 GType
 gst_msdkvpp_deinterlace_mode_get_type (void)
@@ -263,6 +284,7 @@ gst_msdkvpp_deinterlace_method_get_type (void)
   return type;
 }
 
+#ifndef GST_REMOVE_DEPRECATED
 GType
 gst_msdkvpp_mirroring_get_type (void)
 {
@@ -280,6 +302,7 @@ gst_msdkvpp_mirroring_get_type (void)
   }
   return type;
 }
+#endif
 
 GType
 gst_msdkvpp_scaling_mode_get_type (void)

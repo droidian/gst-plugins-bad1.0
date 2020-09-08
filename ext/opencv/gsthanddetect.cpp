@@ -47,13 +47,12 @@
  * FIXME:operates hand gesture detection in video streams and images,
  * and enable media operation e.g. play/stop/fast forward/back rewind.
  *
- * <refsect2>
- * <title>Example launch line</title>
+ * ## Example launch line
+ *
  * |[
  * gst-launch-1.0 autovideosrc ! videoconvert ! "video/x-raw, format=RGB, width=320, height=240" ! \
  * videoscale ! handdetect ! videoconvert ! xvimagesink
  * ]|
- * </refsect2>
  */
 
 #ifdef HAVE_CONFIG_H
@@ -508,7 +507,7 @@ gst_handdetect_transform_ip (GstOpencvVideoFilter * transform,
         Point c;
 
         if (filter->display) {
-          GST_DEBUG_OBJECT (filter, "%d PALM gestures detected\n",
+          GST_DEBUG_OBJECT (filter, "%d PALM gestures detected",
               (int) hands.size ());
         }
         /* Go through all detected PALM gestures to get the best one

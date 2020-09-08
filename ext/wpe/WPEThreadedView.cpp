@@ -1,4 +1,4 @@
-/* Copyright (C) <2018> Philippe Normand <philn@igalia.com>
+/* Copyright (C) <2018, 2019, 2020> Philippe Normand <philn@igalia.com>
  * Copyright (C) <2018> Žan Doberšek <zdobersek@igalia.com>
  *
  * This library is free software; you can redistribute it and/or
@@ -17,15 +17,34 @@
  * Boston, MA 02110-1301, USA.
  */
 
+#ifdef HAVE_CONFIG_H
+#include <config.h>
+#endif
+
 #include "WPEThreadedView.h"
+
+#include <gst/gl/gl.h>
+#include <gst/gl/egl/gsteglimage.h>
+#include <gst/gl/egl/gstgldisplay_egl.h>
+#include <wayland-server.h>
 
 #include <cstdio>
 #include <mutex>
 
+#if ENABLE_SHM_BUFFER_SUPPORT
+#include <wpe/unstable/fdo-shm.h>
+#endif
+
+GST_DEBUG_CATEGORY_EXTERN (wpe_src_debug);
 #define GST_CAT_DEFAULT wpe_src_debug
 
-// -70 is the GLib priority we use internally in WebKit, for WPE.
+#if defined(WPE_FDO_CHECK_VERSION) && WPE_FDO_CHECK_VERSION(1, 3, 0)
+#define USE_DEPRECATED_FDO_EGL_IMAGE 0
+#define WPE_GLIB_SOURCE_PRIORITY G_PRIORITY_DEFAULT
+#else
+#define USE_DEPRECATED_FDO_EGL_IMAGE 1
 #define WPE_GLIB_SOURCE_PRIORITY -70
+#endif
 
 class GMutexHolder {
 public:
@@ -43,54 +62,33 @@ private:
     GMutex& m;
 };
 
-WPEThreadedView::WPEThreadedView()
+static WPEContextThread *s_view = NULL;
+
+WPEContextThread& WPEContextThread::singleton()
+{
+    if (!s_view)
+        s_view = new WPEContextThread;
+
+    return *s_view;
+}
+
+WPEContextThread::WPEContextThread()
 {
     g_mutex_init(&threading.mutex);
     g_cond_init(&threading.cond);
     g_mutex_init(&threading.ready_mutex);
     g_cond_init(&threading.ready_cond);
 
-    g_mutex_init(&images.mutex);
-
     {
         GMutexHolder lock(threading.mutex);
-        threading.thread = g_thread_new("WPEThreadedView",
-            s_viewThread, this);
+        threading.thread = g_thread_new("WPEContextThread", s_viewThread, this);
         g_cond_wait(&threading.cond, &threading.mutex);
         GST_DEBUG("thread spawned");
     }
 }
 
-WPEThreadedView::~WPEThreadedView()
+WPEContextThread::~WPEContextThread()
 {
-    {
-        GMutexHolder lock(images.mutex);
-
-        if (images.pending) {
-            gst_egl_image_unref(images.pending);
-            images.pending = nullptr;
-        }
-        if (images.committed) {
-            gst_egl_image_unref(images.committed);
-            images.committed = nullptr;
-        }
-    }
-
-    {
-        GMutexHolder lock(threading.mutex);
-        wpe_view_backend_exportable_fdo_destroy(wpe.exportable);
-    }
-
-    if (gst.display) {
-        gst_object_unref(gst.display);
-        gst.display = nullptr;
-    }
-
-    if (gst.context) {
-        gst_object_unref(gst.context);
-        gst.context = nullptr;
-    }
-
     if (threading.thread) {
         g_thread_unref(threading.thread);
         threading.thread = nullptr;
@@ -100,12 +98,41 @@ WPEThreadedView::~WPEThreadedView()
     g_cond_clear(&threading.cond);
     g_mutex_clear(&threading.ready_mutex);
     g_cond_clear(&threading.ready_cond);
-    g_mutex_clear(&images.mutex);
 }
 
-gpointer WPEThreadedView::s_viewThread(gpointer data)
+template<typename Function>
+void WPEContextThread::dispatch(Function func)
 {
-    auto& view = *static_cast<WPEThreadedView*>(data);
+    struct Payload {
+        Function& func;
+    };
+    struct Payload payload { func };
+
+    GSource* source = g_idle_source_new();
+    g_source_set_callback(source, [](gpointer data) -> gboolean {
+        auto& view = WPEContextThread::singleton();
+        GMutexHolder lock(view.threading.mutex);
+
+        auto* payload = static_cast<struct Payload*>(data);
+        payload->func();
+
+        g_cond_signal(&view.threading.cond);
+        return G_SOURCE_REMOVE;
+    }, &payload, nullptr);
+    g_source_set_priority(source, WPE_GLIB_SOURCE_PRIORITY);
+
+    {
+        GMutexHolder lock(threading.mutex);
+        g_source_attach(source, glib.context);
+        g_cond_wait(&threading.cond, &threading.mutex);
+    }
+
+    g_source_unref(source);
+}
+
+gpointer WPEContextThread::s_viewThread(gpointer data)
+{
+    auto& view = *static_cast<WPEContextThread*>(data);
 
     view.glib.context = g_main_context_new();
     view.glib.loop = g_main_loop_new(view.glib.context, FALSE);
@@ -116,7 +143,7 @@ gpointer WPEThreadedView::s_viewThread(gpointer data)
         GSource* source = g_idle_source_new();
         g_source_set_callback(source,
             [](gpointer data) -> gboolean {
-                auto& view = *static_cast<WPEThreadedView*>(data);
+                auto& view = *static_cast<WPEContextThread*>(data);
                 GMutexHolder lock(view.threading.mutex);
                 g_cond_signal(&view.threading.cond);
                 return G_SOURCE_REMOVE;
@@ -131,38 +158,16 @@ gpointer WPEThreadedView::s_viewThread(gpointer data)
     g_main_loop_unref(view.glib.loop);
     view.glib.loop = nullptr;
 
-    if (view.webkit.view) {
-        g_object_unref(view.webkit.view);
-        view.webkit.view = nullptr;
-    }
-    if (view.webkit.uri) {
-        g_free(view.webkit.uri);
-        view.webkit.uri = nullptr;
-    }
-
     g_main_context_pop_thread_default(view.glib.context);
     g_main_context_unref(view.glib.context);
     view.glib.context = nullptr;
     return nullptr;
 }
 
-struct wpe_view_backend* WPEThreadedView::backend() const
-{
-    return wpe.exportable ? wpe_view_backend_exportable_fdo_get_view_backend(wpe.exportable) : nullptr;
-}
-
-void WPEThreadedView::s_loadEvent(WebKitWebView*, WebKitLoadEvent event, gpointer data)
-{
-    if (event == WEBKIT_LOAD_COMMITTED) {
-        auto& view = *static_cast<WPEThreadedView*>(data);
-        GMutexHolder lock(view.threading.ready_mutex);
-        g_cond_signal(&view.threading.ready_cond);
-    }
-}
-
-void WPEThreadedView::initialize(GstWpeSrc* src, GstGLContext* context, GstGLDisplay* display, int width, int height)
+WPEView* WPEContextThread::createWPEView(GstWpeSrc* src, GstGLContext* context, GstGLDisplay* display, int width, int height)
 {
     GST_DEBUG("context %p display %p, size (%d,%d)", context, display, width, height);
+    threading.ready = FALSE;
 
     static std::once_flag s_loaderFlag;
     std::call_once(s_loaderFlag,
@@ -172,164 +177,230 @@ void WPEThreadedView::initialize(GstWpeSrc* src, GstGLContext* context, GstGLDis
 #endif
         });
 
-    struct InitializeContext {
-        GstWpeSrc* src;
-        WPEThreadedView& view;
-        GstGLContext* context;
-        GstGLDisplay* display;
-        int width;
-        int height;
-    } initializeContext{ src, *this, context, display, width, height };
+    WPEView* view = nullptr;
+    dispatch([&]() mutable {
+        if (!glib.web_context) {
+            auto* manager = webkit_website_data_manager_new_ephemeral();
+            glib.web_context = webkit_web_context_new_with_website_data_manager(manager);
+            g_object_unref(manager);
+        }
 
-    GSource* source = g_idle_source_new();
-    g_source_set_callback(source,
-        [](gpointer data) -> gboolean {
-            GST_DEBUG("on view thread");
-            auto& initializeContext = *static_cast<InitializeContext*>(data);
-            auto& view = initializeContext.view;
+        view = new WPEView(glib.web_context, src, context, display, width, height);
+    });
 
-            GMutexHolder lock(view.threading.mutex);
-
-            view.gst.context = GST_GL_CONTEXT(gst_object_ref(initializeContext.context));
-            view.gst.display = GST_GL_DISPLAY(gst_object_ref(initializeContext.display));
-
-            view.wpe.width = initializeContext.width;
-            view.wpe.height = initializeContext.height;
-
-            EGLDisplay eglDisplay = gst_gl_display_egl_get_from_native(
-                GST_GL_DISPLAY_TYPE_WAYLAND,
-                gst_gl_display_get_handle(initializeContext.display));
-            GST_DEBUG("eglDisplay %p", eglDisplay);
-            wpe_fdo_initialize_for_egl_display(eglDisplay);
-
-            view.wpe.exportable = wpe_view_backend_exportable_fdo_egl_create(&s_exportableClient,
-                &view, view.wpe.width, view.wpe.height);
-            auto* wpeViewBackend = wpe_view_backend_exportable_fdo_get_view_backend(view.wpe.exportable);
-            auto* viewBackend = webkit_web_view_backend_new(wpeViewBackend, nullptr, nullptr);
-#if defined(WPE_BACKEND_CHECK_VERSION) && WPE_BACKEND_CHECK_VERSION(1, 1, 0)
-            wpe_view_backend_add_activity_state(wpeViewBackend, wpe_view_activity_state_visible | wpe_view_activity_state_focused | wpe_view_activity_state_in_window);
-#endif
-
-            view.webkit.view = WEBKIT_WEB_VIEW(g_object_new(WEBKIT_TYPE_WEB_VIEW,
-                "backend", viewBackend, nullptr));
-
-            gst_wpe_src_configure_web_view(initializeContext.src, view.webkit.view);
-
-            g_signal_connect(view.webkit.view, "load-changed", G_CALLBACK(s_loadEvent), &view);
-
-            const gchar* location;
-            gboolean drawBackground = TRUE;
-            g_object_get(initializeContext.src, "location", &location, "draw-background", &drawBackground, nullptr);
-            if (!location)
-                g_warning("Invalid location");
-            else {
-                view.setDrawBackground(drawBackground);
-                view.loadUriUnlocked(location);
-            }
-            g_cond_signal(&view.threading.cond);
-            return G_SOURCE_REMOVE;
-        },
-        &initializeContext, nullptr);
-    g_source_set_priority(source, WPE_GLIB_SOURCE_PRIORITY);
-
-    {
-        GMutexHolder lock(threading.mutex);
-        g_source_attach(source, glib.context);
-        g_cond_wait(&threading.cond, &threading.mutex);
-    }
-
-    g_source_unref(source);
-
-    {
+    if (view && view->hasUri()) {
         GST_DEBUG("waiting load to finish");
         GMutexHolder lock(threading.ready_mutex);
-        g_cond_wait(&threading.ready_cond, &threading.ready_mutex);
+        while (!threading.ready)
+            g_cond_wait(&threading.ready_cond, &threading.ready_mutex);
         GST_DEBUG("done");
+    }
+
+    return view;
+}
+
+void WPEContextThread::notifyLoadFinished()
+{
+    GMutexHolder lock(threading.ready_mutex);
+    if (!threading.ready) {
+        threading.ready = TRUE;
+        g_cond_signal(&threading.ready_cond);
     }
 }
 
-GstEGLImage* WPEThreadedView::image()
+static gboolean s_loadFailed(WebKitWebView*, WebKitLoadEvent, gchar* failing_uri, GError* error, gpointer data)
 {
-    GstEGLImage* ret = nullptr;
-    GMutexHolder lock(images.mutex);
+    GstWpeSrc* src = GST_WPE_SRC(data);
+    GST_ELEMENT_ERROR (GST_ELEMENT_CAST(src), RESOURCE, FAILED, (NULL), ("Failed to load %s (%s)", failing_uri, error->message));
+    return FALSE;
+}
 
-    GST_TRACE("pending %" GST_PTR_FORMAT " committed %" GST_PTR_FORMAT, images.pending, images.committed);
+WPEView::WPEView(WebKitWebContext* web_context, GstWpeSrc* src, GstGLContext* context, GstGLDisplay* display, int width, int height)
+{
+    g_mutex_init(&images_mutex);
+    if (context)
+        gst.context = GST_GL_CONTEXT(gst_object_ref(context));
+    if (display)
+        gst.display = GST_GL_DISPLAY(gst_object_ref(display));
 
-    if (images.pending) {
-        auto* previousImage = images.committed;
-        images.committed = images.pending;
-        images.pending = nullptr;
+    wpe.width = width;
+    wpe.height = height;
 
-        frameComplete();
+    EGLDisplay eglDisplay = EGL_NO_DISPLAY;
+    if (context && display)
+        eglDisplay = gst_gl_display_egl_get_from_native(GST_GL_DISPLAY_TYPE_WAYLAND, gst_gl_display_get_handle(display));
+    GST_DEBUG("eglDisplay %p", eglDisplay);
 
-        if (previousImage)
-            gst_egl_image_unref(previousImage);
+    if (eglDisplay) {
+        m_isValid = wpe_fdo_initialize_for_egl_display(eglDisplay);
+        GST_DEBUG("FDO EGL display initialisation result: %d", m_isValid);
+    } else {
+#if ENABLE_SHM_BUFFER_SUPPORT
+        m_isValid = wpe_fdo_initialize_shm();
+        GST_DEBUG("FDO SHM initialisation result: %d", m_isValid);
+#else
+        GST_WARNING("FDO SHM support is available only in WPEBackend-FDO 1.7.0");
+#endif
+    }
+    if (!m_isValid)
+        return;
+
+    if (eglDisplay) {
+        wpe.exportable = wpe_view_backend_exportable_fdo_egl_create(&s_exportableEGLClient, this, wpe.width, wpe.height);
+    } else {
+#if ENABLE_SHM_BUFFER_SUPPORT
+        wpe.exportable = wpe_view_backend_exportable_fdo_create(&s_exportableClient, this, wpe.width, wpe.height);
+#endif
     }
 
-    if (images.committed)
-        ret = images.committed;
+    auto* wpeViewBackend = wpe_view_backend_exportable_fdo_get_view_backend(wpe.exportable);
+    auto* viewBackend = webkit_web_view_backend_new(wpeViewBackend, (GDestroyNotify) wpe_view_backend_exportable_fdo_destroy, wpe.exportable);
+#if defined(WPE_BACKEND_CHECK_VERSION) && WPE_BACKEND_CHECK_VERSION(1, 1, 0)
+    wpe_view_backend_add_activity_state(wpeViewBackend, wpe_view_activity_state_visible | wpe_view_activity_state_focused | wpe_view_activity_state_in_window);
+#endif
+
+    webkit.view = WEBKIT_WEB_VIEW(g_object_new(WEBKIT_TYPE_WEB_VIEW, "web-context", web_context, "backend", viewBackend, nullptr));
+
+    g_signal_connect(webkit.view, "load-failed", G_CALLBACK(s_loadFailed), src);
+    g_signal_connect(webkit.view, "load-failed-with-tls-errors", G_CALLBACK(s_loadFailed), src);
+
+    gst_wpe_src_configure_web_view(src, webkit.view);
+
+    const gchar* location;
+    gboolean drawBackground = TRUE;
+    g_object_get(src, "location", &location, "draw-background", &drawBackground, nullptr);
+    setDrawBackground(drawBackground);
+    if (location)
+        loadUriUnlocked(location);
+}
+
+WPEView::~WPEView()
+{
+    {
+        GMutexHolder lock(images_mutex);
+
+        if (egl.pending) {
+            gst_egl_image_unref(egl.pending);
+            egl.pending = nullptr;
+        }
+        if (egl.committed) {
+            gst_egl_image_unref(egl.committed);
+            egl.committed = nullptr;
+        }
+    }
+
+    WPEContextThread::singleton().dispatch([&]() {
+        if (webkit.view) {
+            g_object_unref(webkit.view);
+            webkit.view = nullptr;
+        }
+    });
+
+    if (gst.display) {
+        gst_object_unref(gst.display);
+        gst.display = nullptr;
+    }
+
+    if (gst.context) {
+        gst_object_unref(gst.context);
+        gst.context = nullptr;
+    }
+    if (webkit.uri) {
+        g_free(webkit.uri);
+        webkit.uri = nullptr;
+    }
+
+    g_mutex_clear(&images_mutex);
+}
+
+GstEGLImage* WPEView::image()
+{
+    GstEGLImage* ret = nullptr;
+    bool dispatchFrameComplete = false;
+
+    {
+        GMutexHolder lock(images_mutex);
+
+        GST_TRACE("pending %" GST_PTR_FORMAT " (%d) committed %" GST_PTR_FORMAT " (%d)", egl.pending,
+                  GST_IS_EGL_IMAGE(egl.pending) ? GST_MINI_OBJECT_REFCOUNT_VALUE(GST_MINI_OBJECT_CAST(egl.pending)) : 0,
+                  egl.committed,
+                  GST_IS_EGL_IMAGE(egl.committed) ? GST_MINI_OBJECT_REFCOUNT_VALUE(GST_MINI_OBJECT_CAST(egl.committed)) : 0);
+
+        if (egl.pending) {
+            auto* previousImage = egl.committed;
+            egl.committed = egl.pending;
+            egl.pending = nullptr;
+
+            if (previousImage)
+                gst_egl_image_unref(previousImage);
+            dispatchFrameComplete = true;
+        }
+
+        if (egl.committed)
+            ret = egl.committed;
+    }
+
+    if (dispatchFrameComplete)
+        frameComplete();
 
     return ret;
 }
 
-void WPEThreadedView::resize(int width, int height)
+GstBuffer* WPEView::buffer()
 {
-    GST_DEBUG("resize");
-
-    GSource* source = g_idle_source_new();
-    g_source_set_callback(source,
-        [](gpointer data) -> gboolean {
-            auto& view = *static_cast<WPEThreadedView*>(data);
-            GMutexHolder lock(view.threading.mutex);
-
-            GST_DEBUG("dispatching");
-            if (view.wpe.exportable && wpe_view_backend_exportable_fdo_get_view_backend(view.wpe.exportable))
-                wpe_view_backend_dispatch_set_size(wpe_view_backend_exportable_fdo_get_view_backend(view.wpe.exportable), view.wpe.width, view.wpe.height);
-
-            g_cond_signal(&view.threading.cond);
-            return G_SOURCE_REMOVE;
-        },
-        this, nullptr);
-    g_source_set_priority(source, WPE_GLIB_SOURCE_PRIORITY);
+    GstBuffer* ret = nullptr;
+    bool dispatchFrameComplete = false;
 
     {
-        GMutexHolder lock(threading.mutex);
-        g_source_attach(source, glib.context);
-        g_cond_wait(&threading.cond, &threading.mutex);
+        GMutexHolder lock(images_mutex);
+
+        GST_TRACE("pending %" GST_PTR_FORMAT " (%d) committed %" GST_PTR_FORMAT " (%d)", shm.pending,
+                  GST_IS_BUFFER(shm.pending) ? GST_MINI_OBJECT_REFCOUNT_VALUE(GST_MINI_OBJECT_CAST(shm.pending)) : 0,
+                  shm.committed,
+                  GST_IS_BUFFER(shm.committed) ? GST_MINI_OBJECT_REFCOUNT_VALUE(GST_MINI_OBJECT_CAST(shm.committed)) : 0);
+
+        if (shm.pending) {
+            auto* previousImage = shm.committed;
+            shm.committed = shm.pending;
+            shm.pending = nullptr;
+
+            if (previousImage)
+                gst_buffer_unref(previousImage);
+            dispatchFrameComplete = true;
+        }
+
+        if (shm.committed)
+            ret = shm.committed;
     }
 
-    g_source_unref(source);
+    if (dispatchFrameComplete)
+        frameComplete();
+
+    return ret;
 }
 
-void WPEThreadedView::frameComplete()
+void WPEView::resize(int width, int height)
 {
-    GST_DEBUG("frame complete");
+    GST_DEBUG("resize to %dx%d", width, height);
+    wpe.width = width;
+    wpe.height = height;
 
-    GSource* source = g_idle_source_new();
-    g_source_set_callback(source,
-        [](gpointer data) -> gboolean {
-            auto& view = *static_cast<WPEThreadedView*>(data);
-            GMutexHolder lock(view.threading.mutex);
-
-            GST_DEBUG("dispatching");
-            wpe_view_backend_exportable_fdo_dispatch_frame_complete(view.wpe.exportable);
-
-            g_cond_signal(&view.threading.cond);
-            return G_SOURCE_REMOVE;
-        },
-        this, nullptr);
-    g_source_set_priority(source, WPE_GLIB_SOURCE_PRIORITY);
-
-    {
-        GMutexHolder lock(threading.mutex);
-        g_source_attach(source, glib.context);
-        g_cond_wait(&threading.cond, &threading.mutex);
-    }
-
-    g_source_unref(source);
+    s_view->dispatch([&]() {
+        if (wpe.exportable && wpe_view_backend_exportable_fdo_get_view_backend(wpe.exportable))
+          wpe_view_backend_dispatch_set_size(wpe_view_backend_exportable_fdo_get_view_backend(wpe.exportable), wpe.width, wpe.height);
+    });
 }
 
-void WPEThreadedView::loadUriUnlocked(const gchar* uri)
+void WPEView::frameComplete()
+{
+    GST_TRACE("frame complete");
+    s_view->dispatch([&]() {
+        GST_TRACE("dispatching");
+        wpe_view_backend_exportable_fdo_dispatch_frame_complete(wpe.exportable);
+    });
+}
+
+void WPEView::loadUriUnlocked(const gchar* uri)
 {
     if (webkit.uri)
         g_free(webkit.uri);
@@ -339,42 +410,24 @@ void WPEThreadedView::loadUriUnlocked(const gchar* uri)
     webkit_web_view_load_uri(webkit.view, webkit.uri);
 }
 
-void WPEThreadedView::loadUri(const gchar* uri)
+void WPEView::loadUri(const gchar* uri)
 {
-    struct UriContext {
-        WPEThreadedView& view;
-        const gchar* uri;
-    } uriContext{ *this, uri };
-
-    GSource* source = g_idle_source_new();
-    g_source_set_callback(source,
-        [](gpointer data) -> gboolean {
-            GST_DEBUG("on view thread");
-            auto& uriContext = *static_cast<UriContext*>(data);
-            auto& view = uriContext.view;
-            GMutexHolder lock(view.threading.mutex);
-
-            view.loadUriUnlocked(uriContext.uri);
-
-            g_cond_signal(&view.threading.cond);
-            return G_SOURCE_REMOVE;
-        },
-        &uriContext, nullptr);
-    g_source_set_priority(source, WPE_GLIB_SOURCE_PRIORITY);
-
-    {
-        GMutexHolder lock(threading.mutex);
-        g_source_attach(source, glib.context);
-        g_cond_wait(&threading.cond, &threading.mutex);
-        GST_DEBUG("done");
-    }
-
-    g_source_unref(source);
+    s_view->dispatch([&]() {
+        loadUriUnlocked(uri);
+    });
 }
 
-void WPEThreadedView::setDrawBackground(gboolean drawsBackground)
+void WPEView::loadData(GBytes* bytes)
 {
-#if WEBKIT_CHECK_VERSION(2, 23, 0)
+    s_view->dispatch([this, bytes = g_bytes_ref(bytes)]() {
+        webkit_web_view_load_bytes(webkit.view, bytes, nullptr, nullptr, nullptr);
+        g_bytes_unref(bytes);
+    });
+}
+
+void WPEView::setDrawBackground(gboolean drawsBackground)
+{
+#if WEBKIT_CHECK_VERSION(2, 24, 0)
     GST_DEBUG("%s background rendering", drawsBackground ? "Enabling" : "Disabling");
     WebKitColor color;
     webkit_color_parse(&color, drawsBackground ? "white" : "transparent");
@@ -384,55 +437,170 @@ void WPEThreadedView::setDrawBackground(gboolean drawsBackground)
 #endif
 }
 
-void WPEThreadedView::releaseImage(EGLImageKHR image)
+void WPEView::releaseImage(gpointer imagePointer)
 {
-    struct ReleaseImageContext {
-        WPEThreadedView& view;
-        EGLImageKHR image;
-    } releaseImageContext{ *this, image };
-
-    GSource* source = g_idle_source_new();
-    g_source_set_callback(source,
-        [](gpointer data) -> gboolean {
-            auto& releaseImageContext = *static_cast<ReleaseImageContext*>(data);
-            auto& view = releaseImageContext.view;
-            GMutexHolder lock(view.threading.mutex);
-
-            wpe_view_backend_exportable_fdo_egl_dispatch_release_image(
-                releaseImageContext.view.wpe.exportable, releaseImageContext.image);
-
-            g_cond_signal(&view.threading.cond);
-            return G_SOURCE_REMOVE;
-        },
-        &releaseImageContext, nullptr);
-    g_source_set_priority(source, WPE_GLIB_SOURCE_PRIORITY);
-
-    {
-        GMutexHolder lock(threading.mutex);
-        g_source_attach(source, glib.context);
-        g_cond_wait(&threading.cond, &threading.mutex);
-    }
-
-    g_source_unref(source);
+    s_view->dispatch([&]() {
+        GST_TRACE("Dispatch release exported image %p", imagePointer);
+#if USE_DEPRECATED_FDO_EGL_IMAGE
+        wpe_view_backend_exportable_fdo_egl_dispatch_release_image(wpe.exportable,
+                                                                   static_cast<EGLImageKHR>(imagePointer));
+#else
+        wpe_view_backend_exportable_fdo_egl_dispatch_release_exported_image(wpe.exportable,
+                                                                            static_cast<struct wpe_fdo_egl_exported_image*>(imagePointer));
+#endif
+    });
 }
 
-struct wpe_view_backend_exportable_fdo_egl_client WPEThreadedView::s_exportableClient = {
-    // export_buffer_resource
-    [](void* data, EGLImageKHR image) {
-        auto& view = *static_cast<WPEThreadedView*>(data);
-        auto* gstImage = gst_egl_image_new_wrapped(view.gst.context, image,
-            GST_GL_RGBA, &view, s_releaseImage);
-        GMutexHolder lock(view.images.mutex);
-
-        view.images.pending = gstImage;
-    },
-    // padding
-    nullptr, nullptr, nullptr, nullptr
+struct ImageContext {
+    WPEView* view;
+    gpointer image;
 };
 
-void WPEThreadedView::s_releaseImage(GstEGLImage* image, gpointer data)
+void WPEView::handleExportedImage(gpointer image)
 {
-    auto& view = *static_cast<WPEThreadedView*>(data);
-    GST_DEBUG("view %p image %" GST_PTR_FORMAT, &view, image);
-    view.releaseImage(gst_egl_image_get_image(image));
+    ImageContext* imageContext = g_slice_new(ImageContext);
+    imageContext->view = this;
+    imageContext->image = static_cast<gpointer>(image);
+    EGLImageKHR eglImage;
+#if USE_DEPRECATED_FDO_EGL_IMAGE
+    eglImage = static_cast<EGLImageKHR>(image);
+#else
+    eglImage = wpe_fdo_egl_exported_image_get_egl_image(static_cast<struct wpe_fdo_egl_exported_image*>(image));
+#endif
+
+    auto* gstImage = gst_egl_image_new_wrapped(gst.context, eglImage, GST_GL_RGBA, imageContext, s_releaseImage);
+    {
+      GMutexHolder lock(images_mutex);
+
+      GST_TRACE("EGLImage %p wrapped in GstEGLImage %" GST_PTR_FORMAT, eglImage, gstImage);
+      egl.pending = gstImage;
+
+      s_view->notifyLoadFinished();
+    }
+}
+
+#if ENABLE_SHM_BUFFER_SUPPORT
+struct SHMBufferContext {
+    WPEView* view;
+    struct wpe_fdo_shm_exported_buffer* buffer;
+};
+
+void WPEView::releaseSHMBuffer(gpointer data)
+{
+    SHMBufferContext* context = static_cast<SHMBufferContext*>(data);
+    s_view->dispatch([&]() {
+        auto* buffer = static_cast<struct wpe_fdo_shm_exported_buffer*>(context->buffer);
+        GST_TRACE("Dispatch release exported buffer %p", buffer);
+        wpe_view_backend_exportable_fdo_dispatch_release_shm_exported_buffer(wpe.exportable, buffer);
+    });
+}
+
+void WPEView::s_releaseSHMBuffer(gpointer data)
+{
+    SHMBufferContext* context = static_cast<SHMBufferContext*>(data);
+    context->view->releaseSHMBuffer(data);
+    g_slice_free(SHMBufferContext, context);
+}
+
+void WPEView::handleExportedBuffer(struct wpe_fdo_shm_exported_buffer* buffer)
+{
+    struct wl_shm_buffer* shmBuffer = wpe_fdo_shm_exported_buffer_get_shm_buffer(buffer);
+    auto format = wl_shm_buffer_get_format(shmBuffer);
+    if (format != WL_SHM_FORMAT_ARGB8888 && format != WL_SHM_FORMAT_XRGB8888) {
+        GST_ERROR("Unsupported pixel format: %d", format);
+        return;
+    }
+
+    int32_t width = wl_shm_buffer_get_width(shmBuffer);
+    int32_t height = wl_shm_buffer_get_height(shmBuffer);
+    gint stride = wl_shm_buffer_get_stride(shmBuffer);
+    gsize size = width * height * 4;
+    auto* data = static_cast<uint8_t*>(wl_shm_buffer_get_data(shmBuffer));
+
+    SHMBufferContext* bufferContext = g_slice_new(SHMBufferContext);
+    bufferContext->view = this;
+    bufferContext->buffer = buffer;
+
+    auto* gstBuffer = gst_buffer_new_wrapped_full(GST_MEMORY_FLAG_READONLY, data, size, 0, size, bufferContext, s_releaseSHMBuffer);
+    gsize offsets[1];
+    gint strides[1];
+    offsets[0] = 0;
+    strides[0] = stride;
+    gst_buffer_add_video_meta_full(gstBuffer, GST_VIDEO_FRAME_FLAG_NONE, GST_VIDEO_FORMAT_BGRA, width, height, 1, offsets, strides);
+
+    {
+        GMutexHolder lock(images_mutex);
+        GST_TRACE("SHM buffer %p wrapped in buffer %" GST_PTR_FORMAT, buffer, gstBuffer);
+        shm.pending = gstBuffer;
+        s_view->notifyLoadFinished();
+    }
+}
+#endif
+
+struct wpe_view_backend_exportable_fdo_egl_client WPEView::s_exportableEGLClient = {
+#if USE_DEPRECATED_FDO_EGL_IMAGE
+    // export_egl_image
+    [](void* data, EGLImageKHR image) {
+        auto& view = *static_cast<WPEView*>(data);
+        view.handleExportedImage(static_cast<gpointer>(image));
+    },
+    nullptr, nullptr,
+#else
+    // export_egl_image
+    nullptr,
+    [](void* data, struct wpe_fdo_egl_exported_image* image) {
+        auto& view = *static_cast<WPEView*>(data);
+        view.handleExportedImage(static_cast<gpointer>(image));
+    },
+    nullptr,
+#endif // USE_DEPRECATED_FDO_EGL_IMAGE
+    // padding
+    nullptr, nullptr
+};
+
+#if ENABLE_SHM_BUFFER_SUPPORT
+struct wpe_view_backend_exportable_fdo_client WPEView::s_exportableClient = {
+    nullptr,
+    nullptr,
+    // export_shm_buffer
+    [](void* data, struct wpe_fdo_shm_exported_buffer* buffer) {
+        auto& view = *static_cast<WPEView*>(data);
+        view.handleExportedBuffer(buffer);
+    },
+    nullptr,
+    nullptr,
+};
+#endif
+
+void WPEView::s_releaseImage(GstEGLImage* image, gpointer data)
+{
+    ImageContext* context = static_cast<ImageContext*>(data);
+    context->view->releaseImage(context->image);
+    g_slice_free(ImageContext, context);
+}
+
+struct wpe_view_backend* WPEView::backend() const
+{
+    return wpe.exportable ? wpe_view_backend_exportable_fdo_get_view_backend(wpe.exportable) : nullptr;
+}
+
+void WPEView::dispatchKeyboardEvent(struct wpe_input_keyboard_event& wpe_event)
+{
+    s_view->dispatch([&]() {
+        wpe_view_backend_dispatch_keyboard_event(backend(), &wpe_event);
+    });
+}
+
+void WPEView::dispatchPointerEvent(struct wpe_input_pointer_event& wpe_event)
+{
+    s_view->dispatch([&]() {
+        wpe_view_backend_dispatch_pointer_event(backend(), &wpe_event);
+    });
+}
+
+void WPEView::dispatchAxisEvent(struct wpe_input_axis_event& wpe_event)
+{
+    s_view->dispatch([&]() {
+        wpe_view_backend_dispatch_axis_event(backend(), &wpe_event);
+    });
 }

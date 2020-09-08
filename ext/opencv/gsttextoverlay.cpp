@@ -48,12 +48,11 @@
  *
  * opencvtextoverlay renders the text on top of the video frames
  *
- * <refsect2>
- * <title>Example launch line</title>
+ * ## Example launch line
+ *
  * |[
  * gst-launch-1.0 videotestsrc ! videoconvert ! opencvtextoverlay text="Opencv Text Overlay " ! videoconvert ! xvimagesink
  * ]|
- * </refsect2>
  */
 
 #ifdef HAVE_CONFIG_H
@@ -218,7 +217,7 @@ gst_opencv_text_overlay_class_init (GstOpencvTextOverlayClass * klass)
 
 /* initialize the new element
  * instantiate pads and add them to element
- * set pad calback functions
+ * set pad callback functions
  * initialize instance structure
  */
 static void

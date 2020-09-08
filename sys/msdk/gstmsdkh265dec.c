@@ -33,13 +33,14 @@
 #  include <config.h>
 #endif
 
-#include <mfxplugin.h>
-
 #include "gstmsdkh265dec.h"
 #include "gstmsdkvideomemory.h"
 
 GST_DEBUG_CATEGORY_EXTERN (gst_msdkh265dec_debug);
 #define GST_CAT_DEFAULT gst_msdkh265dec_debug
+
+#define COMMON_FORMAT \
+  "{ NV12, P010_10LE, YUY2, Y210, VUYA, Y410, P012_LE, Y212_LE, Y412_LE }"
 
 /* TODO: update both sink and src dynamically */
 static GstStaticPadTemplate sink_factory = GST_STATIC_PAD_TEMPLATE ("sink",
@@ -47,20 +48,13 @@ static GstStaticPadTemplate sink_factory = GST_STATIC_PAD_TEMPLATE ("sink",
     GST_PAD_ALWAYS,
     GST_STATIC_CAPS ("video/x-h265, "
         "width = (int) [ 1, MAX ], height = (int) [ 1, MAX ], "
-        "stream-format = (string) byte-stream , alignment = (string) au , "
-        "profile = (string) { main, main-10 } ")
+        "stream-format = (string) byte-stream , alignment = (string) au ")
     );
 
 static GstStaticPadTemplate src_factory = GST_STATIC_PAD_TEMPLATE ("src",
     GST_PAD_SRC,
     GST_PAD_ALWAYS,
-    GST_STATIC_CAPS ("video/x-raw, "
-        "format = (string) { NV12, P010_10LE }, "
-        "framerate = (fraction) [0, MAX], "
-        "width = (int) [ 1, MAX ], height = (int) [ 1, MAX ],"
-        "interlace-mode = (string) progressive;"
-        GST_VIDEO_CAPS_MAKE_WITH_FEATURES (GST_CAPS_FEATURE_MEMORY_DMABUF,
-            "{ NV12, P010_10LE }") ";")
+    GST_STATIC_CAPS (GST_MSDK_CAPS_STR (COMMON_FORMAT, COMMON_FORMAT))
     );
 
 #define gst_msdkh265dec_parent_class parent_class
@@ -71,7 +65,6 @@ gst_msdkh265dec_configure (GstMsdkDec * decoder)
 {
   GstMsdkH265Dec *h265dec = GST_MSDKH265DEC (decoder);
   mfxSession session;
-  mfxStatus status;
   const mfxPluginUID *uid;
 
   session = gst_msdk_context_get_session (decoder->context);
@@ -81,15 +74,8 @@ gst_msdkh265dec_configure (GstMsdkDec * decoder)
   else
     uid = &MFX_PLUGINID_HEVCD_SW;
 
-  status = MFXVideoUSER_Load (session, uid, 1);
-  if (status < MFX_ERR_NONE) {
-    GST_ERROR_OBJECT (h265dec, "Media SDK Plugin load failed (%s)",
-        msdk_status_to_string (status));
+  if (!gst_msdk_load_plugin (session, uid, 1, "msdkh265dec"))
     return FALSE;
-  } else if (status > MFX_ERR_NONE) {
-    GST_WARNING_OBJECT (h265dec, "Media SDK Plugin load warning: %s",
-        msdk_status_to_string (status));
-  }
 
   decoder->param.mfx.CodecId = MFX_CODEC_HEVC;
 

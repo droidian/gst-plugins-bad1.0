@@ -164,6 +164,8 @@ gst_wasapi_sink_class_init (GstWasapiSinkClass * klass)
 
   GST_DEBUG_CATEGORY_INIT (gst_wasapi_sink_debug, "wasapisink",
       0, "Windows audio session API sink");
+
+  gst_type_mark_as_plugin_api (GST_WASAPI_DEVICE_TYPE_ROLE, 0);
 }
 
 static void
@@ -175,6 +177,7 @@ gst_wasapi_sink_init (GstWasapiSink * self)
   self->low_latency = DEFAULT_LOW_LATENCY;
   self->try_audioclient3 = DEFAULT_AUDIOCLIENT3;
   self->event_handle = CreateEvent (NULL, FALSE, FALSE, NULL);
+  self->cancellable = CreateEvent (NULL, TRUE, FALSE, NULL);
   self->client_needs_restart = FALSE;
 
   CoInitializeEx (NULL, COINIT_MULTITHREADED);
@@ -188,6 +191,11 @@ gst_wasapi_sink_dispose (GObject * object)
   if (self->event_handle != NULL) {
     CloseHandle (self->event_handle);
     self->event_handle = NULL;
+  }
+
+  if (self->cancellable != NULL) {
+    CloseHandle (self->cancellable);
+    self->cancellable = NULL;
   }
 
   if (self->client != NULL) {
@@ -564,6 +572,9 @@ gst_wasapi_sink_prepare (GstAudioSink * asink, GstAudioRingBufferSpec * spec)
 
   res = TRUE;
 
+  /* reset cancellable event handle */
+  ResetEvent (self->cancellable);
+
 beach:
   /* unprepare() is not called if prepare() fails, but we want it to be, so call
    * it manually when needed */
@@ -600,6 +611,10 @@ gst_wasapi_sink_write (GstAudioSink * asink, gpointer data, guint length)
   gint16 *dst = NULL;
   DWORD dwWaitResult;
   guint can_frames, have_frames, n_frames, write_len, written_len = 0;
+  HANDLE event_handle[2];
+
+  event_handle[0] = self->event_handle;
+  event_handle[1] = self->cancellable;
 
   GST_OBJECT_LOCK (self);
   if (self->client_needs_restart) {
@@ -607,6 +622,7 @@ gst_wasapi_sink_write (GstAudioSink * asink, gpointer data, guint length)
     HR_FAILED_ELEMENT_ERROR_AND (hr, IAudioClient::Start, self,
         GST_OBJECT_UNLOCK (self); goto err);
     self->client_needs_restart = FALSE;
+    ResetEvent (self->cancellable);
   }
   GST_OBJECT_UNLOCK (self);
 
@@ -614,12 +630,18 @@ gst_wasapi_sink_write (GstAudioSink * asink, gpointer data, guint length)
   have_frames = length / (self->mix_format->nBlockAlign);
 
   if (self->sharemode == AUDCLNT_SHAREMODE_EXCLUSIVE) {
-    /* In exlusive mode we have to wait always */
-    dwWaitResult = WaitForSingleObject (self->event_handle, INFINITE);
-    if (dwWaitResult != WAIT_OBJECT_0) {
+    /* In exclusive mode we have to wait always */
+    dwWaitResult = WaitForMultipleObjects (2, event_handle, FALSE, INFINITE);
+    if (dwWaitResult != WAIT_OBJECT_0 && dwWaitResult != WAIT_OBJECT_0 + 1) {
       GST_ERROR_OBJECT (self, "Error waiting for event handle: %x",
           (guint) dwWaitResult);
       goto err;
+    }
+
+    /* ::reset was requested */
+    if (dwWaitResult == WAIT_OBJECT_0 + 1) {
+      GST_DEBUG_OBJECT (self, "operation was cancelled");
+      return -1;
     }
 
     can_frames = gst_wasapi_sink_get_can_frames (self);
@@ -645,12 +667,19 @@ gst_wasapi_sink_write (GstAudioSink * asink, gpointer data, guint length)
     }
 
     if (can_frames == 0) {
-      dwWaitResult = WaitForSingleObject (self->event_handle, INFINITE);
-      if (dwWaitResult != WAIT_OBJECT_0) {
+      dwWaitResult = WaitForMultipleObjects (2, event_handle, FALSE, INFINITE);
+      if (dwWaitResult != WAIT_OBJECT_0 && dwWaitResult != WAIT_OBJECT_0 + 1) {
         GST_ERROR_OBJECT (self, "Error waiting for event handle: %x",
             (guint) dwWaitResult);
         goto err;
       }
+
+      /* ::reset was requested */
+      if (dwWaitResult == WAIT_OBJECT_0 + 1) {
+        GST_DEBUG_OBJECT (self, "operation was cancelled");
+        return -1;
+      }
+
       can_frames = gst_wasapi_sink_get_can_frames (self);
       if (can_frames < 0) {
         GST_ERROR_OBJECT (self, "Error getting frames to write to");
@@ -713,13 +742,16 @@ gst_wasapi_sink_reset (GstAudioSink * asink)
   if (!self->client)
     return;
 
+  SetEvent (self->cancellable);
+
   GST_OBJECT_LOCK (self);
   hr = IAudioClient_Stop (self->client);
-  HR_FAILED_AND (hr, IAudioClient::Stop,);
+  HR_FAILED_AND (hr, IAudioClient::Stop, goto err);
 
   hr = IAudioClient_Reset (self->client);
-  HR_FAILED_AND (hr, IAudioClient::Reset,);
+  HR_FAILED_AND (hr, IAudioClient::Reset, goto err);
 
+err:
   self->client_needs_restart = TRUE;
   GST_OBJECT_UNLOCK (self);
 }

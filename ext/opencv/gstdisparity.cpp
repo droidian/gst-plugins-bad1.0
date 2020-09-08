@@ -97,8 +97,8 @@
  * [D] Scharstein, D. & Szeliski, R. (2001). A taxonomy and evaluation of dense two-frame stereo
  * correspondence algorithms, International Journal of Computer Vision 47: 7–42.
  *
- * <refsect2>
- * <title>Example launch line</title>
+ * ## Example launch line
+ *
  * |[
  * gst-launch-1.0 videotestsrc ! video/x-raw,width=320,height=240 ! videoconvert ! disp0.sink_right videotestsrc ! video/x-raw,width=320,height=240 ! videoconvert ! disp0.sink_left disparity name=disp0 ! videoconvert ! ximagesink
  * ]|
@@ -112,7 +112,6 @@ gst-launch-1.0    multifilesrc  location=~/im3.png ! pngdec ! videoconvert  ! di
  * |[
  gst-launch-1.0    v4l2src device=/dev/video1 ! video/x-raw,width=320,height=240 ! videoconvert  ! disp0.sink_right     v4l2src device=/dev/video0 ! video/x-raw,width=320,height=240 ! videoconvert ! disp0.sink_left disparity   name=disp0 method=sgbm     disp0.src ! videoconvert ! ximagesink
  * ]|
- * </refsect2>
  */
 
 #ifdef HAVE_CONFIG_H
@@ -233,6 +232,8 @@ gst_disparity_class_init (GstDisparityClass * klass)
 
   gst_element_class_add_static_pad_template (element_class, &src_factory);
   gst_element_class_add_static_pad_template (element_class, &sink_factory);
+
+  gst_type_mark_as_plugin_api (GST_TYPE_DISPARITY_METHOD, (GstPluginAPIFlags) 0);
 }
 
 /* initialize the new element
@@ -371,7 +372,7 @@ gst_disparity_handle_sink_event (GstPad * pad,
       GST_INFO_OBJECT (pad, " Negotiating caps via event %" GST_PTR_FORMAT,
           caps);
       if (!gst_pad_has_current_caps (fs->srcpad)) {
-        /* Init image info (widht, height, etc) and all OpenCV matrices */
+        /* Init image info (width, height, etc) and all OpenCV matrices */
         initialise_disparity (fs, info.width, info.height,
             info.finfo->n_components);
 

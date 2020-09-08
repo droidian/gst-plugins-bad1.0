@@ -21,59 +21,72 @@
 
 #include <EGL/egl.h>
 #include <glib.h>
-#include <gst/gl/gl.h>
 #include <gst/gl/gstglfuncs.h>
-#include <gst/gl/egl/gsteglimage.h>
-#include <gst/gl/egl/gstgldisplay_egl.h>
 #include <wpe/fdo.h>
 #include <wpe/fdo-egl.h>
 #include <wpe/webkit.h>
 #include "gstwpesrc.h"
 
-GST_DEBUG_CATEGORY_EXTERN(wpe_src_debug);
+typedef struct _GstGLContext GstGLContext;
+typedef struct _GstGLDisplay GstGLDisplay;
+typedef struct _GstEGLImage GstEGLImage;
 
-class WPEThreadedView {
+#if defined(WPE_FDO_CHECK_VERSION) && WPE_FDO_CHECK_VERSION(1, 7, 0)
+#define ENABLE_SHM_BUFFER_SUPPORT 1
+#else
+#define ENABLE_SHM_BUFFER_SUPPORT 0
+#endif
+
+class WPEView {
 public:
-    WPEThreadedView();
-    ~WPEThreadedView();
+    WPEView(WebKitWebContext*, GstWpeSrc*, GstGLContext*, GstGLDisplay*, int width, int height);
+    ~WPEView();
 
-    void initialize(GstWpeSrc*, GstGLContext*, GstGLDisplay*, int width, int height);
+    bool operator!() const { return m_isValid; }
 
+    /*  Used by wpesrc */
     void resize(int width, int height);
     void loadUri(const gchar*);
+    void loadData(GBytes*);
     void setDrawBackground(gboolean);
-
     GstEGLImage* image();
+    GstBuffer* buffer();
 
-    struct wpe_view_backend* backend() const;
+    void dispatchKeyboardEvent(struct wpe_input_keyboard_event&);
+    void dispatchPointerEvent(struct wpe_input_pointer_event&);
+    void dispatchAxisEvent(struct wpe_input_axis_event&);
+
+    /*  Used by WPEContextThread */
+    bool hasUri() const { return webkit.uri; }
+    void disconnectLoadFailedSignal();
+
+protected:
+    void handleExportedImage(gpointer);
+#if ENABLE_SHM_BUFFER_SUPPORT
+    void handleExportedBuffer(struct wpe_fdo_shm_exported_buffer*);
+#endif
 
 private:
+    struct wpe_view_backend* backend() const;
     void frameComplete();
-    void releaseImage(EGLImageKHR);
     void loadUriUnlocked(const gchar*);
 
-    static void s_loadEvent(WebKitWebView*, WebKitLoadEvent, gpointer);
-
-    static gpointer s_viewThread(gpointer);
-    struct {
-        GMutex mutex;
-        GCond cond;
-        GMutex ready_mutex;
-        GCond ready_cond;
-        GThread* thread { nullptr };
-    } threading;
-
-    struct {
-        GMainContext* context;
-        GMainLoop* loop;
-    } glib { nullptr, nullptr };
+    void releaseImage(gpointer);
+#if ENABLE_SHM_BUFFER_SUPPORT
+    void releaseSHMBuffer(gpointer);
+    static void s_releaseSHMBuffer(gpointer);
+#endif
 
     struct {
         GstGLContext* context;
         GstGLDisplay* display;
     } gst { nullptr, nullptr };
 
-    static struct wpe_view_backend_exportable_fdo_egl_client s_exportableClient;
+    static struct wpe_view_backend_exportable_fdo_egl_client s_exportableEGLClient;
+#if ENABLE_SHM_BUFFER_SUPPORT
+    static struct wpe_view_backend_exportable_fdo_client s_exportableClient;
+#endif
+
     static void s_releaseImage(GstEGLImage*, gpointer);
     struct {
         struct wpe_view_backend_exportable_fdo* exportable;
@@ -86,9 +99,52 @@ private:
         WebKitWebView* view;
     } webkit = { nullptr, nullptr };
 
+    bool m_isValid { false };
+
+    // This mutex guards access to either egl or shm resources declared below,
+    // depending on the runtime behavior.
+    GMutex images_mutex;
+
+    struct {
+        GstEGLImage* pending;
+        GstEGLImage* committed;
+    } egl { nullptr, nullptr };
+
+    struct {
+        GstBuffer* pending;
+        GstBuffer* committed;
+    } shm { nullptr, nullptr };
+
+};
+
+class WPEContextThread {
+public:
+    static WPEContextThread& singleton();
+
+    WPEContextThread();
+    ~WPEContextThread();
+
+    WPEView* createWPEView(GstWpeSrc*, GstGLContext*, GstGLDisplay*, int width, int height);
+
+    template<typename Function>
+    void dispatch(Function);
+
+    void notifyLoadFinished();
+
+private:
+    static gpointer s_viewThread(gpointer);
     struct {
         GMutex mutex;
-        GstEGLImage* pending { nullptr };
-        GstEGLImage* committed { nullptr };
-    } images;
+        GCond cond;
+        GMutex ready_mutex;
+        GCond ready_cond;
+        gboolean ready;
+        GThread* thread { nullptr };
+    } threading;
+
+    struct {
+        GMainContext* context;
+        GMainLoop* loop;
+        WebKitWebContext* web_context;
+    } glib { nullptr, nullptr, nullptr };
 };

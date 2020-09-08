@@ -110,6 +110,10 @@ struct _GstAV1Enc
   /* properties */
   guint keyframe_dist;
   gint cpu_used;
+  gint threads;
+  gboolean row_mt;
+  guint tile_columns;
+  guint tile_rows;
 
   /* state */
   gboolean encoder_inited;

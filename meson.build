@@ -1,6 +1,6 @@
 project('gst-plugins-bad', 'c', 'cpp',
-  version : '1.16.2',
-  meson_version : '>= 0.47',
+  version : '1.17.90',
+  meson_version : '>= 0.49',
   default_options : [ 'warning_level=1',
                       'buildtype=debugoptimized' ])
 
@@ -16,7 +16,7 @@ else
 endif
 gst_version_is_dev = gst_version_minor % 2 == 1 and gst_version_micro < 90
 
-glib_req = '>= 2.40.0'
+glib_req = '>= 2.44.0'
 orc_req = '>= 0.4.17'
 gst_req = '>= @0@.@1@.0'.format(gst_version_major, gst_version_minor)
 
@@ -29,9 +29,19 @@ libversion = '@0@.@1@.0'.format(soversion, curversion)
 osxversion = curversion + 1
 
 plugins_install_dir = join_paths(get_option('libdir'), 'gstreamer-1.0')
+plugins = []
 
 cc = meson.get_compiler('c')
 cxx = meson.get_compiler('cpp')
+host_system = host_machine.system()
+
+if host_system in ['ios', 'darwin']
+  have_objc = add_languages('objc', native: false)
+  have_objcpp = add_languages('objcpp', native: false)
+else
+  have_objc = false
+  have_objcpp = false
+endif
 
 cdata = configuration_data()
 
@@ -69,6 +79,10 @@ if cc.get_id() == 'msvc'
   export_define = '__declspec(dllexport) extern'
 elif cc.has_argument('-fvisibility=hidden')
   add_project_arguments('-fvisibility=hidden', language: 'c')
+  add_project_arguments('-fvisibility=hidden', language: 'cpp')
+  if have_objc
+    add_project_arguments('-fvisibility=hidden', language: 'objc')
+  endif
   export_define = 'extern __attribute__ ((visibility ("default")))'
 else
   export_define = 'extern'
@@ -146,10 +160,15 @@ check_functions = [
   ['HAVE_GMTIME_R', 'gmtime_r'],
   ['HAVE_MMAP', 'mmap'],
   ['HAVE_PIPE2', 'pipe2'],
+  ['HAVE_GETRUSAGE', 'getrusage', '#include<sys/resource.h>'],
 ]
 
 foreach f : check_functions
-  if cc.has_function(f.get(1))
+  prefix = ''
+  if f.length() == 3
+    prefix = f.get(2)
+  endif
+  if cc.has_function(f.get(1), prefix: prefix)
     cdata.set(f.get(0), 1)
   endif
 endforeach
@@ -163,7 +182,7 @@ cdata.set('SIZEOF_VOIDP', cc.sizeof('void*'))
 cdata.set_quoted('VERSION', gst_version)
 cdata.set_quoted('PACKAGE', 'gst-plugins-bad')
 cdata.set_quoted('PACKAGE_VERSION', gst_version)
-cdata.set_quoted('PACKAGE_BUGREPORT', 'http://bugzilla.gnome.org/enter_bug.cgi?product=GStreamer')
+cdata.set_quoted('PACKAGE_BUGREPORT', 'https://gitlab.freedesktop.org/gstreamer/gst-plugins-bad/issues/new')
 cdata.set_quoted('PACKAGE_NAME', 'GStreamer Bad Plug-ins')
 cdata.set_quoted('GETTEXT_PACKAGE', 'gst-plugins-bad-1.0')
 cdata.set_quoted('GST_API_VERSION', api_version)
@@ -231,7 +250,6 @@ cdata.set_quoted('GST_PACKAGE_NAME', gst_package_name)
 cdata.set_quoted('GST_PACKAGE_ORIGIN', get_option('package-origin'))
 
 # FIXME: This should be exposed as a configuration option
-host_system = host_machine.system()
 if host_system == 'linux'
   cdata.set_quoted('DEFAULT_VIDEOSRC', 'v4l2src')
 elif ['darwin', 'ios'].contains(host_system)
@@ -282,6 +300,11 @@ gstcheck_dep = dependency('gstreamer-check-1.0', version : gst_req,
 # GStreamer OpenGL
 gstgl_dep = dependency('gstreamer-gl-1.0', version : gst_req,
     fallback : ['gst-plugins-base', 'gstgl_dep'], required: get_option('gl'))
+gstglproto_dep = dependency('gstreamer-gl-prototypes-1.0', version : gst_req,
+    fallback : ['gst-plugins-base', 'gstglproto_dep'], required: get_option('gl'))
+gstglx11_dep = dependency('', required : false)
+gstglwayland_dep = dependency('', required : false)
+gstglegl_dep = dependency('', required : false)
 
 if gstgl_dep.found()
   if gstgl_dep.type_name() == 'pkgconfig'
@@ -309,11 +332,24 @@ if gstgl_dep.found()
 
   foreach api : ['gl', 'gles2']
     set_variable('gst_gl_have_api_@0@'.format(api), gst_gl_apis.contains(api))
-    # temporary backwards compat for older meson-generated .pc file with 'opengl' instead of 'gl'
-    if gst_gl_apis.contains('opengl')
-      gst_gl_have_api_gl = true
-    endif
   endforeach
+
+  # Behind specific checks because meson fails at optional dependencies with a
+  # fallback to the same subproject.  On the first failure, meson will never
+  # check the system again even if the fallback never existed.
+  # Last checked with meson 0.54.3
+  if gst_gl_have_window_x11
+    gstglx11_dep = dependency('gstreamer-gl-x11-1.0', version : gst_req,
+        fallback : ['gst-plugins-base', 'gstglx11_dep'], required: true)
+  endif
+  if gst_gl_have_window_wayland
+    gstglwayland_dep = dependency('gstreamer-gl-wayland-1.0', version : gst_req,
+        fallback : ['gst-plugins-base', 'gstglwayland_dep'], required: true)
+  endif
+  if gst_gl_have_platform_egl
+    gstglegl_dep = dependency('gstreamer-gl-egl-1.0', version : gst_req,
+        fallback : ['gst-plugins-base', 'gstglegl_dep'], required: true)
+  endif
 endif
 
 libm = cc.find_library('m', required : false)
@@ -335,7 +371,9 @@ else
 endif
 
 if ['darwin', 'ios'].contains(host_system)
-  add_languages('objc')
+  if not have_objc
+    error('Building on MacOS/iOS/etc requires an ObjC compiler')
+  endif
   if host_system == 'ios'
     cdata.set('HAVE_IOS', 1)
   endif
@@ -358,6 +396,7 @@ endif
 
 have_orcc = false
 orcc_args = []
+orc_targets = []
 # Used by various libraries/elements that use Orc code
 orc_dep = dependency('orc-0.4', version : orc_req, required : get_option('orc'),
     fallback : ['orc', 'orc_dep'])
@@ -370,6 +409,7 @@ else
   message('Orc Compiler not found or disabled, will use backup C code')
   cdata.set('DISABLE_ORC', 1)
 endif
+cdata.set('GST_ENABLE_EXTRA_CHECKS', not get_option('extra-checks').disabled())
 
 gnustl_dep = declare_dependency()
 if host_system == 'android'
@@ -405,7 +445,7 @@ python3 = import('python').find_installation()
 
 gir = find_program('g-ir-scanner', required : get_option('introspection'))
 gnome = import('gnome')
-build_gir = gir.found() and not meson.is_cross_build()
+build_gir = gir.found() and (not meson.is_cross_build() or get_option('introspection').enabled())
 gir_init_section = [ '--add-init-section=extern void gst_init(gint*,gchar**);' + \
     'g_setenv("GST_REGISTRY_1.0", "@0@", TRUE);'.format(meson.current_build_dir() + '/gir_empty_registry.reg') + \
     'g_setenv("GST_PLUGIN_PATH_1_0", "", TRUE);' + \
@@ -426,7 +466,32 @@ subdir('gst')
 subdir('sys')
 subdir('ext')
 subdir('tests')
+subdir('data')
+subdir('tools')
 subdir('pkgconfig')
+
+if have_orcc
+  update_orc_dist_files = find_program('scripts/update-orc-dist-files.py')
+
+  orc_update_targets = []
+  foreach t : orc_targets
+    orc_name = t.get('name')
+    orc_file = t.get('orc-source')
+    header = t.get('header')
+    source = t.get('source')
+    # alias_target() only works with build targets, so can't use run_target() here
+    orc_update_targets += [
+      custom_target('update-orc-@0@'.format(orc_name),
+        input: [header, source],
+        command: [update_orc_dist_files, orc_file, header, source],
+        output: ['@0@-dist.c'.format(orc_name)]) # not entirely true
+    ]
+  endforeach
+
+  if meson.version().version_compare('>= 0.52') and orc_update_targets.length() > 0
+    update_orc_dist_target = alias_target('update-orc-dist', orc_update_targets)
+  endif
+endif
 
 # xgettext is optional (on Windows for instance)
 if find_program('xgettext', required : get_option('nls')).found()
@@ -434,6 +499,37 @@ if find_program('xgettext', required : get_option('nls')).found()
   subdir('po')
 endif
 
+# Set release date
+if gst_version_nano == 0
+  extract_release_date = find_program('scripts/extract-release-date-from-doap-file.py')
+  run_result = run_command(extract_release_date, gst_version, files('gst-plugins-bad.doap'))
+  if run_result.returncode() == 0
+    release_date = run_result.stdout().strip()
+    cdata.set_quoted('GST_PACKAGE_RELEASE_DATETIME', release_date)
+    message('Package release date: ' + release_date)
+  else
+    # Error out if our release can't be found in the .doap file
+    error(run_result.stderr())
+  endif
+endif
+
 configure_file(output : 'config.h', configuration : cdata)
 
 run_command(python3, '-c', 'import shutil; shutil.copy("hooks/pre-commit.hook", ".git/hooks/pre-commit")')
+
+subdir('docs')
+
+if meson.version().version_compare('>= 0.54')
+  plugin_names = []
+  foreach plugin: plugins
+    # FIXME: Use str.subtring() when we can depend on Meson 0.56
+    split = plugin.name().split('gst')
+    if split.length() == 2
+      plugin_names += [split[1]]
+    else
+      warning('Need substring API in meson >= 0.56 to properly parse plugin name: ' + plugin.name())
+      plugin_names += [plugin.name()]
+    endif
+  endforeach
+  summary({'Plugins':plugin_names}, list_sep: ', ')
+endif

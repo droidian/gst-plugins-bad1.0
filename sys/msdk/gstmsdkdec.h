@@ -65,9 +65,7 @@ struct _GstMsdkDec
   /* input description */
   GstVideoCodecState *input_state;
   /* aligned msdk pool info */
-  GstVideoInfo output_info;
   GstBufferPool *pool;
-  GstCaps *allocation_caps;
   /* downstream pool info based on allocation query */
   GstVideoInfo non_msdk_pool_info;
   mfxFrameAllocResponse alloc_resp;
@@ -77,7 +75,6 @@ struct _GstMsdkDec
 
   /* for packetization */
   GstAdapter *adapter;
-  gboolean is_packetized;
   /* cap negotiation needed, allocation may or may not be required*/
   gboolean do_renego;
   /* re-allocation is mandatory if enabled */
@@ -91,11 +88,12 @@ struct _GstMsdkDec
 
   /* MFX context */
   GstMsdkContext *context;
+  GstMsdkContext *old_context;
   mfxVideoParam param;
   GArray *tasks;
   guint next_task;
 
-  GList *decoded_msdk_surfaces;
+  GList *locked_msdk_surfaces;
 
   /* element properties */
   gboolean hardware;
@@ -108,18 +106,13 @@ struct _GstMsdkDecClass
 
   gboolean (*configure) (GstMsdkDec * decoder);
 
+  /* adjust mfx parameters per codec after decode header */
+  gboolean (*post_configure) (GstMsdkDec * decoder);
+
   /* reset mfx parameters per codec */
   gboolean (*preinit_decoder) (GstMsdkDec * decoder);
   /* adjust mfx parameters per codec */
   gboolean (*postinit_decoder) (GstMsdkDec * decoder);
-};
-
-struct _MsdkDecTask
-{
-  mfxFrameSurface1 *surface;
-  mfxSyncPoint sync_point;
-
-  gboolean decode_only;
 };
 
 GType gst_msdkdec_get_type (void);

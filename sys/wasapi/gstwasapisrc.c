@@ -168,6 +168,8 @@ gst_wasapi_src_class_init (GstWasapiSrcClass * klass)
 
   GST_DEBUG_CATEGORY_INIT (gst_wasapi_src_debug, "wasapisrc",
       0, "Windows audio session API source");
+
+  gst_type_mark_as_plugin_api (GST_WASAPI_DEVICE_TYPE_ROLE, 0);
 }
 
 static void
@@ -189,6 +191,7 @@ gst_wasapi_src_init (GstWasapiSrc * self)
   self->low_latency = DEFAULT_LOW_LATENCY;
   self->try_audioclient3 = DEFAULT_AUDIOCLIENT3;
   self->event_handle = CreateEvent (NULL, FALSE, FALSE, NULL);
+  self->cancellable = CreateEvent (NULL, TRUE, FALSE, NULL);
   self->client_needs_restart = FALSE;
   self->adapter = gst_adapter_new ();
 
@@ -203,6 +206,11 @@ gst_wasapi_src_dispose (GObject * object)
   if (self->event_handle != NULL) {
     CloseHandle (self->event_handle);
     self->event_handle = NULL;
+  }
+
+  if (self->cancellable != NULL) {
+    CloseHandle (self->cancellable);
+    self->cancellable = NULL;
   }
 
   if (self->client_clock != NULL) {
@@ -316,10 +324,8 @@ gst_wasapi_src_get_property (GObject * object, guint prop_id,
 static gboolean
 gst_wasapi_src_can_audioclient3 (GstWasapiSrc * self)
 {
-  if (self->sharemode == AUDCLNT_SHAREMODE_SHARED &&
-      self->try_audioclient3 && gst_wasapi_util_have_audioclient3 ())
-    return TRUE;
-  return FALSE;
+  return (self->sharemode == AUDCLNT_SHAREMODE_SHARED &&
+      self->try_audioclient3 && gst_wasapi_util_have_audioclient3 ());
 }
 
 static GstCaps *
@@ -518,7 +524,12 @@ gst_wasapi_src_prepare (GstAudioSrc * asrc, GstAudioRingBufferSpec * spec)
       (self)->ringbuffer, self->positions);
 
   res = TRUE;
+
+  /* reset cancellable event handle */
+  ResetEvent (self->cancellable);
+
 beach:
+
   /* unprepare() is not called if prepare() fails, but we want it to be, so call
    * it manually when needed */
   if (!res)
@@ -570,6 +581,7 @@ gst_wasapi_src_read (GstAudioSrc * asrc, gpointer data, guint length,
     HR_FAILED_ELEMENT_ERROR_AND (hr, IAudioClient::Start, self,
         GST_OBJECT_UNLOCK (self); goto err);
     self->client_needs_restart = FALSE;
+    ResetEvent (self->cancellable);
     gst_adapter_clear (self->adapter);
   }
 
@@ -587,13 +599,23 @@ gst_wasapi_src_read (GstAudioSrc * asrc, gpointer data, guint length,
   while (wanted > 0) {
     DWORD dwWaitResult;
     guint got_frames, avail_frames, n_frames, want_frames, read_len;
+    HANDLE event_handle[2];
+
+    event_handle[0] = self->event_handle;
+    event_handle[1] = self->cancellable;
 
     /* Wait for data to become available */
-    dwWaitResult = WaitForSingleObject (self->event_handle, INFINITE);
-    if (dwWaitResult != WAIT_OBJECT_0) {
+    dwWaitResult = WaitForMultipleObjects (2, event_handle, FALSE, INFINITE);
+    if (dwWaitResult != WAIT_OBJECT_0 && dwWaitResult != WAIT_OBJECT_0 + 1) {
       GST_ERROR_OBJECT (self, "Error waiting for event handle: %x",
           (guint) dwWaitResult);
       goto err;
+    }
+
+    /* ::reset was requested */
+    if (dwWaitResult == WAIT_OBJECT_0 + 1) {
+      GST_DEBUG_OBJECT (self, "operation was cancelled");
+      return -1;
     }
 
     hr = IAudioCaptureClient_GetBuffer (self->capture_client,
@@ -687,13 +709,16 @@ gst_wasapi_src_reset (GstAudioSrc * asrc)
   if (!self->client)
     return;
 
+  SetEvent (self->cancellable);
+
   GST_OBJECT_LOCK (self);
   hr = IAudioClient_Stop (self->client);
-  HR_FAILED_RET (hr, IAudioClock::Stop,);
+  HR_FAILED_AND (hr, IAudioClock::Stop, goto err);
 
   hr = IAudioClient_Reset (self->client);
-  HR_FAILED_RET (hr, IAudioClock::Reset,);
+  HR_FAILED_AND (hr, IAudioClock::Reset, goto err);
 
+err:
   self->client_needs_restart = TRUE;
   GST_OBJECT_UNLOCK (self);
 }

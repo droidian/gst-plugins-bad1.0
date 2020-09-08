@@ -45,10 +45,10 @@ struct _GstCCCombiner
   GstAggregator parent;
 
   gint video_fps_n, video_fps_d;
+  GstClockTime previous_video_running_time_end;
   GstClockTime current_video_running_time;
   GstClockTime current_video_running_time_end;
   GstBuffer *current_video_buffer;
-  GstCaps *video_caps;
 
   GArray *current_frame_captions;
   GstVideoCaptionType current_caption_type;

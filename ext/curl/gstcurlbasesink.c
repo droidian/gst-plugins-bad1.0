@@ -21,7 +21,6 @@
  * SECTION:element-curlsink
  * @title: curlsink
  * @short_description: sink that uploads data to a server using libcurl
- * @see_also:
  *
  * This is a network sink that uses libcurl as a client to upload data to
  * a server (e.g. a HTTP/FTP server).
@@ -236,6 +235,8 @@ gst_curl_base_sink_class_init (GstCurlBaseSinkClass * klass)
           G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
 
   gst_element_class_add_static_pad_template (element_class, &sinktemplate);
+
+  gst_type_mark_as_plugin_api (GST_TYPE_CURL_BASE_SINK, 0);
 }
 
 static void
@@ -902,7 +903,7 @@ gst_curl_base_sink_transfer_check (GstCurlBaseSink * sink)
     }
     if (easy) {
       curl_easy_getinfo (easy, CURLINFO_EFFECTIVE_URL, &eff_url);
-      GST_DEBUG ("transfer done %s (%s-%d)\n", eff_url,
+      GST_DEBUG ("transfer done %s (%s-%d)", eff_url,
           curl_easy_strerror (code), code);
     }
   } while (easy);

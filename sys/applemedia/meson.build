@@ -5,6 +5,7 @@ applemedia_sources = [
     'corevideobuffer.c',
     'coremediabuffer.c',
     'videotexturecache.m',
+    'videotexturecache-gl.m',
     'atdec.c',
     'glcontexthelper.c'
 ]
@@ -21,6 +22,15 @@ applemedia_objc_args = []
 applemedia_option = get_option('applemedia')
 if not ['darwin', 'ios'].contains(host_system) or applemedia_option.disabled()
   subdir_done()
+endif
+
+if ['darwin', 'ios'].contains(host_system)
+  objc = meson.get_compiler('objc')
+  if not objc.has_argument('-fobjc-arc')
+    error('ARC is required for building')
+  endif
+
+  applemedia_objc_args += ['-fobjc-arc']
 endif
 
 applemedia_frameworks = []
@@ -58,12 +68,12 @@ if host_system == 'ios'
     applemedia_objc_args += ['-fobjc-abi-version=2', '-fobjc-legacy-dispatch']
 
     ios_media_dep = dependency('appleframeworks', modules : ['Foundation', 'AssetsLibrary'], required : applemedia_option)
-    applemedia_frameworks += [ios_media_dep]
+    iosurface_dep = dependency('IOSurface', required : applemedia_option)
+    applemedia_frameworks += [ios_media_dep, iosurface_dep]
 else
     applemedia_sources += [
-        'iosurfacememory.c'
+        'iosurfaceglmemory.c'
     ]
-    applemedia_objc_args += ['-mmacosx-version-min=10.8']
     cocoa_dep = dependency('Cocoa', required : applemedia_option)
     iosurface_dep = dependency('IOSurface', required : applemedia_option)
     applemedia_opengl_dep = dependency('appleframeworks', modules : ['OpenGL'], required : applemedia_option)
@@ -77,16 +87,31 @@ foreach framework : applemedia_frameworks
     endif
 endforeach
 
+if gstvulkan_dep.found() and have_objcpp
+  moltenvk_dep = cc.find_library('MoltenVK', required : false)
+  metal_dep = dependency('appleframeworks', modules : ['Metal'], required : false)
+  if metal_dep.found() and moltenvk_dep.found() and cc.has_header ('MoltenVK/vk_mvk_moltenvk.h')
+    applemedia_frameworks += [moltenvk_dep, gstvulkan_dep, metal_dep]
+    applemedia_sources += [
+      'videotexturecache-vulkan.mm',
+      'iosurfacevulkanmemory.c',
+    ]
+    applemedia_args += ['-DAPPLEMEDIA_MOLTENVK']
+  endif
+endif
+
 if applemedia_found_deps
     gstapplemedia = library('gstapplemedia',
         applemedia_sources,
         c_args : gst_plugins_bad_args + applemedia_args,
         objc_args : gst_plugins_bad_args + applemedia_args + applemedia_objc_args,
+        objcpp_args : gst_plugins_bad_args + applemedia_args + applemedia_objc_args,
         link_args : noseh_link_args,
         include_directories : [configinc, libsinc],
-        dependencies : [gstvideo_dep, gstaudio_dep, gstpbutils_dep, gst_dep, gstbase_dep, gstgl_dep] + applemedia_frameworks,
+        dependencies : [gstvideo_dep, gstaudio_dep, gstpbutils_dep, gst_dep, gstbase_dep, gstgl_dep, gstglproto_dep] + applemedia_frameworks,
         install : true,
         install_dir : plugins_install_dir,
     )
     pkgconfig.generate(gstapplemedia, install_dir : plugins_pkgconfig_install_dir)
+    plugins += [gstapplemedia]
 endif
