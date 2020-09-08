@@ -285,8 +285,10 @@ _transport_closed (WebRTCDataChannel * channel)
   channel->stored_error = NULL;
   GST_WEBRTC_DATA_CHANNEL_UNLOCK (channel);
 
-  if (error)
+  if (error) {
     gst_webrtc_data_channel_on_error (GST_WEBRTC_DATA_CHANNEL (channel), error);
+    g_clear_error (&error);
+  }
   gst_webrtc_data_channel_on_close (GST_WEBRTC_DATA_CHANNEL (channel));
 }
 
@@ -416,7 +418,9 @@ _parse_control_packet (WebRTCDataChannel * channel, guint8 * data,
     memcpy (proto, src, proto_len);
     proto[proto_len] = '\0';
 
+    g_free (channel->parent.label);
     channel->parent.label = label;
+    g_free (channel->parent.protocol);
     channel->parent.protocol = proto;
     channel->parent.priority = priority_uint_to_type (priority);
     channel->parent.ordered = !(reliability & 0x80);

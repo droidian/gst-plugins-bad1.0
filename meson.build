@@ -1,5 +1,5 @@
 project('gst-plugins-bad', 'c', 'cpp',
-  version : '1.17.90',
+  version : '1.18.0',
   meson_version : '>= 0.49',
   default_options : [ 'warning_level=1',
                       'buildtype=debugoptimized' ])
@@ -498,6 +498,8 @@ if find_program('xgettext', required : get_option('nls')).found()
   cdata.set('ENABLE_NLS', 1)
   subdir('po')
 endif
+
+subdir('scripts')
 
 # Set release date
 if gst_version_nano == 0
