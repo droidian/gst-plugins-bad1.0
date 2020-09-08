@@ -12,10 +12,10 @@ Build-Depends: debhelper,
                xvfb,
                xauth,
                libglib2.0-dev (>= 2.44),
-               libgstreamer1.0-dev (>= 1.17.90),
-               libgstreamer-plugins-base1.0-dev (>= 1.17.90),
-               gstreamer1.0-plugins-base (>= 1.17.90),
-               gstreamer1.0-plugins-good (>= 1.17.90),
+               libgstreamer1.0-dev (>= 1.18.0),
+               libgstreamer-plugins-base1.0-dev (>= 1.18.0),
+               gstreamer1.0-plugins-base (>= 1.18.0),
+               gstreamer1.0-plugins-good (>= 1.18.0),
                liborc-0.4-dev (>= 1:0.4.24),
                flite-dev,
                ladspa-sdk,
@@ -173,8 +173,8 @@ Depends: ${misc:Depends},
          gstreamer1.0-plugins-base,
          libgstreamer-plugins-bad1.0-0 (= ${binary:Version}),
          libgstreamer-opencv1.0-0 (= ${binary:Version}),
-Conflicts: gstreamer1.0-plugins-bad (<< 1.17.90~)
-Replaces: gstreamer1.0-plugins-bad (<< 1.17.90~)
+Conflicts: gstreamer1.0-plugins-bad (<< 1.17.2~)
+Replaces: gstreamer1.0-plugins-bad (<< 1.17.2~)
 Recommends: opencv-data
 XB-GStreamer-Version: ${gstreamer:Version}
 XB-GStreamer-Elements: ${gstreamer:Elements}

@@ -1,3 +1,10 @@
+gst-plugins-bad1.0 (1.18.0-1) unstable; urgency=medium
+
+  * New upstream stable release.
+  * Upload to unstable (Closes: #927995, #893813).
+
+ -- Sebastian Dröge <slomo@debian.org>  Tue, 08 Sep 2020 11:57:33 +0300
+
 gst-plugins-bad1.0 (1.17.90-1) experimental; urgency=medium
 
   * New upstream release candidate.
