@@ -169,11 +169,13 @@ gst_wpe_src_create (GstBaseSrc * bsrc, guint64 offset, guint length, GstBuffer *
   }
 
   locked_buffer = src->view->buffer ();
-
-  if (locked_buffer != NULL) {
-    *buf = gst_buffer_copy_deep (locked_buffer);
-    ret = GST_FLOW_OK;
+  if (locked_buffer == NULL) {
+    GST_OBJECT_UNLOCK (src);
+    GST_ELEMENT_ERROR (src, RESOURCE, FAILED,
+        ("WPE View did not render a buffer"), (NULL));
+    return ret;
   }
+  *buf = gst_buffer_copy_deep (locked_buffer);
 
   g_object_get(gl_src, "timestamp-offset", &ts_offset, NULL);
 
@@ -195,6 +197,7 @@ gst_wpe_src_create (GstBaseSrc * bsrc, guint64 offset, guint length, GstBuffer *
 
   gl_src->running_time = next_time;
 
+  ret = GST_FLOW_OK;
   GST_OBJECT_UNLOCK (src);
   return ret;
 }
@@ -327,15 +330,20 @@ gst_wpe_src_stop (GstBaseSrc * base_src)
 {
   GstWpeSrc *src = GST_WPE_SRC (base_src);
 
+  /* we can call this always, GstGLBaseSrc is smart enough to not crash if
+   * gst_gl_base_src_gl_start() has not been called from chaining up
+   * gst_wpe_src_decide_allocation() */
+  if (!GST_CALL_PARENT_WITH_DEFAULT(GST_BASE_SRC_CLASS, stop, (base_src), FALSE))
+    return FALSE;
+
   GST_OBJECT_LOCK (src);
 
-  if (src->gl_enabled) {
-    GST_OBJECT_UNLOCK (src);
-    // Let glbasesrc call our gl_stop() within its GL context.
-    return GST_CALL_PARENT_WITH_DEFAULT(GST_BASE_SRC_CLASS, stop, (base_src), FALSE);
-  }
+  /* if gl-enabled, gst_wpe_src_stop_unlocked() would have already been called
+   * inside gst_wpe_src_gl_stop() from the base class stopping the OpenGL
+   * context */
+  if (!src->gl_enabled)
+    gst_wpe_src_stop_unlocked (src);
 
-  gst_wpe_src_stop_unlocked (src);
   GST_OBJECT_UNLOCK (src);
   return TRUE;
 }
@@ -582,6 +590,8 @@ gst_wpe_src_event (GstPad * pad, GstObject * parent, GstEvent * event)
 
   if (!ret) {
     ret = gst_pad_event_default (pad, parent, event);
+  } else {
+    gst_event_unref (event);
   }
   return ret;
 }

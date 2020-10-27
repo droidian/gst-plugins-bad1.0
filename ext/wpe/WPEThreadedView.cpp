@@ -76,8 +76,6 @@ WPEContextThread::WPEContextThread()
 {
     g_mutex_init(&threading.mutex);
     g_cond_init(&threading.cond);
-    g_mutex_init(&threading.ready_mutex);
-    g_cond_init(&threading.ready_cond);
 
     {
         GMutexHolder lock(threading.mutex);
@@ -96,8 +94,6 @@ WPEContextThread::~WPEContextThread()
 
     g_mutex_clear(&threading.mutex);
     g_cond_clear(&threading.cond);
-    g_mutex_clear(&threading.ready_mutex);
-    g_cond_clear(&threading.ready_cond);
 }
 
 template<typename Function>
@@ -167,7 +163,6 @@ gpointer WPEContextThread::s_viewThread(gpointer data)
 WPEView* WPEContextThread::createWPEView(GstWpeSrc* src, GstGLContext* context, GstGLDisplay* display, int width, int height)
 {
     GST_DEBUG("context %p display %p, size (%d,%d)", context, display, width, height);
-    threading.ready = FALSE;
 
     static std::once_flag s_loaderFlag;
     std::call_once(s_loaderFlag,
@@ -190,22 +185,11 @@ WPEView* WPEContextThread::createWPEView(GstWpeSrc* src, GstGLContext* context, 
 
     if (view && view->hasUri()) {
         GST_DEBUG("waiting load to finish");
-        GMutexHolder lock(threading.ready_mutex);
-        while (!threading.ready)
-            g_cond_wait(&threading.ready_cond, &threading.ready_mutex);
+        view->waitLoadCompletion();
         GST_DEBUG("done");
     }
 
     return view;
-}
-
-void WPEContextThread::notifyLoadFinished()
-{
-    GMutexHolder lock(threading.ready_mutex);
-    if (!threading.ready) {
-        threading.ready = TRUE;
-        g_cond_signal(&threading.ready_cond);
-    }
 }
 
 static gboolean s_loadFailed(WebKitWebView*, WebKitLoadEvent, gchar* failing_uri, GError* error, gpointer data)
@@ -215,8 +199,18 @@ static gboolean s_loadFailed(WebKitWebView*, WebKitLoadEvent, gchar* failing_uri
     return FALSE;
 }
 
+static gboolean s_loadFailedWithTLSErrors(WebKitWebView*,  gchar* failing_uri, GTlsCertificate*, GTlsCertificateFlags, gpointer data)
+{
+    // Defer to load-failed.
+    return FALSE;
+}
+
 WPEView::WPEView(WebKitWebContext* web_context, GstWpeSrc* src, GstGLContext* context, GstGLDisplay* display, int width, int height)
 {
+    g_mutex_init(&threading.ready_mutex);
+    g_cond_init(&threading.ready_cond);
+    threading.ready = FALSE;
+
     g_mutex_init(&images_mutex);
     if (context)
         gst.context = GST_GL_CONTEXT(gst_object_ref(context));
@@ -262,7 +256,7 @@ WPEView::WPEView(WebKitWebContext* web_context, GstWpeSrc* src, GstGLContext* co
     webkit.view = WEBKIT_WEB_VIEW(g_object_new(WEBKIT_TYPE_WEB_VIEW, "web-context", web_context, "backend", viewBackend, nullptr));
 
     g_signal_connect(webkit.view, "load-failed", G_CALLBACK(s_loadFailed), src);
-    g_signal_connect(webkit.view, "load-failed-with-tls-errors", G_CALLBACK(s_loadFailed), src);
+    g_signal_connect(webkit.view, "load-failed-with-tls-errors", G_CALLBACK(s_loadFailedWithTLSErrors), src);
 
     gst_wpe_src_configure_web_view(src, webkit.view);
 
@@ -276,6 +270,9 @@ WPEView::WPEView(WebKitWebContext* web_context, GstWpeSrc* src, GstGLContext* co
 
 WPEView::~WPEView()
 {
+    g_mutex_clear(&threading.ready_mutex);
+    g_cond_clear(&threading.ready_cond);
+
     {
         GMutexHolder lock(images_mutex);
 
@@ -286,6 +283,14 @@ WPEView::~WPEView()
         if (egl.committed) {
             gst_egl_image_unref(egl.committed);
             egl.committed = nullptr;
+        }
+        if (shm.pending) {
+            gst_buffer_unref(shm.pending);
+            shm.pending = nullptr;
+        }
+        if (shm.committed) {
+            gst_buffer_unref(shm.committed);
+            shm.committed = nullptr;
         }
     }
 
@@ -311,6 +316,22 @@ WPEView::~WPEView()
     }
 
     g_mutex_clear(&images_mutex);
+}
+
+void WPEView::notifyLoadFinished()
+{
+    GMutexHolder lock(threading.ready_mutex);
+    if (!threading.ready) {
+        threading.ready = TRUE;
+        g_cond_signal(&threading.ready_cond);
+    }
+}
+
+void WPEView::waitLoadCompletion()
+{
+    GMutexHolder lock(threading.ready_mutex);
+    while (!threading.ready)
+        g_cond_wait(&threading.ready_cond, &threading.ready_mutex);
 }
 
 GstEGLImage* WPEView::image()
@@ -475,7 +496,7 @@ void WPEView::handleExportedImage(gpointer image)
       GST_TRACE("EGLImage %p wrapped in GstEGLImage %" GST_PTR_FORMAT, eglImage, gstImage);
       egl.pending = gstImage;
 
-      s_view->notifyLoadFinished();
+      notifyLoadFinished();
     }
 }
 
@@ -532,7 +553,7 @@ void WPEView::handleExportedBuffer(struct wpe_fdo_shm_exported_buffer* buffer)
         GMutexHolder lock(images_mutex);
         GST_TRACE("SHM buffer %p wrapped in buffer %" GST_PTR_FORMAT, buffer, gstBuffer);
         shm.pending = gstBuffer;
-        s_view->notifyLoadFinished();
+        notifyLoadFinished();
     }
 }
 #endif
