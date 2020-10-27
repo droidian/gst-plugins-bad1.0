@@ -2200,8 +2200,8 @@ gst_h265_parse_update_src_caps (GstH265Parse * h265parse, GstCaps * caps)
         gst_caps_set_simple (caps, "profile", G_TYPE_STRING, profile, NULL);
 
       if (sps->profile_tier_level.interlaced_source_flag)
-        gst_caps_set_simple (caps, "interlace-mode", G_TYPE_STRING, "alternate",
-            NULL);
+        gst_caps_set_simple (caps, "interlace-mode", G_TYPE_STRING,
+            "interleaved", NULL);
 
       tier = get_tier_string (sps->profile_tier_level.tier_flag);
       if (tier != NULL)
@@ -2977,7 +2977,13 @@ gst_h265_parse_set_caps (GstBaseParse * parse, GstCaps * caps)
   if (format == h265parse->format && align == h265parse->align) {
     /* do not set CAPS and passthrough mode if SPS/PPS have not been parsed */
     if (h265parse->have_sps && h265parse->have_pps) {
+      /* Don't enable passthrough here. This element will parse various
+       * SEI messages which would be very important/useful for downstream
+       * (HDR, timecode for example)
+       */
+#if 0
       gst_base_parse_set_passthrough (parse, TRUE);
+#endif
 
       /* we did parse codec-data and might supplement src caps */
       gst_h265_parse_update_src_caps (h265parse, caps);

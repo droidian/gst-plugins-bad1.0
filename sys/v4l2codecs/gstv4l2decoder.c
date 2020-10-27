@@ -854,7 +854,7 @@ gst_v4l2_request_free (GstV4l2Request * request)
 
     GST_DEBUG_OBJECT (decoder, "Freeing pending request %p.", request);
 
-    idx = gst_queue_array_find (decoder->pending_requests, NULL, NULL);
+    idx = gst_queue_array_find (decoder->pending_requests, NULL, request);
     if (idx >= 0)
       gst_queue_array_drop_element (decoder->pending_requests, idx);
 
@@ -914,6 +914,7 @@ gst_v4l2_request_set_done (GstV4l2Request * request)
     while ((pending_req = gst_queue_array_pop_head (dec->pending_requests))) {
       gst_v4l2_decoder_dequeue_sink (request->decoder);
       g_clear_pointer (&pending_req->bitstream, gst_memory_unref);
+      pending_req->pending = FALSE;
 
       if (pending_req == request)
         break;

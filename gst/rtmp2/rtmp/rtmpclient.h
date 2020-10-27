@@ -56,6 +56,31 @@ GType gst_rtmp_authmod_get_type (void);
 
 
 
+#define GST_TYPE_RTMP_STOP_COMMANDS (gst_rtmp_stop_commands_get_type ())
+#define GST_RTMP_DEFAULT_STOP_COMMANDS (GST_RTMP_STOP_COMMANDS_FCUNPUBLISH | \
+    GST_RTMP_STOP_COMMANDS_DELETE_STREAM) /* FCUnpublish + deleteStream */
+
+/**
+ * GstRtmpStopCommands:
+ * @GST_RTMP_STOP_COMMANDS_NONE: Don't send any commands
+ * @GST_RTMP_STOP_COMMANDS_FCUNPUBLISH: Send FCUnpublish command
+ * @GST_RTMP_STOP_COMMANDS_CLOSE_STREAM: Send closeStream command
+ * @GST_RTMP_STOP_COMMANDS_DELETE_STREAM: Send deleteStream command
+ *
+ * Since: 1.18
+ */
+typedef enum
+{
+  GST_RTMP_STOP_COMMANDS_NONE = 0,
+  GST_RTMP_STOP_COMMANDS_FCUNPUBLISH = (1 << 0),
+  GST_RTMP_STOP_COMMANDS_CLOSE_STREAM = (1 << 1),
+  GST_RTMP_STOP_COMMANDS_DELETE_STREAM = (1 << 2)
+} GstRtmpStopCommands;
+
+GType gst_rtmp_stop_commands_get_type (void);
+
+
+
 typedef struct _GstRtmpLocation
 {
   GstRtmpScheme scheme;
@@ -97,6 +122,9 @@ void gst_rtmp_client_start_play_async (GstRtmpConnection * connection,
     GAsyncReadyCallback callback, gpointer user_data);
 gboolean gst_rtmp_client_start_play_finish (GstRtmpConnection * connection,
     GAsyncResult * result, guint * stream_id, GError ** error);
+
+void gst_rtmp_client_stop_publish (GstRtmpConnection * connection,
+    const gchar * stream, const GstRtmpStopCommands stop_commands);
 
 G_END_DECLS
 #endif
