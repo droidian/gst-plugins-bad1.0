@@ -8,7 +8,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: gst-plugins-bad-1.0\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2020-10-26 11:14+0000\n"
+"POT-Creation-Date: 2020-12-06 13:24+0000\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -17,7 +17,7 @@ msgstr ""
 "Content-Type: text/plain; charset=CHARSET\n"
 "Content-Transfer-Encoding: 8bit\n"
 
-#: ext/curl/gstcurlhttpsrc.c:1438
+#: ext/curl/gstcurlhttpsrc.c:1436
 msgid "No URL set."
 msgstr ""
 
@@ -49,7 +49,7 @@ msgid "Could not read DVD."
 msgstr ""
 
 #: ext/smoothstreaming/gstmssdemux.c:429
-#: gst-libs/gst/adaptivedemux/gstadaptivedemux.c:733
+#: gst-libs/gst/adaptivedemux/gstadaptivedemux.c:735
 msgid "This file contains no playable streams."
 msgstr ""
 
@@ -79,16 +79,16 @@ msgstr ""
 msgid "Subpicture format was not configured before data flow"
 msgstr ""
 
-#: gst-libs/gst/adaptivedemux/gstadaptivedemux.c:3621
+#: gst-libs/gst/adaptivedemux/gstadaptivedemux.c:3626
 msgid "Failed to get fragment URL."
 msgstr ""
 
-#: gst-libs/gst/adaptivedemux/gstadaptivedemux.c:4008
+#: gst-libs/gst/adaptivedemux/gstadaptivedemux.c:4013
 #, c-format
 msgid "Couldn't download fragments"
 msgstr ""
 
-#: gst-libs/gst/adaptivedemux/gstadaptivedemux.c:4097
+#: gst-libs/gst/adaptivedemux/gstadaptivedemux.c:4102
 #: gst/mpegtsdemux/mpegtsbase.c:1674
 msgid "Internal data stream error."
 msgstr ""

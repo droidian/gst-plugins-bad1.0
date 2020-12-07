@@ -270,6 +270,8 @@ mpegts_packetizer_init (MpegTSPacketizer2 * packetizer)
   packetizer->refoffset = -1;
   packetizer->last_in_time = GST_CLOCK_TIME_NONE;
   packetizer->pcr_discont_threshold = GST_SECOND;
+  packetizer->last_pts = GST_CLOCK_TIME_NONE;
+  packetizer->last_dts = GST_CLOCK_TIME_NONE;
 }
 
 static void
@@ -590,6 +592,8 @@ mpegts_packetizer_clear (MpegTSPacketizer2 * packetizer)
   packetizer->map_size = 0;
   packetizer->map_offset = 0;
   packetizer->last_in_time = GST_CLOCK_TIME_NONE;
+  packetizer->last_pts = GST_CLOCK_TIME_NONE;
+  packetizer->last_dts = GST_CLOCK_TIME_NONE;
 
   pcrtable = packetizer->observations[packetizer->pcrtablelut[0x1fff]];
   if (pcrtable)
@@ -630,6 +634,8 @@ mpegts_packetizer_flush (MpegTSPacketizer2 * packetizer, gboolean hard)
   packetizer->map_size = 0;
   packetizer->map_offset = 0;
   packetizer->last_in_time = GST_CLOCK_TIME_NONE;
+  packetizer->last_pts = GST_CLOCK_TIME_NONE;
+  packetizer->last_dts = GST_CLOCK_TIME_NONE;
 
   pcrtable = packetizer->observations[packetizer->pcrtablelut[0x1fff]];
   if (pcrtable)
@@ -691,6 +697,8 @@ mpegts_packetizer_push (MpegTSPacketizer2 * packetizer, GstBuffer * buffer)
   ts = GST_BUFFER_DTS_OR_PTS (buffer);
   if (GST_CLOCK_TIME_IS_VALID (ts))
     packetizer->last_in_time = ts;
+  packetizer->last_pts = GST_BUFFER_PTS (buffer);
+  packetizer->last_dts = GST_BUFFER_DTS (buffer);
 }
 
 static void
@@ -1386,7 +1394,19 @@ calculate_skew (MpegTSPacketizer2 * packetizer,
       /* Small jumps backward, assume some arrival jitter and skip it */
       send_diff = 0;
 
-      if (pcr->last_pcrtime - gstpcrtime < GST_SECOND) {
+      /* The following code are the different ways we deal with small-ish
+       * jitter, ranging in severity from "can be ignored" to "this needs a full
+       * resync" */
+
+      if (time == pcr->base_time) {
+        /* If this comes from a non-fully-timestamped source (i.e. adaptive
+         * streams), then cope with the fact that some producers generate utter
+         * PCR garbage on fragment ends.
+         *
+         * We detect this comes from a non-fully-timestamped source by the fact
+         * that the buffer time never changes */
+        GST_DEBUG ("Ignoring PCR resets on non-fully timestamped stream");
+      } else if (pcr->last_pcrtime - gstpcrtime < GST_SECOND) {
         GST_WARNING
             ("(small) backward timestamps at server or no buffer timestamps. Ignoring.");
         /* This will trigger the no_skew logic before but leave other state
@@ -1444,8 +1464,8 @@ calculate_skew (MpegTSPacketizer2 * packetizer,
    * changed too quickly we have to resync because the server likely restarted
    * its timestamps. */
   if (ABS (delta - pcr->skew) > packetizer->pcr_discont_threshold) {
-    GST_WARNING ("delta - skew: %" GST_TIME_FORMAT " too big, reset skew",
-        GST_TIME_ARGS (delta - pcr->skew));
+    GST_WARNING ("delta - skew: %" GST_STIME_FORMAT " too big, reset skew",
+        GST_STIME_ARGS (delta - pcr->skew));
     mpegts_packetizer_resync (pcr, time, gstpcrtime, TRUE);
     send_diff = 0;
     delta = 0;
@@ -2256,7 +2276,7 @@ mpegts_packetizer_pts_to_ts (MpegTSPacketizer2 * packetizer,
       res = GST_CLOCK_TIME_NONE;
     else {
       GstClockTime tmp = pcrtable->base_time + pcrtable->skew;
-      if (tmp + res > pcrtable->base_pcrtime)
+      if (tmp + res >= pcrtable->base_pcrtime)
         res += tmp - pcrtable->base_pcrtime;
       else
         res = GST_CLOCK_TIME_NONE;

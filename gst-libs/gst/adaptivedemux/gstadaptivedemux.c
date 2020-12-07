@@ -205,6 +205,8 @@ struct _GstAdaptiveDemuxPrivate
    * without needing to stop tasks when they just want to
    * update the segment boundaries */
   GMutex segment_lock;
+
+  GstClockTime qos_earliest_time;
 };
 
 typedef struct _GstAdaptiveDemuxTimer
@@ -1203,12 +1205,12 @@ gst_adaptive_demux_prepare_streams (GstAdaptiveDemux * demux,
 
     stream->pending_segment = gst_event_new_segment (&stream->segment);
     gst_event_set_seqnum (stream->pending_segment, demux->priv->segment_seqnum);
-    stream->qos_earliest_time = GST_CLOCK_TIME_NONE;
 
     GST_DEBUG_OBJECT (demux,
         "Prepared segment %" GST_SEGMENT_FORMAT " for stream %p",
         &stream->segment, stream);
   }
+  demux->priv->qos_earliest_time = GST_CLOCK_TIME_NONE;
 
   return TRUE;
 }
@@ -1274,7 +1276,8 @@ gst_adaptive_demux_expose_streams (GstAdaptiveDemux * demux)
        * Even if it doesn't do that, we will change its state later in
        * gst_adaptive_demux_stop_tasks.
        */
-      GST_LOG_OBJECT (stream, "Marking stream as cancelled");
+      GST_LOG_OBJECT (GST_ADAPTIVE_DEMUX_STREAM_PAD (stream),
+          "Marking stream as cancelled");
       gst_task_stop (stream->download_task);
       g_mutex_lock (&stream->fragment_download_lock);
       stream->cancelled = TRUE;
@@ -1526,8 +1529,8 @@ gst_adaptive_demux_update_streams_segment (GstAdaptiveDemux * demux,
     gst_event_unref (seg_evt);
     /* Make sure the first buffer after a seek has the discont flag */
     stream->discont = TRUE;
-    stream->qos_earliest_time = GST_CLOCK_TIME_NONE;
   }
+  demux->priv->qos_earliest_time = GST_CLOCK_TIME_NONE;
 }
 
 #define IS_SNAP_SEEK(f) (f & (GST_SEEK_FLAG_SNAP_BEFORE |	  \
@@ -1907,25 +1910,25 @@ gst_adaptive_demux_src_event (GstPad * pad, GstObject * parent,
       return TRUE;
     }
     case GST_EVENT_QOS:{
-      GstAdaptiveDemuxStream *stream;
+      GstClockTimeDiff diff;
+      GstClockTime timestamp;
+      GstClockTime earliest_time;
 
-      GST_MANIFEST_LOCK (demux);
-      stream = gst_adaptive_demux_find_stream_for_pad (demux, pad);
+      gst_event_parse_qos (event, NULL, NULL, &diff, &timestamp);
+      /* Only take into account lateness if late */
+      if (diff > 0)
+        earliest_time = timestamp + 2 * diff;
+      else
+        earliest_time = timestamp;
 
-      if (stream) {
-        GstClockTimeDiff diff;
-        GstClockTime timestamp;
-
-        gst_event_parse_qos (event, NULL, NULL, &diff, &timestamp);
-        /* Only take into account lateness if late */
-        if (diff > 0)
-          stream->qos_earliest_time = timestamp + 2 * diff;
-        else
-          stream->qos_earliest_time = timestamp;
-        GST_DEBUG_OBJECT (stream->pad, "qos_earliest_time %" GST_TIME_FORMAT,
-            GST_TIME_ARGS (stream->qos_earliest_time));
+      GST_OBJECT_LOCK (demux);
+      if (!GST_CLOCK_TIME_IS_VALID (demux->priv->qos_earliest_time) ||
+          earliest_time > demux->priv->qos_earliest_time) {
+        demux->priv->qos_earliest_time = earliest_time;
+        GST_DEBUG_OBJECT (demux, "qos_earliest_time %" GST_TIME_FORMAT,
+            GST_TIME_ARGS (demux->priv->qos_earliest_time));
       }
-      GST_MANIFEST_UNLOCK (demux);
+      GST_OBJECT_UNLOCK (demux);
       break;
     }
     default:
@@ -2197,10 +2200,10 @@ gst_adaptive_demux_stop_tasks (GstAdaptiveDemux * demux, gboolean stop_updates)
 
       stream->download_error_count = 0;
       stream->need_header = TRUE;
-      stream->qos_earliest_time = GST_CLOCK_TIME_NONE;
     }
     list_to_process = demux->prepared_streams;
   }
+  demux->priv->qos_earliest_time = GST_CLOCK_TIME_NONE;
 }
 
 /* must be called with manifest_lock taken */
@@ -2290,9 +2293,9 @@ gst_adaptive_demux_stream_update_current_bitrate (GstAdaptiveDemux * demux,
 
   average_bitrate = _update_average_bitrate (demux, stream, fragment_bitrate);
 
-  GST_INFO_OBJECT (stream, "last fragment bitrate was %" G_GUINT64_FORMAT,
-      fragment_bitrate);
-  GST_INFO_OBJECT (stream,
+  GST_INFO_OBJECT (GST_ADAPTIVE_DEMUX_STREAM_PAD (stream),
+      "last fragment bitrate was %" G_GUINT64_FORMAT, fragment_bitrate);
+  GST_INFO_OBJECT (GST_ADAPTIVE_DEMUX_STREAM_PAD (stream),
       "Last %u fragments average bitrate is %" G_GUINT64_FORMAT,
       NUM_LOOKBACK_FRAGMENTS, average_bitrate);
 
@@ -2531,7 +2534,8 @@ gst_adaptive_demux_stream_push_buffer (GstAdaptiveDemuxStream * stream,
 
   g_mutex_lock (&stream->fragment_download_lock);
   if (G_UNLIKELY (stream->cancelled)) {
-    GST_LOG_OBJECT (stream, "Stream was cancelled");
+    GST_LOG_OBJECT (GST_ADAPTIVE_DEMUX_STREAM_PAD (stream),
+        "Stream was cancelled");
     ret = stream->last_ret = GST_FLOW_FLUSHING;
     g_mutex_unlock (&stream->fragment_download_lock);
     return ret;
@@ -2773,7 +2777,8 @@ gst_adaptive_demux_eos_handling (GstAdaptiveDemuxStream * stream)
     /* Last chance to figure out a fallback nominal bitrate if neither baseclass
        nor the HTTP Content-Length implementation worked. */
     if (stream->fragment.bitrate == 0 && stream->fragment.duration != 0 &&
-        stream->fragment_bytes_downloaded != 0) {
+        stream->fragment_bytes_downloaded != 0 && !stream->downloading_index &&
+        !stream->downloading_header) {
       guint bitrate = MIN (G_MAXUINT,
           gst_util_uint64_scale (stream->fragment_bytes_downloaded,
               8 * GST_SECOND, stream->fragment.duration));
@@ -4657,4 +4662,23 @@ gst_adaptive_demux_clock_callback (GstClock * clock,
   g_cond_signal (timer->cond);
   g_mutex_unlock (timer->mutex);
   return TRUE;
+}
+
+/**
+ * gst_adaptive_demux_get_qos_earliest_time:
+ *
+ * Returns: The QOS earliest time
+ *
+ * Since: 1.20
+ */
+GstClockTime
+gst_adaptive_demux_get_qos_earliest_time (GstAdaptiveDemux * demux)
+{
+  GstClockTime earliest;
+
+  GST_OBJECT_LOCK (demux);
+  earliest = demux->priv->qos_earliest_time;
+  GST_OBJECT_UNLOCK (demux);
+
+  return earliest;
 }

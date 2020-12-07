@@ -305,7 +305,7 @@ static const GstDecklinkMode modes[] = {
   {bmdMode2k24, 2048, 1556, 24, 1, false, HD},
   {bmdMode2k25, 2048, 1556, 25, 1, false, HD},
 
-  {bmdMode2kDCI2398, 2048, 1080, 2400, 1001, false, HD},
+  {bmdMode2kDCI2398, 2048, 1080, 24000, 1001, false, HD},
   {bmdMode2kDCI24, 2048, 1080, 24, 1, false, HD},
   {bmdMode2kDCI25, 2048, 1080, 25, 1, false, HD},
   {bmdMode2kDCI2997, 2048, 1080, 30000, 1001, false, HD},
@@ -400,7 +400,7 @@ static const struct
 const GstDecklinkMode *
 gst_decklink_get_mode (GstDecklinkModeEnum e)
 {
-  if (e < GST_DECKLINK_MODE_AUTO || e > GST_DECKLINK_MODE_2160p60)
+  if (e < GST_DECKLINK_MODE_AUTO || e > GST_DECKLINK_MODE_PAL_P_WIDESCREEN)
     return NULL;
   return &modes[e];
 }
