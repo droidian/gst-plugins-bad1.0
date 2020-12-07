@@ -2907,6 +2907,8 @@ gst_player_main (gpointer data)
     g_assert_not_reached ();
   }
 
+  gst_object_ref_sink (self->playbin);
+
   if (self->video_renderer) {
     GstElement *video_sink =
         gst_player_video_renderer_create_video_sink (self->video_renderer,
@@ -3789,7 +3791,7 @@ gst_player_get_current_video_track (GstPlayer * self)
  *
  * A Function to get current subtitle #GstPlayerSubtitleInfo instance.
  *
- * Returns: (transfer none): current subtitle track.
+ * Returns: (transfer full): current subtitle track.
  *
  * The caller should free it with g_object_unref()
  */
