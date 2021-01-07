@@ -1,3 +1,9 @@
+gst-plugins-bad1.0 (1.18.2-1~deb11u1) bullseye; urgency=medium
+
+  * Rebuild for bullseye against the older SRT version (Closes: #978564).
+
+ -- Sebastian Dröge <slomo@debian.org>  Thu, 07 Jan 2021 13:02:45 +0200
+
 gst-plugins-bad1.0 (1.18.2-1) unstable; urgency=medium
 
   * New upstream bugfix release.
