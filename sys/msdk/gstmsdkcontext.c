@@ -178,6 +178,7 @@ static gboolean
 gst_msdk_context_open (GstMsdkContext * context, gboolean hardware,
     GstMsdkContextJobType job_type)
 {
+  mfxU16 codename;
   GstMsdkContextPrivate *priv = context->priv;
 
   priv->job_type = job_type;
@@ -196,10 +197,16 @@ gst_msdk_context_open (GstMsdkContext * context, gboolean hardware,
   }
 #endif
 
+  codename = msdk_get_platform_codename (priv->session);
+
+  if (codename != MFX_PLATFORM_UNKNOWN)
+    GST_INFO ("Detected MFX platform with device code %d", codename);
+  else
+    GST_WARNING ("Unknown MFX platform");
+
   return TRUE;
 
 failed:
-  msdk_close_session (priv->session);
   return FALSE;
 }
 
@@ -359,7 +366,6 @@ _requested_frame_size_is_equal_or_lower (mfxFrameAllocRequest * _req,
       (!(_req->Type & MFX_MEMTYPE_EXPORT_FRAME) &&
           _req->Info.Width <= cached_resp->request.Info.Width &&
           _req->Info.Height <= cached_resp->request.Info.Height))
-
     return TRUE;
 
   return FALSE;
