@@ -99,6 +99,8 @@ typedef struct _GstD3D11H264Dec
   guint chroma_format_idc;
   GstVideoFormat out_format;
 
+  gint max_dpb_size;
+
   /* Array of DXVA_Slice_H264_Short */
   GArray *slice_list;
 
@@ -288,6 +290,20 @@ gst_d3d11_h264_dec_set_context (GstElement * element, GstContext * context)
   GST_ELEMENT_CLASS (parent_class)->set_context (element, context);
 }
 
+/* Clear all codec specific (e.g., SPS) data */
+static void
+gst_d3d11_h264_dec_reset (GstD3D11H264Dec * self)
+{
+  self->width = 0;
+  self->height = 0;
+  self->coded_width = 0;
+  self->coded_height = 0;
+  self->bitdepth = 0;
+  self->chroma_format_idc = 0;
+  self->out_format = GST_VIDEO_FORMAT_UNKNOWN;
+  self->max_dpb_size = 0;
+}
+
 static gboolean
 gst_d3d11_h264_dec_open (GstVideoDecoder * decoder)
 {
@@ -307,6 +323,8 @@ gst_d3d11_h264_dec_open (GstVideoDecoder * decoder)
     gst_clear_object (&self->device);
     return FALSE;
   }
+
+  gst_d3d11_h264_dec_reset (self);
 
   return TRUE;
 }
@@ -419,6 +437,12 @@ gst_d3d11_h264_dec_new_sequence (GstH264Decoder * decoder,
     modified = TRUE;
   }
 
+  if (self->max_dpb_size < max_dpb_size) {
+    GST_INFO_OBJECT (self, "Requires larger DPB size (%d -> %d)",
+        self->max_dpb_size, max_dpb_size);
+    modified = TRUE;
+  }
+
   if (modified || !self->d3d11_decoder->opened) {
     GstVideoInfo info;
 
@@ -446,6 +470,12 @@ gst_d3d11_h264_dec_new_sequence (GstH264Decoder * decoder,
     gst_video_info_set_format (&info,
         self->out_format, self->width, self->height);
 
+    /* Store configured DPB size here. Then, it will be referenced later
+     * to decide whether we need to re-open decoder object or not.
+     * For instance, if every configuration is same apart from DPB size and
+     * new DPB size is decreased, we can reuse existing decoder object.
+     */
+    self->max_dpb_size = max_dpb_size;
     gst_d3d11_decoder_reset (self->d3d11_decoder);
     if (!gst_d3d11_decoder_open (self->d3d11_decoder, GST_D3D11_CODEC_H264,
             &info, self->coded_width, self->coded_height,
