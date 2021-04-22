@@ -1,3 +1,15 @@
+gst-plugins-bad1.0 (1.18.4-2) unstable; urgency=medium
+
+  * Upload to unstable.
+  * debian/patches/0001-h2645parser-Catch-overflows-in-AVC-HEVC-NAL-unit-length.patch:
+    + Catch overflows in AVC/HEVC NAL unit length calculations, which would
+      lead to allocating infinite amounts of small memory blocks until OOM and
+      could potentially also lead to memory corruptions.
+
+      See https://gitlab.freedesktop.org/gstreamer/gst-plugins-bad/-/merge_requests/2103
+
+ -- Sebastian Dröge <slomo@debian.org>  Thu, 22 Apr 2021 20:52:28 +0300
+
 gst-plugins-bad1.0 (1.18.4-1) experimental; urgency=medium
 
   [ Marc Leeman ]
