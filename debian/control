@@ -279,11 +279,11 @@ Section: libdevel
 Priority: optional
 Depends: ${misc:Depends},
          libgstreamer-plugins-bad1.0-0 (= ${binary:Version}),
-         libgstreamer-opencv1.0-0 (= ${binary:Version}),
+         libgstreamer-opencv1.0-0 (= ${binary:Version}) [amd64 arm64 armel armhf i386 mips64el mipsel ppc64el s390x alpha hppa hurd-i386 m68k powerpc ppc64 riscv64],
          libgstreamer1.0-dev,
          libgstreamer-plugins-base1.0-dev,
          gir1.2-gst-plugins-bad-1.0 (= ${binary:Version}),
-         libopencv-dev (>= 2.3.0)
+         libopencv-dev (>= 2.3.0) [amd64 arm64 armel armhf i386 mips64el mipsel ppc64el s390x alpha hppa hurd-i386 m68k powerpc ppc64 riscv64]
 Conflicts: pitivi (<< 0.9999)
 Description: GStreamer development files for libraries from the "bad" set
  GStreamer is a streaming media framework, based on graphs of filters
