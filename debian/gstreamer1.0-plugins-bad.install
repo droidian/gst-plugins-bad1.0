@@ -84,7 +84,6 @@ debian/tmp/usr/lib/*/gstreamer-1.0/libgstrtmp.so
 debian/tmp/usr/lib/*/gstreamer-1.0/libgstrtmp2.so
 debian/tmp/usr/lib/*/gstreamer-1.0/libgstrtponvif.so
 debian/tmp/usr/lib/*/gstreamer-1.0/libgstrtpmanagerbad.so
-debian/tmp/usr/lib/*/gstreamer-1.0/libgstsctp.so
 debian/tmp/usr/lib/*/gstreamer-1.0/libgstsdpelem.so
 debian/tmp/usr/lib/*/gstreamer-1.0/libgstsegmentclip.so
 debian/tmp/usr/lib/*/gstreamer-1.0/libgstshm.so
