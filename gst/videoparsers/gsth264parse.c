@@ -953,7 +953,7 @@ gst_h264_parse_process_nal (GstH264Parse * h264parse, GstH264NalUnit * nalu)
 
     case GST_H264_NAL_SPS:
       /* reset state, everything else is obsolete */
-      h264parse->state = 0;
+      h264parse->state &= GST_H264_PARSE_STATE_GOT_PPS;
       pres = gst_h264_parser_parse_sps (nalparser, nalu, &sps);
 
     process_sps:
@@ -3577,6 +3577,7 @@ gst_h264_parse_event (GstBaseParse * parse, GstEvent * event)
       break;
     }
     case GST_EVENT_FLUSH_STOP:
+    case GST_EVENT_SEGMENT_DONE:
       h264parse->dts = GST_CLOCK_TIME_NONE;
       h264parse->ts_trn_nb = GST_CLOCK_TIME_NONE;
       h264parse->push_codec = TRUE;

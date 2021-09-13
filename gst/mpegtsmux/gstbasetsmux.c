@@ -1263,6 +1263,26 @@ write_fail:
 }
 
 /* GstElement implementation */
+static gboolean
+gst_base_ts_mux_has_pad_with_pid (GstBaseTsMux * mux, guint16 pid)
+{
+  GList *l;
+  gboolean res = FALSE;
+
+  GST_OBJECT_LOCK (mux);
+
+  for (l = GST_ELEMENT_CAST (mux)->sinkpads; l; l = l->next) {
+    GstBaseTsMuxPad *tpad = GST_BASE_TS_MUX_PAD (l->data);
+
+    if (tpad->pid == pid) {
+      res = TRUE;
+      break;
+    }
+  }
+
+  GST_OBJECT_UNLOCK (mux);
+  return res;
+}
 
 static GstPad *
 gst_base_ts_mux_request_new_pad (GstElement * element, GstPadTemplate * templ,
@@ -1271,6 +1291,7 @@ gst_base_ts_mux_request_new_pad (GstElement * element, GstPadTemplate * templ,
   GstBaseTsMux *mux = GST_BASE_TS_MUX (element);
   gint pid = -1;
   GstPad *pad = NULL;
+  gchar *free_name = NULL;
 
   if (name != NULL && sscanf (name, "sink_%d", &pid) == 1) {
     if (tsmux_find_stream (mux->tsmux, pid))
@@ -1280,7 +1301,12 @@ gst_base_ts_mux_request_new_pad (GstElement * element, GstPadTemplate * templ,
     if (pid < TSMUX_START_ES_PID)
       goto invalid_stream_pid;
   } else {
-    pid = tsmux_get_new_pid (mux->tsmux);
+    do {
+      pid = tsmux_get_new_pid (mux->tsmux);
+    } while (gst_base_ts_mux_has_pad_with_pid (mux, pid));
+
+    /* Name the pad correctly after the selected pid */
+    name = free_name = g_strdup_printf ("sink_%d", pid);
   }
 
   pad = (GstPad *)
@@ -1289,6 +1315,8 @@ gst_base_ts_mux_request_new_pad (GstElement * element, GstPadTemplate * templ,
 
   gst_base_ts_mux_pad_reset (GST_BASE_TS_MUX_PAD (pad));
   GST_BASE_TS_MUX_PAD (pad)->pid = pid;
+
+  g_free (free_name);
 
   return pad;
 
@@ -1303,7 +1331,7 @@ stream_exists:
 invalid_stream_pid:
   {
     GST_ELEMENT_ERROR (element, STREAM, MUX,
-        ("Invalid Elementary stream PID (< 0x40)"), (NULL));
+        ("Invalid Elementary stream PID (0x%02u < 0x40)", pid), (NULL));
     return NULL;
   }
 }
