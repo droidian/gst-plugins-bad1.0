@@ -756,7 +756,7 @@ gst_h265_parse_process_nal (GstH265Parse * h265parse, GstH265NalUnit * nalu)
       break;
     case GST_H265_NAL_SPS:
       /* reset state, everything else is obsolete */
-      h265parse->state = 0;
+      h265parse->state &= GST_H265_PARSE_STATE_GOT_PPS;
 
       pres = gst_h265_parser_parse_sps (nalparser, nalu, &sps, TRUE);
 
@@ -1809,7 +1809,8 @@ get_compatible_profile_caps (GstH265SPS * sps, GstH265Profile profile)
     case GST_H265_PROFILE_MAIN_444_10:
     {
       /* A.3.7 */
-      profiles |= profile_to_flag (GST_H265_PROFILE_SCREEN_EXTENDED_MAIN_10);
+      profiles |=
+          profile_to_flag (GST_H265_PROFILE_SCREEN_EXTENDED_MAIN_444_10);
       break;
     }
     case GST_H265_PROFILE_HIGH_THROUGHPUT_444:
@@ -3127,6 +3128,7 @@ gst_h265_parse_event (GstBaseParse * parse, GstEvent * event)
       break;
     }
     case GST_EVENT_FLUSH_STOP:
+    case GST_EVENT_SEGMENT_DONE:
       h265parse->push_codec = TRUE;
       res = GST_BASE_PARSE_CLASS (parent_class)->sink_event (parse, event);
       break;
