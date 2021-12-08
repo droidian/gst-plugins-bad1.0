@@ -51,8 +51,8 @@ Build-Depends: debhelper,
                libnice-dev (>= 0.1.14),
                libofa0-dev (>= 0.9.3),
                libopenal-dev (>= 1:1.14),
-               libopencv-dev (>= 3.0.0) [amd64 arm64 armel armhf i386 mips64el mipsel ppc64el s390x powerpc ppc64 riscv64],
-               opencv-data [amd64 arm64 armel armhf i386 mips64el mipsel ppc64el s390x powerpc ppc64 riscv64],
+               libopencv-dev (>= 3.0.0) [amd64 arm64 armel armhf i386 mips64el mipsel ppc64el s390x alpha hppa hurd-i386 m68k powerpc ppc64 riscv64],
+               opencv-data [amd64 arm64 armel armhf i386 mips64el mipsel ppc64el s390x alpha hppa hurd-i386 m68k powerpc ppc64 riscv64],
                libwpebackend-fdo-1.0-dev (>= 1.6.0) [amd64 arm64 armel armhf hppa i386 mipsel ppc64 ppc64el s390x sparc64 x32],
                libwpewebkit-1.0-dev (>= 2.28.0) [amd64 arm64 armel armhf hppa i386 mipsel ppc64 ppc64el s390x sparc64 x32],
                libopenexr-dev,
@@ -166,7 +166,7 @@ Description: GStreamer plugins from the "bad" set
  real live maintainer, or some actual wide use.
 
 Package: gstreamer1.0-opencv
-Architecture: amd64 arm64 armel armhf i386 mips64el mipsel ppc64el s390x powerpc ppc64 riscv64
+Architecture: amd64 arm64 armel armhf i386 mips64el mipsel ppc64el s390x alpha hppa hurd-i386 m68k powerpc ppc64 riscv64
 Multi-Arch: same
 Depends: ${misc:Depends},
          ${shlibs:Depends},
@@ -248,7 +248,7 @@ Description: GStreamer libraries from the "bad" set
  is not guaranteed to be stable.
 
 Package: libgstreamer-opencv1.0-0
-Architecture: amd64 arm64 armel armhf i386 mips64el mipsel ppc64el s390x powerpc ppc64 riscv64
+Architecture: amd64 arm64 armel armhf i386 mips64el mipsel ppc64el s390x alpha hppa hurd-i386 m68k powerpc ppc64 riscv64
 Section: libs
 Priority: optional
 Multi-Arch: same
@@ -279,11 +279,11 @@ Section: libdevel
 Priority: optional
 Depends: ${misc:Depends},
          libgstreamer-plugins-bad1.0-0 (= ${binary:Version}),
-         libgstreamer-opencv1.0-0 (= ${binary:Version}),
+         libgstreamer-opencv1.0-0 (= ${binary:Version}) [amd64 arm64 armel armhf i386 mips64el mipsel ppc64el s390x alpha hppa hurd-i386 m68k powerpc ppc64 riscv64],
          libgstreamer1.0-dev,
          libgstreamer-plugins-base1.0-dev,
          gir1.2-gst-plugins-bad-1.0 (= ${binary:Version}),
-         libopencv-dev (>= 2.3.0)
+         libopencv-dev (>= 2.3.0) [amd64 arm64 armel armhf i386 mips64el mipsel ppc64el s390x alpha hppa hurd-i386 m68k powerpc ppc64 riscv64]
 Conflicts: pitivi (<< 0.9999)
 Description: GStreamer development files for libraries from the "bad" set
  GStreamer is a streaming media framework, based on graphs of filters
