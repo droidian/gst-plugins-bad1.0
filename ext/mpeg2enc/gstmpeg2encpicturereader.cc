@@ -61,6 +61,7 @@ GstMpeg2EncPictureReader::StreamPictureParams (MPEG2EncInVidParams & strm)
   const GValue *par_val;
   y4m_ratio_t fps;
   y4m_ratio_t par;
+  const gchar *interlace_mode;
 
   if (!gst_structure_get_int (structure, "width", &width))
     width = -1;
@@ -90,7 +91,24 @@ GstMpeg2EncPictureReader::StreamPictureParams (MPEG2EncInVidParams & strm)
   strm.horizontal_size = width;
   strm.vertical_size = height;
 
-  strm.interlacing_code = Y4M_ILACE_NONE;
+  interlace_mode = gst_structure_get_string (structure, "interlace-mode");
+
+  if (!g_strcmp0(interlace_mode, "interleaved")) {
+    const gchar *field_order = gst_structure_get_string(structure, "field-order");
+
+    if (!g_strcmp0(field_order, "bottom-field-first")) {
+      strm.interlacing_code = Y4M_ILACE_BOTTOM_FIRST;
+    } else if (!g_strcmp0(field_order, "top-field-first")) {
+      strm.interlacing_code = Y4M_ILACE_TOP_FIRST;
+    } else {
+      GST_WARNING ("No field-order in caps, assuming top field first");
+      strm.interlacing_code = Y4M_ILACE_TOP_FIRST;
+    }
+  } else if (!g_strcmp0(interlace_mode, "mixed")) {
+    strm.interlacing_code = Y4M_ILACE_MIXED;
+  } else {
+    strm.interlacing_code = Y4M_ILACE_NONE;
+  }
 
   strm.aspect_ratio_code = mpeg_guess_mpeg_aspect_code (2, par,
       strm.horizontal_size, strm.vertical_size);
@@ -117,7 +135,7 @@ bool
   GST_MPEG2ENC_MUTEX_LOCK (enc);
 
   /* hang around until the element provides us with a buffer */
-  while (!(inframe = (GstVideoCodecFrame *)g_queue_pop_head (enc->frames))) {
+  while (enc->pending_frame == NULL) {
     if (enc->eos) {
       GST_MPEG2ENC_MUTEX_UNLOCK (enc);
       /* inform the mpeg encoding loop that it can give up */
@@ -126,7 +144,9 @@ bool
     GST_MPEG2ENC_WAIT (enc);
   }
 
+  inframe = enc->pending_frame;
   gst_video_frame_map (&vframe, &enc->input_state->info, inframe->input_buffer, GST_MAP_READ);
+  enc->pending_frame = NULL;
 
   frame = GST_VIDEO_FRAME_COMP_DATA (&vframe, 0);
   s = GST_VIDEO_FRAME_COMP_STRIDE (&vframe, 0);
