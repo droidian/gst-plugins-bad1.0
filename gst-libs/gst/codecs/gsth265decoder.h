@@ -64,7 +64,7 @@ struct _GstH265Decoder
   guint NumPocStFoll;
   guint NumPocLtCurr;
   guint NumPocLtFoll;
-  guint NumPocTotalCurr;
+  guint NumPicTotalCurr;
 
   /*< private >*/
   GstH265DecoderPrivate *priv;
@@ -87,35 +87,47 @@ struct _GstH265Decoder
  *                  Called per one #GstH265Picture to notify subclass to finish
  *                  decoding process for the #GstH265Picture
  * @output_picture: Called with a #GstH265Picture which is required to be outputted.
- *                  Subclass can retrieve parent #GstVideoCodecFrame by using
- *                  gst_video_decoder_get_frame() with system_frame_number
- *                  and the #GstVideoCodecFrame must be consumed by subclass via
+ *                  The #GstVideoCodecFrame must be consumed by subclass via
  *                  gst_video_decoder_{finish,drop,release}_frame().
  */
 struct _GstH265DecoderClass
 {
   GstVideoDecoderClass parent_class;
 
-  gboolean      (*new_sequence)     (GstH265Decoder * decoder,
+  GstFlowReturn (*new_sequence)     (GstH265Decoder * decoder,
                                      const GstH265SPS * sps,
                                      gint max_dpb_size);
-
-  gboolean      (*new_picture)      (GstH265Decoder * decoder,
+  /**
+   * GstH265Decoder:new_picture:
+   * @decoder: a #GstH265Decoder
+   * @frame: (transfer none): a #GstVideoCodecFrame
+   * @picture: (transfer none): a #GstH265Picture
+   */
+  GstFlowReturn (*new_picture)      (GstH265Decoder * decoder,
+                                     GstVideoCodecFrame * frame,
                                      GstH265Picture * picture);
 
-  gboolean      (*start_picture)    (GstH265Decoder * decoder,
+  GstFlowReturn (*start_picture)    (GstH265Decoder * decoder,
                                      GstH265Picture * picture,
                                      GstH265Slice * slice,
                                      GstH265Dpb * dpb);
 
-  gboolean      (*decode_slice)     (GstH265Decoder * decoder,
+  GstFlowReturn (*decode_slice)     (GstH265Decoder * decoder,
                                      GstH265Picture * picture,
-                                     GstH265Slice * slice);
+                                     GstH265Slice * slice,
+                                     GArray * ref_pic_list0,
+                                     GArray * ref_pic_list1);
 
-  gboolean      (*end_picture)      (GstH265Decoder * decoder,
+  GstFlowReturn (*end_picture)      (GstH265Decoder * decoder,
                                      GstH265Picture * picture);
-
+  /**
+   * GstH265Decoder:output_picture:
+   * @decoder: a #GstH265Decoder
+   * @frame: (transfer full): a #GstVideoCodecFrame
+   * @picture: (transfer full): a #GstH265Picture
+   */
   GstFlowReturn (*output_picture)   (GstH265Decoder * decoder,
+                                     GstVideoCodecFrame * frame,
                                      GstH265Picture * picture);
 
   /*< private >*/
@@ -126,6 +138,14 @@ G_DEFINE_AUTOPTR_CLEANUP_FUNC(GstH265Decoder, gst_object_unref)
 
 GST_CODECS_API
 GType gst_h265_decoder_get_type (void);
+
+GST_CODECS_API
+void gst_h265_decoder_set_process_ref_pic_lists (GstH265Decoder * decoder,
+                                                 gboolean process);
+
+GST_CODECS_API
+GstH265Picture * gst_h265_decoder_get_picture   (GstH265Decoder * decoder,
+                                                 guint32 system_frame_number);
 
 G_END_DECLS
 

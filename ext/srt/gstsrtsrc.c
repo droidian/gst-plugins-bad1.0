@@ -45,6 +45,7 @@
 #include <config.h>
 #endif
 
+#include "gstsrtelements.h"
 #include "gstsrtsrc.h"
 
 static GstStaticPadTemplate src_template = GST_STATIC_PAD_TEMPLATE ("src",
@@ -59,7 +60,8 @@ enum
 {
   SIG_CALLER_ADDED,
   SIG_CALLER_REMOVED,
-
+  SIG_CALLER_REJECTED,
+  SIG_CALLER_CONNECTING,
   LAST_SIGNAL
 };
 
@@ -70,12 +72,37 @@ static void gst_srt_src_uri_handler_init (gpointer g_iface,
 static gchar *gst_srt_src_uri_get_uri (GstURIHandler * handler);
 static gboolean gst_srt_src_uri_set_uri (GstURIHandler * handler,
     const gchar * uri, GError ** error);
+static gboolean src_default_caller_connecting (GstSRTSrc * self,
+    GSocketAddress * addr, const gchar * username, gpointer data);
+static gboolean src_authentication_accumulator (GSignalInvocationHint * ihint,
+    GValue * return_accu, const GValue * handler_return, gpointer data);
 
 #define gst_srt_src_parent_class parent_class
 G_DEFINE_TYPE_WITH_CODE (GstSRTSrc, gst_srt_src,
     GST_TYPE_PUSH_SRC,
     G_IMPLEMENT_INTERFACE (GST_TYPE_URI_HANDLER, gst_srt_src_uri_handler_init)
     GST_DEBUG_CATEGORY_INIT (GST_CAT_DEFAULT, "srtsrc", 0, "SRT Source"));
+GST_ELEMENT_REGISTER_DEFINE_WITH_CODE (srtsrc, "srtsrc", GST_RANK_PRIMARY,
+    GST_TYPE_SRT_SRC, srt_element_init (plugin));
+
+static gboolean
+src_default_caller_connecting (GstSRTSrc * self,
+    GSocketAddress * addr, const gchar * stream_id, gpointer data)
+{
+  /* Accept all connections. */
+  return TRUE;
+}
+
+static gboolean
+src_authentication_accumulator (GSignalInvocationHint * ihint,
+    GValue * return_accu, const GValue * handler_return, gpointer data)
+{
+  gboolean ret = g_value_get_boolean (handler_return);
+  /* Handlers return TRUE on authentication success and we want to stop on
+   * the first failure. */
+  g_value_set_boolean (return_accu, ret);
+  return ret;
+}
 
 static gboolean
 gst_srt_src_start (GstBaseSrc * bsrc)
@@ -333,14 +360,15 @@ gst_srt_src_class_init (GstSRTSrcClass * klass)
   gobject_class->set_property = gst_srt_src_set_property;
   gobject_class->get_property = gst_srt_src_get_property;
   gobject_class->finalize = gst_srt_src_finalize;
+  klass->caller_connecting = src_default_caller_connecting;
 
   /**
    * GstSRTSrc::caller-added:
-   * @gstsrtsink: the srtsink element that emitted this signal
-   * @sock: the client socket descriptor that was added to srtsink
-   * @addr: the #GSocketAddress that describes the @sock
-   *
-   * The given socket descriptor was added to srtsink.
+   * @gstsrtsrc: the srtsrc element that emitted this signal
+   * @unused: always zero (for ABI compatibility with previous versions)
+   * @addr: the #GSocketAddress of the new caller
+   * 
+   * A new caller has connected to srtsrc.
    */
   signals[SIG_CALLER_ADDED] =
       g_signal_new ("caller-added", G_TYPE_FROM_CLASS (klass),
@@ -349,17 +377,52 @@ gst_srt_src_class_init (GstSRTSrcClass * klass)
 
   /**
    * GstSRTSrc::caller-removed:
-   * @gstsrtsink: the srtsink element that emitted this signal
-   * @sock: the client socket descriptor that was added to srtsink
-   * @addr: the #GSocketAddress that describes the @sock
+   * @gstsrtsrc: the srtsrc element that emitted this signal
+   * @unused: always zero (for ABI compatibility with previous versions)
+   * @addr: the #GSocketAddress of the caller
    *
-   * The given socket descriptor was removed from srtsink.
+   * The given caller has disconnected.
    */
   signals[SIG_CALLER_REMOVED] =
       g_signal_new ("caller-removed", G_TYPE_FROM_CLASS (klass),
       G_SIGNAL_RUN_LAST, G_STRUCT_OFFSET (GstSRTSrcClass,
           caller_added), NULL, NULL, NULL, G_TYPE_NONE,
       2, G_TYPE_INT, G_TYPE_SOCKET_ADDRESS);
+
+  /**
+   * GstSRTSrc::caller-rejected:
+   * @gstsrtsrc: the srtsrc element that emitted this signal
+   * @addr: the #GSocketAddress that describes the client socket
+   * @stream_id: the stream Id to which the caller wants to connect
+   *
+   * A caller's connection to srtsrc in listener mode has been rejected.
+   *
+   * Since: 1.20
+   *
+   */
+  signals[SIG_CALLER_REJECTED] =
+      g_signal_new ("caller-rejected", G_TYPE_FROM_CLASS (klass),
+      G_SIGNAL_RUN_LAST, G_STRUCT_OFFSET (GstSRTSrcClass, caller_rejected),
+      NULL, NULL, NULL, G_TYPE_NONE, 2, G_TYPE_SOCKET_ADDRESS, G_TYPE_STRING);
+
+  /**
+   * GstSRTSrc::caller-connecting:
+   * @gstsrtsrc: the srtsrc element that emitted this signal
+   * @addr: the #GSocketAddress that describes the client socket
+   * @stream_id: the stream Id to which the caller wants to connect
+   *
+   * Whether to accept or reject a caller's connection to srtsrc in listener mode.
+   * The Caller's connection is rejected if the callback returns FALSE, else
+   * the connection is accepeted.
+   *
+   * Since: 1.20
+   *
+   */
+  signals[SIG_CALLER_CONNECTING] =
+      g_signal_new ("caller-connecting", G_TYPE_FROM_CLASS (klass),
+      G_SIGNAL_RUN_LAST, G_STRUCT_OFFSET (GstSRTSrcClass, caller_connecting),
+      src_authentication_accumulator, NULL, NULL, G_TYPE_BOOLEAN,
+      2, G_TYPE_SOCKET_ADDRESS, G_TYPE_STRING);
 
   gst_srt_object_install_properties_helper (gobject_class);
 

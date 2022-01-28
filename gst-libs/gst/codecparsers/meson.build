@@ -37,6 +37,7 @@ install_headers(codecparser_headers, subdir : 'gstreamer-1.0/gst/codecparsers')
 cp_args = [
   '-DGST_USE_UNSTABLE_API',
   '-DBUILDING_GST_CODEC_PARSERS',
+  '-DG_LOG_DOMAIN="GStreamer-CodecParsers"',
   '-Dvp8_norm=gst_codecparsers_vp8_norm',
   '-Dvp8dx_start_decode=gst_codecparsers_vp8dx_start_decode',
   '-Dvp8dx_bool_decoder_fill=gst_codecparsers_vp8dx_bool_decoder_fill',
@@ -53,6 +54,18 @@ gstcodecparsers = library('gstcodecparsers-' + api_version,
   dependencies : [gstbase_dep, libm],
 )
 
+pkg_name = 'gstreamer-codecparsers-1.0'
+pkgconfig.generate(gstcodecparsers,
+  libraries : [gst_dep, gstbase_dep],
+  variables : pkgconfig_variables,
+  subdirs : pkgconfig_subdirs,
+  name : pkg_name,
+  description : 'Bitstream parsers for GStreamer elements',
+)
+
 gstcodecparsers_dep = declare_dependency(link_with : gstcodecparsers,
   include_directories : [libsinc],
   dependencies : [gstbase_dep])
+
+libraries += [[pkg_name, {'lib': gstcodecparsers}]]
+meson.override_dependency(pkg_name, gstcodecparsers_dep)

@@ -27,13 +27,25 @@
 #include "config.h"
 #endif
 
+#include "gstvaav1dec.h"
 #include "gstvacaps.h"
+#include "gstvadeinterlace.h"
 #include "gstvadevice.h"
+#include "gstvafilter.h"
 #include "gstvah264dec.h"
+#include "gstvah265dec.h"
+#include "gstvampeg2dec.h"
 #include "gstvaprofile.h"
+#include "gstvavp8dec.h"
+#include "gstvavp9dec.h"
+#include "gstvavpp.h"
 
 #define GST_CAT_DEFAULT gstva_debug
 GST_DEBUG_CATEGORY (gstva_debug);
+
+/* big bad mutex to exclusive access to shared stream buffers, such as
+ * DMABuf after a tee */
+GRecMutex GST_VA_SHARED_LOCK = { 0, };
 
 static void
 plugin_add_dependencies (GstPlugin * plugin)
@@ -91,6 +103,43 @@ plugin_register_decoders (GstPlugin * plugin, GstVaDevice * device,
               device->render_device_path);
         }
         break;
+      case HEVC:
+        if (!gst_va_h265_dec_register (plugin, device, sinkcaps, srccaps,
+                GST_RANK_NONE)) {
+          GST_WARNING ("Failed to register H265 decoder: %s",
+              device->render_device_path);
+        }
+        break;
+      case VP8:
+        if (!gst_va_vp8_dec_register (plugin, device, sinkcaps, srccaps,
+                GST_RANK_NONE)) {
+          GST_WARNING ("Failed to register VP8 decoder: %s",
+              device->render_device_path);
+        }
+        break;
+      case VP9:
+        if (!gst_va_vp9_dec_register (plugin, device, sinkcaps, srccaps,
+                GST_RANK_NONE)) {
+          GST_WARNING ("Failed to register VP9 decoder: %s",
+              device->render_device_path);
+        }
+        break;
+      case MPEG2:
+        if (!gst_va_mpeg2_dec_register (plugin, device, sinkcaps, srccaps,
+                GST_RANK_NONE)) {
+          GST_WARNING ("Failed to register Mpeg2 decoder: %s",
+              device->render_device_path);
+        }
+        break;
+#if VA_CHECK_VERSION(1, 8, 0)
+      case AV1:
+        if (!gst_va_av1_dec_register (plugin, device, sinkcaps, srccaps,
+                GST_RANK_NONE)) {
+          GST_WARNING ("Failed to register AV1 decoder: %s",
+              device->render_device_path);
+        }
+        break;
+#endif
       default:
         GST_DEBUG ("No decoder implementation for %" GST_FOURCC_FORMAT,
             GST_FOURCC_ARGS (codec));
@@ -138,6 +187,38 @@ plugin_register_encoders (GstPlugin * plugin, GstVaDevice * device,
   }
 }
 
+static void
+plugin_register_vpp (GstPlugin * plugin, GstVaDevice * device)
+{
+  GstVaFilter *filter;
+  gboolean has_colorbalance, has_deinterlace;
+
+  has_colorbalance = FALSE;
+  has_deinterlace = FALSE;
+  filter = gst_va_filter_new (device->display);
+  if (gst_va_filter_open (filter)) {
+    has_colorbalance =
+        gst_va_filter_has_filter (filter, VAProcFilterColorBalance);
+    has_deinterlace =
+        gst_va_filter_has_filter (filter, VAProcFilterDeinterlacing);
+  } else {
+    GST_WARNING ("Failed open VA filter");
+    gst_object_unref (filter);
+    return;
+  }
+  gst_object_unref (filter);
+
+  if (!gst_va_vpp_register (plugin, device, has_colorbalance, GST_RANK_NONE))
+    GST_WARNING ("Failed to register postproc: %s", device->render_device_path);
+
+  if (has_deinterlace) {
+    if (!gst_va_deinterlace_register (plugin, device, GST_RANK_NONE)) {
+      GST_WARNING ("Failed to register deinterlace: %s",
+          device->render_device_path);
+    }
+  }
+}
+
 static inline void
 _insert_profile_in_table (GHashTable * table, VAProfile profile)
 {
@@ -167,7 +248,7 @@ plugin_register_elements (GstPlugin * plugin, GstVaDevice * device)
   VAStatus status;
   GHashTable *decoders, *encoders, *encoderslp, *encodersimg;
   gint i, j, num_entrypoints = 0, num_profiles = 0;
-  gboolean ret = FALSE;
+  gboolean has_vpp = FALSE, ret = FALSE;
 
   decoders = g_hash_table_new_full (g_int64_hash, g_int64_equal,
       (GDestroyNotify) g_free, (GDestroyNotify) g_array_unref);
@@ -201,6 +282,8 @@ plugin_register_elements (GstPlugin * plugin, GstVaDevice * device)
         _insert_profile_in_table (encoderslp, profiles[i]);
       else if (entrypoints[j] == VAEntrypointEncPicture)
         _insert_profile_in_table (encodersimg, profiles[i]);
+      else if (entrypoints[j] == VAEntrypointVideoProc)
+        has_vpp = TRUE;
     }
   }
 
@@ -209,6 +292,8 @@ plugin_register_elements (GstPlugin * plugin, GstVaDevice * device)
   plugin_register_encoders (plugin, device, encoderslp, VAEntrypointEncSliceLP);
   plugin_register_encoders (plugin, device, encodersimg,
       VAEntrypointEncPicture);
+  if (has_vpp)
+    plugin_register_vpp (plugin, device);
 
   ret = TRUE;
 

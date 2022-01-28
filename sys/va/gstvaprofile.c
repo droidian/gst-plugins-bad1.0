@@ -71,10 +71,10 @@ static const struct ProfileMap
   /*     "profile = (string) {  multiview-high, stereo-high }"), */
   P (HEVC, Main, "video/x-h265", "profile = (string) main"),
   P (HEVC, Main10, "video/x-h265", "profile = (string) main-10"),
-  P (VP9, Profile0, "video/x-vp9", "profile = (string) profile0"),
-  P (VP9, Profile1, "video/x-vp9", "profile = (string) profile1"),
-  P (VP9, Profile2, "video/x-vp9", "profile = (string) profile2"),
-  P (VP9, Profile3, "video/x-vp9", "profile = (string) profile3"),
+  P (VP9, Profile0, "video/x-vp9", "profile = (string) 0"),
+  P (VP9, Profile1, "video/x-vp9", "profile = (string) 1"),
+  P (VP9, Profile2, "video/x-vp9", "profile = (string) 2"),
+  P (VP9, Profile3, "video/x-vp9", "profile = (string) 3"),
   P (HEVC, Main12, "video/x-h265", "profile = (string) main-12"),
   P (HEVC, Main422_10, "video/x-h265", "profile = (string) main-422-10"),
   P (HEVC, Main422_12, "video/x-h265", "profile = (string) main-422-12"),
@@ -87,8 +87,24 @@ static const struct ProfileMap
   P (HEVC, SccMain444, "video/x-h265",
       "profile = (string) screen-extended-main-444"),
 #if VA_CHECK_VERSION(1,7,0)
-  P (AV1, Profile0, "video/x-av1", NULL),
-  P (AV1, Profile1, "video/x-av1", NULL),
+  /* Spec A.2:
+     "Main" compliant decoders must be able to decode streams with
+     seq_profile equal to 0.
+     "High" compliant decoders must be able to decode streams with
+     seq_profile less than or equal to 1.
+     "Professional" compliant decoders must be able to decode streams
+     with seq_profile less than or equal to 2.
+
+     The correct relationship between profile "main" "high" "professional"
+     and seq_profile "0" "1" "2" should be:
+     main <------> { 0 }
+     high <------> { main, 1 }
+     professional <------> { high, 2 }
+
+     So far, all va decoders can support "0" when they support "1",
+     we just map "0" to "main" and "1" to "high".  */
+  P (AV1, Profile0, "video/x-av1", "profile = (string) main"),
+  P (AV1, Profile1, "video/x-av1", "profile = (string) high"),
 #endif
 #if VA_CHECK_VERSION(1, 8, 0)
   P (HEVC, SccMain444_10, "video/x-h265",

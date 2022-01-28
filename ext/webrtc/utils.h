@@ -40,6 +40,9 @@ typedef enum
   GST_WEBRTC_BIN_ERROR_SCTP_FAILURE,
   GST_WEBRTC_BIN_ERROR_DATA_CHANNEL_FAILURE,
   GST_WEBRTC_BIN_ERROR_CLOSED,
+  GST_WEBRTC_BIN_ERROR_NOT_IMPLEMENTED,
+  GST_WEBRTC_BIN_ERROR_IMPOSSIBLE_MLINE_RESTRICTION,
+  GST_WEBRTC_BIN_ERROR_CAPS_NEGOTIATION_FAILED
 } GstWebRTCError;
 
 GstPadTemplate *        _find_pad_template          (GstElement * element,
@@ -80,6 +83,8 @@ G_GNUC_INTERNAL
 const gchar *           _g_checksum_to_webrtc_string (GChecksumType type);
 G_GNUC_INTERNAL
 GstCaps *               _rtp_caps_from_media        (const GstSDPMedia * media);
+G_GNUC_INTERNAL
+GstWebRTCKind           webrtc_kind_from_caps       (const GstCaps * caps);
 
 G_END_DECLS
 

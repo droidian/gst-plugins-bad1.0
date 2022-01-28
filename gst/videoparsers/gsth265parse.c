@@ -24,6 +24,7 @@
 
 #include <gst/base/base.h>
 #include <gst/pbutils/pbutils.h>
+#include "gstvideoparserselements.h"
 #include "gsth265parse.h"
 
 #include <string.h>
@@ -91,6 +92,9 @@ static GstStaticPadTemplate srctemplate = GST_STATIC_PAD_TEMPLATE ("src",
 
 #define parent_class gst_h265_parse_parent_class
 G_DEFINE_TYPE (GstH265Parse, gst_h265_parse, GST_TYPE_BASE_PARSE);
+GST_ELEMENT_REGISTER_DEFINE_WITH_CODE (h265parse, "h265parse",
+    GST_RANK_SECONDARY, GST_TYPE_H265_PARSE,
+    videoparsers_element_init (plugin));
 
 static void gst_h265_parse_finalize (GObject * object);
 
@@ -1846,6 +1850,106 @@ get_compatible_profile_caps (GstH265SPS * sps, GstH265Profile profile)
           (GST_H265_PROFILE_SCREEN_EXTENDED_HIGH_THROUGHPUT_444_14);
       break;
     }
+      /* All the -intra profiles can map to non-intra profiles, except
+         the monochrome case for main and main-10. */
+    case GST_H265_PROFILE_MAIN_INTRA:
+    {
+      if (sps->chroma_format_idc == 1) {
+        profiles |= profile_to_flag (GST_H265_PROFILE_MAIN);
+
+        /* Add all main compatible profiles without monochrome. */
+        /* A.3.3 */
+        profiles |= profile_to_flag (GST_H265_PROFILE_MAIN_10);
+
+        /* A.3.5 */
+        profiles |= profile_to_flag (GST_H265_PROFILE_MAIN_444_10);
+        profiles |= profile_to_flag (GST_H265_PROFILE_MAIN_444_12);
+
+        /* A.3.7 */
+        profiles |= profile_to_flag (GST_H265_PROFILE_SCREEN_EXTENDED_MAIN);
+        profiles |= profile_to_flag (GST_H265_PROFILE_SCREEN_EXTENDED_MAIN_10);
+        profiles |=
+            profile_to_flag
+            (GST_H265_PROFILE_SCREEN_EXTENDED_HIGH_THROUGHPUT_444);
+        profiles |=
+            profile_to_flag
+            (GST_H265_PROFILE_SCREEN_EXTENDED_HIGH_THROUGHPUT_444_10);
+        profiles |=
+            profile_to_flag
+            (GST_H265_PROFILE_SCREEN_EXTENDED_HIGH_THROUGHPUT_444_14);
+
+        /* G.11.1.1 */
+        profiles |= profile_to_flag (GST_H265_PROFILE_MULTIVIEW_MAIN);
+
+        /* H.11.1.1 */
+        profiles |= profile_to_flag (GST_H265_PROFILE_SCALABLE_MAIN);
+        profiles |= profile_to_flag (GST_H265_PROFILE_SCALABLE_MAIN_10);
+
+        /* I.11.1.1 */
+        profiles |= profile_to_flag (GST_H265_PROFILE_3D_MAIN);
+      }
+
+      /* Add all main compatible profiles with monochrome. */
+      profiles |= profile_to_flag (GST_H265_PROFILE_MAIN_12);
+      profiles |= profile_to_flag (GST_H265_PROFILE_MAIN_422_10);
+      profiles |= profile_to_flag (GST_H265_PROFILE_MAIN_422_12);
+      profiles |= profile_to_flag (GST_H265_PROFILE_SCREEN_EXTENDED_MAIN_444);
+      profiles |=
+          profile_to_flag (GST_H265_PROFILE_SCREEN_EXTENDED_MAIN_444_10);
+      break;
+    }
+    case GST_H265_PROFILE_MAIN_10_INTRA:
+    {
+      if (sps->chroma_format_idc == 1) {
+        profiles |= profile_to_flag (GST_H265_PROFILE_MAIN_10);
+
+        /* Add all main-10 compatible profiles without monochrome. */
+        /* A.3.5 */
+        profiles |= profile_to_flag (GST_H265_PROFILE_MAIN_444_10);
+        profiles |= profile_to_flag (GST_H265_PROFILE_MAIN_444_12);
+
+        /* A.3.7 */
+        profiles |= profile_to_flag (GST_H265_PROFILE_SCREEN_EXTENDED_MAIN_10);
+
+        /* H.11.1.1 */
+        profiles |= profile_to_flag (GST_H265_PROFILE_SCALABLE_MAIN_10);
+      }
+
+      /* Add all main-10 compatible profiles with monochrome. */
+      profiles |= profile_to_flag (GST_H265_PROFILE_MAIN_12);
+      profiles |= profile_to_flag (GST_H265_PROFILE_MAIN_422_10);
+      profiles |= profile_to_flag (GST_H265_PROFILE_MAIN_422_12);
+      break;
+    }
+    case GST_H265_PROFILE_MAIN_12_INTRA:
+      profiles |= profile_to_flag (GST_H265_PROFILE_MAIN_12);
+      break;
+    case GST_H265_PROFILE_MAIN_422_10_INTRA:
+      profiles |= profile_to_flag (GST_H265_PROFILE_MAIN_422_10);
+      break;
+    case GST_H265_PROFILE_MAIN_422_12_INTRA:
+      profiles |= profile_to_flag (GST_H265_PROFILE_MAIN_422_12);
+      break;
+    case GST_H265_PROFILE_MAIN_444_INTRA:
+      profiles |= profile_to_flag (GST_H265_PROFILE_MAIN_444);
+
+      /* Add all main444 compatible profiles. */
+      /* A.3.7 */
+      profiles |= profile_to_flag (GST_H265_PROFILE_SCREEN_EXTENDED_MAIN_444);
+      profiles |=
+          profile_to_flag (GST_H265_PROFILE_SCREEN_EXTENDED_MAIN_444_10);
+      break;
+    case GST_H265_PROFILE_MAIN_444_10_INTRA:
+      profiles |= profile_to_flag (GST_H265_PROFILE_MAIN_444_10);
+
+      /* Add all main444-10 compatible profiles. */
+      /* A.3.7 */
+      profiles |=
+          profile_to_flag (GST_H265_PROFILE_SCREEN_EXTENDED_MAIN_444_10);
+      break;
+    case GST_H265_PROFILE_MAIN_444_12_INTRA:
+      profiles |= profile_to_flag (GST_H265_PROFILE_MAIN_444_12);
+      break;
     default:
       break;
   }
@@ -1878,6 +1982,22 @@ get_compatible_profile_caps (GstH265SPS * sps, GstH265Profile profile)
   return caps;
 }
 
+static void
+fix_invalid_profile (GstH265Parse * h265parse, GstCaps * caps, GstH265SPS * sps)
+{
+  /* HACK: This is a work-around to identify some main profile streams
+   * having wrong profile_idc. There are some wrongly encoded main profile
+   * streams which doesn't have any of the profile_idc values mentioned in
+   * Annex-A. Just assuming them as MAIN profile for now if they meet the
+   * A.3.2 requirement. */
+  if (sps->chroma_format_idc == 1 && sps->bit_depth_luma_minus8 == 0 &&
+      sps->bit_depth_chroma_minus8 == 0 && sps->sps_extension_flag == 0) {
+    gst_caps_set_simple (caps, "profile", G_TYPE_STRING, "main", NULL);
+    GST_WARNING_OBJECT (h265parse,
+        "Wrong profile_idc = 0, setting it as main profile !!");
+  }
+}
+
 /* if downstream didn't support the exact profile indicated in sps header,
  * check for the compatible profiles also */
 static void
@@ -1885,6 +2005,9 @@ ensure_caps_profile (GstH265Parse * h265parse, GstCaps * caps, GstH265SPS * sps,
     GstH265Profile profile)
 {
   GstCaps *peer_caps, *compat_caps;
+
+  if (profile == GST_H265_PROFILE_INVALID)
+    fix_invalid_profile (h265parse, caps, sps);
 
   peer_caps = gst_pad_get_current_caps (GST_BASE_PARSE_SRC_PAD (h265parse));
   if (!peer_caps || !gst_caps_can_intersect (caps, peer_caps)) {
@@ -1928,6 +2051,31 @@ ensure_caps_profile (GstH265Parse * h265parse, GstCaps * caps, GstH265SPS * sps,
   }
   if (peer_caps)
     gst_caps_unref (peer_caps);
+}
+
+static gboolean
+gst_h265_parse_is_field_interlaced (GstH265Parse * h265parse)
+{
+  /* FIXME: The SEI is optional, so theoretically there could be files with
+   * the interlaced_source_flag set to TRUE but no SEI present, or SEI present
+   * but no pic_struct. Haven't seen any such files in practice, and we don't
+   * know how to interpret the data without the pic_struct, so we'll treat
+   * them as progressive */
+
+  switch (h265parse->sei_pic_struct) {
+    case GST_H265_SEI_PIC_STRUCT_TOP_FIELD:
+    case GST_H265_SEI_PIC_STRUCT_TOP_PAIRED_PREVIOUS_BOTTOM:
+    case GST_H265_SEI_PIC_STRUCT_TOP_PAIRED_NEXT_BOTTOM:
+    case GST_H265_SEI_PIC_STRUCT_BOTTOM_FIELD:
+    case GST_H265_SEI_PIC_STRUCT_BOTTOM_PAIRED_PREVIOUS_TOP:
+    case GST_H265_SEI_PIC_STRUCT_BOTTOM_PAIRED_NEXT_TOP:
+      return TRUE;
+      break;
+    default:
+      break;
+  }
+
+  return FALSE;
 }
 
 static void
@@ -2002,12 +2150,14 @@ gst_h265_parse_update_src_caps (GstH265Parse * h265parse, GstCaps * caps)
       crop_width = sps->width;
       crop_height = sps->height;
     }
+    if (gst_h265_parse_is_field_interlaced (h265parse)) {
+      crop_height *= 2;
+    }
 
     if (G_UNLIKELY (h265parse->width != crop_width ||
             h265parse->height != crop_height)) {
       h265parse->width = crop_width;
-      h265parse->height = sps->profile_tier_level.interlaced_source_flag ?
-          crop_height * 2 : crop_height;
+      h265parse->height = crop_height;
       GST_INFO_OBJECT (h265parse, "resolution changed %dx%d",
           h265parse->width, h265parse->height);
       modified = TRUE;
@@ -2025,8 +2175,16 @@ gst_h265_parse_update_src_caps (GstH265Parse * h265parse, GstCaps * caps)
         fps_num = sps->vui_params.time_scale;
         fps_den = sps->vui_params.num_units_in_tick;
 
-        if (sps->profile_tier_level.interlaced_source_flag)
-          fps_num /= 2;
+        if (gst_h265_parse_is_field_interlaced (h265parse)
+            && h265parse->parsed_framerate) {
+          gint new_fps_num, new_fps_den;
+
+          gst_util_fraction_multiply (fps_num, fps_den, 1, 2, &new_fps_num,
+              &new_fps_den);
+          fps_num = new_fps_num;
+          fps_den = new_fps_den;
+          h265parse->parsed_framerate = FALSE;
+        }
       }
 
       if (G_UNLIKELY (h265parse->fps_num != fps_num
@@ -2103,6 +2261,7 @@ gst_h265_parse_update_src_caps (GstH265Parse * h265parse, GstCaps * caps)
       gst_caps_set_simple (caps, "width", G_TYPE_INT, width,
           "height", G_TYPE_INT, height, NULL);
 
+      h265parse->parsed_framerate = FALSE;
       /* upstream overrides */
       if (s && gst_structure_has_field (s, "framerate"))
         gst_structure_get_fraction (s, "framerate", &fps_num, &fps_den);
@@ -2122,6 +2281,7 @@ gst_h265_parse_update_src_caps (GstH265Parse * h265parse, GstCaps * caps)
             fps_num, fps_den, 0, 0);
         val = sps->profile_tier_level.interlaced_source_flag ? GST_SECOND / 2 :
             GST_SECOND;
+        h265parse->parsed_framerate = TRUE;
 
         /* If we know the frame duration, and if we are not in one of the zero
          * latency pattern, add one frame of latency */
@@ -2195,14 +2355,27 @@ gst_h265_parse_update_src_caps (GstH265Parse * h265parse, GstCaps * caps)
       const gchar *profile, *tier, *level;
       GstH265Profile p;
 
-      p = gst_h265_profile_tier_level_get_profile (&sps->profile_tier_level);
+      p = gst_h265_get_profile_from_sps (sps);
       profile = gst_h265_profile_to_string (p);
+
+      if (s && gst_structure_has_field (s, "profile")) {
+        const gchar *profile_sink = gst_structure_get_string (s, "profile");
+        GstH265Profile p_sink = gst_h265_profile_from_string (profile_sink);
+
+        if (p != p_sink) {
+          const gchar *profile_src;
+
+          p = MAX (p, p_sink);
+          profile_src = (p == p_sink) ? profile_sink : profile;
+          GST_INFO_OBJECT (h265parse,
+              "Upstream profile (%s) is different than in SPS (%s). "
+              "Using %s.", profile_sink, profile, profile_src);
+          profile = profile_src;
+        }
+      }
+
       if (profile != NULL)
         gst_caps_set_simple (caps, "profile", G_TYPE_STRING, profile, NULL);
-
-      if (sps->profile_tier_level.interlaced_source_flag)
-        gst_caps_set_simple (caps, "interlace-mode", G_TYPE_STRING,
-            "interleaved", NULL);
 
       tier = get_tier_string (sps->profile_tier_level.tier_flag);
       if (tier != NULL)
@@ -2342,11 +2515,10 @@ gst_h265_parse_parse_frame (GstBaseParse * parse, GstBaseParseFrame * frame)
   gst_h265_parse_update_src_caps (h265parse, NULL);
 
   if (h265parse->fps_num > 0 && h265parse->fps_den > 0) {
-    GstH265SPS *sps = h265parse->nalparser->last_sps;
-    GstClockTime val;
+    GstClockTime val =
+        gst_h265_parse_is_field_interlaced (h265parse) ? GST_SECOND /
+        2 : GST_SECOND;
 
-    val = (sps != NULL && sps->profile_tier_level.interlaced_source_flag) ?
-        GST_SECOND / 2 : GST_SECOND;
     GST_BUFFER_DURATION (buffer) = gst_util_uint64_scale (val,
         h265parse->fps_den, h265parse->fps_num);
   }
@@ -2748,6 +2920,37 @@ gst_h265_parse_pre_push_frame (GstBaseParse * parse, GstBaseParseFrame * frame)
     }
   }
 
+  if (frame->out_buffer) {
+    parse_buffer = frame->out_buffer =
+        gst_buffer_make_writable (frame->out_buffer);
+  } else {
+    parse_buffer = frame->buffer = gst_buffer_make_writable (frame->buffer);
+  }
+
+  /* see section D.3.3 of the spec */
+  switch (h265parse->sei_pic_struct) {
+    case GST_H265_SEI_PIC_STRUCT_TOP_BOTTOM:
+    case GST_H265_SEI_PIC_STRUCT_BOTTOM_TOP:
+    case GST_H265_SEI_PIC_STRUCT_TOP_BOTTOM_TOP:
+    case GST_H265_SEI_PIC_STRUCT_BOTTOM_TOP_BOTTOM:
+      GST_BUFFER_FLAG_SET (parse_buffer, GST_VIDEO_BUFFER_FLAG_INTERLACED);
+      break;
+    case GST_H265_SEI_PIC_STRUCT_TOP_FIELD:
+    case GST_H265_SEI_PIC_STRUCT_TOP_PAIRED_NEXT_BOTTOM:
+    case GST_H265_SEI_PIC_STRUCT_TOP_PAIRED_PREVIOUS_BOTTOM:
+      GST_BUFFER_FLAG_SET (parse_buffer, GST_VIDEO_BUFFER_FLAG_INTERLACED);
+      GST_BUFFER_FLAG_SET (parse_buffer, GST_VIDEO_BUFFER_FLAG_TOP_FIELD);
+      break;
+    case GST_H265_SEI_PIC_STRUCT_BOTTOM_FIELD:
+    case GST_H265_SEI_PIC_STRUCT_BOTTOM_PAIRED_PREVIOUS_TOP:
+    case GST_H265_SEI_PIC_STRUCT_BOTTOM_PAIRED_NEXT_TOP:
+      GST_BUFFER_FLAG_SET (parse_buffer, GST_VIDEO_BUFFER_FLAG_INTERLACED);
+      GST_BUFFER_FLAG_SET (parse_buffer, GST_VIDEO_BUFFER_FLAG_BOTTOM_FIELD);
+      break;
+    default:
+      break;
+  }
+
   {
     guint i = 0;
 
@@ -2809,7 +3012,7 @@ gst_h265_parse_pre_push_frame (GstBaseParse * parse, GstBaseParseFrame * frame)
           gst_util_uint64_scale_int (h265parse->time_code.n_frames[i], 1,
           2 - h265parse->time_code.units_field_based_flag[i]);
 
-      gst_buffer_add_video_time_code_meta_full (buffer,
+      gst_buffer_add_video_time_code_meta_full (parse_buffer,
           h265parse->parsed_fps_n,
           h265parse->parsed_fps_d,
           NULL,
@@ -2821,19 +3024,6 @@ gst_h265_parse_pre_push_frame (GstBaseParse * parse, GstBaseParseFrame * frame)
           h265parse->time_code.seconds_flag[i] ? h265parse->time_code.
           seconds_value[i] : 0, n_frames, field_count);
     }
-  }
-
-  if (frame->out_buffer) {
-    parse_buffer = frame->out_buffer =
-        gst_buffer_make_writable (frame->out_buffer);
-  } else {
-    parse_buffer = frame->buffer = gst_buffer_make_writable (frame->buffer);
-  }
-
-  if (h265parse->sei_pic_struct != GST_H265_SEI_PIC_STRUCT_FRAME) {
-    GST_BUFFER_FLAG_SET (parse_buffer, GST_VIDEO_BUFFER_FLAG_INTERLACED);
-    if (h265parse->sei_pic_struct == GST_H265_SEI_PIC_STRUCT_TOP_FIELD)
-      GST_BUFFER_FLAG_SET (parse_buffer, GST_VIDEO_BUFFER_FLAG_TFF);
   }
 
   gst_video_push_user_data ((GstElement *) h265parse, &h265parse->user_data,

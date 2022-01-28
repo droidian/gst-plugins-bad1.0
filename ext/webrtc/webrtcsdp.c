@@ -569,6 +569,7 @@ _media_replace_setup (GstSDPMedia * media, GstWebRTCDTLSSetup setup)
       GST_TRACE ("replace setup:%s with setup:%s", attr->value, setup_str);
       gst_sdp_attribute_set (&new_attr, "setup", setup_str);
       gst_sdp_media_replace_attribute (media, i, &new_attr);
+      g_free (setup_str);
       return;
     }
   }
@@ -872,7 +873,7 @@ _get_ice_credentials_from_sdp_media (const GstSDPMessage * sdp, guint media_idx,
 }
 
 gboolean
-_parse_bundle (GstSDPMessage * sdp, GStrv * bundled)
+_parse_bundle (GstSDPMessage * sdp, GStrv * bundled, GError ** error)
 {
   const gchar *group;
   gboolean ret = FALSE;
@@ -883,8 +884,9 @@ _parse_bundle (GstSDPMessage * sdp, GStrv * bundled)
     *bundled = g_strsplit (group + strlen ("BUNDLE "), " ", 0);
 
     if (!(*bundled)[0]) {
-      GST_ERROR ("Invalid format for BUNDLE group, expected at least "
-          "one mid (%s)", group);
+      g_set_error (error, GST_WEBRTC_BIN_ERROR, GST_WEBRTC_BIN_ERROR_BAD_SDP,
+          "Invalid format for BUNDLE group, expected at least one mid (%s)",
+          group);
       g_strfreev (*bundled);
       *bundled = NULL;
       goto done;

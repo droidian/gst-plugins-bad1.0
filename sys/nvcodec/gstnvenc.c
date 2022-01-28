@@ -24,6 +24,8 @@
 #include "gstnvenc.h"
 #include "gstnvh264enc.h"
 #include "gstnvh265enc.h"
+#include "gstcudabufferpool.h"
+
 #include <gmodule.h>
 
 #if HAVE_NVCODEC_GST_GL
@@ -512,6 +514,9 @@ gst_nvenc_get_supported_codec_profiles (gpointer enc, GUID codec_id)
     /* put baseline to last since it does not support bframe */
     {"baseline", NV_ENC_H264_PROFILE_BASELINE_GUID, NV_ENC_CODEC_H264_GUID,
         FALSE, FALSE, FALSE},
+    {"constrained-baseline", NV_ENC_H264_PROFILE_BASELINE_GUID,
+          NV_ENC_CODEC_H264_GUID,
+        FALSE, FALSE, FALSE},
     /* hevc profiles */
     {"main", NV_ENC_HEVC_PROFILE_MAIN_GUID, NV_ENC_CODEC_HEVC_GUID, FALSE,
         FALSE, FALSE},
@@ -787,14 +792,20 @@ gst_nv_enc_register (GstPlugin * plugin, GUID codec_id, const gchar * codec,
       g_value_unset (interlace_modes);
       g_free (interlace_modes);
     }
-#if HAVE_NVCODEC_GST_GL
+
     {
+      GstCaps *cuda_caps = gst_caps_copy (sink_templ);
+#if HAVE_NVCODEC_GST_GL
       GstCaps *gl_caps = gst_caps_copy (sink_templ);
       gst_caps_set_features_simple (gl_caps,
           gst_caps_features_from_string (GST_CAPS_FEATURE_MEMORY_GL_MEMORY));
       gst_caps_append (sink_templ, gl_caps);
-    }
 #endif
+
+      gst_caps_set_features_simple (cuda_caps,
+          gst_caps_features_from_string (GST_CAPS_FEATURE_MEMORY_CUDA_MEMORY));
+      gst_caps_append (sink_templ, cuda_caps);
+    }
 
     name = g_strdup_printf ("video/x-%s", codec);
     src_templ = gst_caps_new_simple (name,
@@ -1083,7 +1094,7 @@ gst_nvenc_get_map_input_resource_version (void)
 }
 
 guint32
-gst_nvenc_get_registure_resource_version (void)
+gst_nvenc_get_register_resource_version (void)
 {
   /* NV_ENC_REGISTER_RESOURCE_VER == NVENCAPI_STRUCT_VERSION(3) */
   return GST_NVENCAPI_STRUCT_VERSION (3, gst_nvenc_api_version);

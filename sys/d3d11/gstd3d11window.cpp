@@ -23,27 +23,26 @@
 #endif
 
 #include "gstd3d11window.h"
-#include "gstd3d11device.h"
-#include "gstd3d11memory.h"
-#include "gstd3d11utils.h"
+#include "gstd3d11pluginutils.h"
 
-#if GST_D3D11_WINAPI_ONLY_APP
+#if GST_D3D11_WINAPI_APP
 /* workaround for GetCurrentTime collision */
 #ifdef GetCurrentTime
 #undef GetCurrentTime
 #endif
 #include <windows.ui.xaml.h>
 #include <windows.applicationmodel.core.h>
-#include <wrl.h>
-#include <wrl/wrappers/corewrappers.h>
-
-using namespace Microsoft::WRL;
 #endif
 
-extern "C" {
+#include <wrl.h>
+
+/* *INDENT-OFF* */
+using namespace Microsoft::WRL;
+/* *INDENT-ON* */
+
 GST_DEBUG_CATEGORY_EXTERN (gst_d3d11_window_debug);
 #define GST_CAT_DEFAULT gst_d3d11_window_debug
-}
+
 
 enum
 {
@@ -54,12 +53,14 @@ enum
   PROP_FULLSCREEN_TOGGLE_MODE,
   PROP_FULLSCREEN,
   PROP_WINDOW_HANDLE,
+  PROP_RENDER_STATS,
 };
 
 #define DEFAULT_ENABLE_NAVIGATION_EVENTS  TRUE
 #define DEFAULT_FORCE_ASPECT_RATIO        TRUE
 #define DEFAULT_FULLSCREEN_TOGGLE_MODE    GST_D3D11_WINDOW_FULLSCREEN_TOGGLE_MODE_NONE
 #define DEFAULT_FULLSCREEN                FALSE
+#define DEFAULT_RENDER_STATS              FALSE
 
 enum
 {
@@ -102,9 +103,13 @@ static void gst_d3d11_window_get_property (GObject * object, guint prop_id,
     GValue * value, GParamSpec * pspec);
 static void gst_d3d11_window_dispose (GObject * object);
 static GstFlowReturn gst_d3d111_window_present (GstD3D11Window * self,
-    GstBuffer * buffer);
+    GstBuffer * buffer, ID3D11VideoProcessorOutputView * pov,
+    ID3D11RenderTargetView * rtv);
 static void gst_d3d11_window_on_resize_default (GstD3D11Window * window,
     guint width, guint height);
+static gboolean gst_d3d11_window_prepare_default (GstD3D11Window * window,
+    guint display_width, guint display_height, GstCaps * caps,
+    gboolean * video_processor_available, GError ** error);
 
 static void
 gst_d3d11_window_class_init (GstD3D11WindowClass * klass)
@@ -116,6 +121,7 @@ gst_d3d11_window_class_init (GstD3D11WindowClass * klass)
   gobject_class->dispose = gst_d3d11_window_dispose;
 
   klass->on_resize = GST_DEBUG_FUNCPTR (gst_d3d11_window_on_resize_default);
+  klass->prepare = GST_DEBUG_FUNCPTR (gst_d3d11_window_prepare_default);
 
   g_object_class_install_property (gobject_class, PROP_D3D11_DEVICE,
       g_param_spec_object ("d3d11device", "D3D11 Device",
@@ -176,6 +182,7 @@ gst_d3d11_window_init (GstD3D11Window * self)
   self->enable_navigation_events = DEFAULT_ENABLE_NAVIGATION_EVENTS;
   self->fullscreen_toggle_mode = GST_D3D11_WINDOW_FULLSCREEN_TOGGLE_MODE_NONE;
   self->fullscreen = DEFAULT_FULLSCREEN;
+  self->render_stats = DEFAULT_RENDER_STATS;
 }
 
 static void
@@ -248,20 +255,9 @@ static void
 gst_d3d11_window_release_resources (GstD3D11Device * device,
     GstD3D11Window * window)
 {
-  if (window->rtv) {
-    window->rtv->Release ();
-    window->rtv = NULL;
-  }
-
-  if (window->pov) {
-    window->pov->Release ();
-    window->pov = NULL;
-  }
-
-  if (window->swap_chain) {
-    window->swap_chain->Release ();
-    window->swap_chain = NULL;
-  }
+  GST_D3D11_CLEAR_COM (window->rtv);
+  GST_D3D11_CLEAR_COM (window->pov);
+  GST_D3D11_CLEAR_COM (window->swap_chain);
 }
 
 static void
@@ -274,7 +270,7 @@ gst_d3d11_window_dispose (GObject * object)
   }
 
   g_clear_pointer (&self->processor, gst_d3d11_video_processor_free);
-  g_clear_pointer (&self->converter, gst_d3d11_color_converter_free);
+  g_clear_pointer (&self->converter, gst_d3d11_converter_free);
   g_clear_pointer (&self->compositor, gst_d3d11_overlay_compositor_free);
 
   gst_clear_buffer (&self->cached_buffer);
@@ -302,15 +298,8 @@ gst_d3d11_window_on_resize_default (GstD3D11Window * window, guint width,
   device_handle = gst_d3d11_device_get_device_handle (window->device);
   swap_chain = window->swap_chain;
 
-  if (window->rtv) {
-    window->rtv->Release ();
-    window->rtv = NULL;
-  }
-
-  if (window->pov) {
-    window->pov->Release ();
-    window->pov = NULL;
-  }
+  GST_D3D11_CLEAR_COM (window->rtv);
+  GST_D3D11_CLEAR_COM (window->pov);
 
   swap_chain->GetDesc (&swap_desc);
   hr = swap_chain->ResizeBuffers (0, width, height, window->dxgi_format,
@@ -320,7 +309,7 @@ gst_d3d11_window_on_resize_default (GstD3D11Window * window, guint width,
     goto done;
   }
 
-  hr = swap_chain->GetBuffer (0, IID_ID3D11Texture2D, (void **) &backbuffer);
+  hr = swap_chain->GetBuffer (0, IID_PPV_ARGS (&backbuffer));
   if (!gst_d3d11_result (hr, window->device)) {
     GST_ERROR_OBJECT (window,
         "Cannot get backbuffer from swapchain, hr: 0x%x", (guint) hr);
@@ -358,8 +347,7 @@ gst_d3d11_window_on_resize_default (GstD3D11Window * window, guint width,
       "New client area %dx%d, render rect x: %d, y: %d, %dx%d",
       desc.Width, desc.Height, rst_rect.x, rst_rect.y, rst_rect.w, rst_rect.h);
 
-  hr = device_handle->CreateRenderTargetView ((ID3D11Resource *) backbuffer,
-      NULL, &window->rtv);
+  hr = device_handle->CreateRenderTargetView (backbuffer, NULL, &window->rtv);
   if (!gst_d3d11_result (hr, window->device)) {
     GST_ERROR_OBJECT (window, "Cannot create render target view, hr: 0x%x",
         (guint) hr);
@@ -374,18 +362,20 @@ gst_d3d11_window_on_resize_default (GstD3D11Window * window, guint width,
     pov_desc.Texture2D.MipSlice = 0;
 
     if (!gst_d3d11_video_processor_create_output_view (window->processor,
-        &pov_desc, (ID3D11Resource *) backbuffer, &window->pov))
+            &pov_desc, backbuffer, &window->pov))
       goto done;
   }
 
   window->first_present = TRUE;
 
   /* redraw the last scene if cached buffer exits */
-  gst_d3d111_window_present (window, NULL);
+  if (window->cached_buffer) {
+    gst_d3d111_window_present (window, window->cached_buffer,
+        window->pov, window->rtv);
+  }
 
 done:
-  if (backbuffer)
-    backbuffer->Release ();
+  GST_D3D11_CLEAR_COM (backbuffer);
 
   gst_d3d11_device_unlock (window->device);
 }
@@ -422,9 +412,27 @@ typedef struct
   gboolean supported;
 } GstD3D11WindowDisplayFormat;
 
-
 gboolean
 gst_d3d11_window_prepare (GstD3D11Window * window, guint display_width,
+    guint display_height, GstCaps * caps, gboolean * video_processor_available,
+    GError ** error)
+{
+  GstD3D11WindowClass *klass;
+
+  g_return_val_if_fail (GST_IS_D3D11_WINDOW (window), FALSE);
+
+  klass = GST_D3D11_WINDOW_GET_CLASS (window);
+  g_assert (klass->prepare != NULL);
+
+  GST_DEBUG_OBJECT (window, "Prepare window, display resolution %dx%d, caps %"
+      GST_PTR_FORMAT, display_width, display_height, caps);
+
+  return klass->prepare (window, display_width, display_height, caps,
+      video_processor_available, error);
+}
+
+static gboolean
+gst_d3d11_window_prepare_default (GstD3D11Window * window, guint display_width,
     guint display_height, GstCaps * caps, gboolean * video_processor_available,
     GError ** error)
 {
@@ -438,31 +446,28 @@ gst_d3d11_window_prepare (GstD3D11Window * window, guint display_width,
       D3D11_FORMAT_SUPPORT_TEXTURE2D | D3D11_FORMAT_SUPPORT_DISPLAY;
   UINT supported_flags = 0;
   GstD3D11WindowDisplayFormat formats[] = {
-    { DXGI_FORMAT_R8G8B8A8_UNORM, GST_VIDEO_FORMAT_RGBA, FALSE },
-    { DXGI_FORMAT_B8G8R8A8_UNORM, GST_VIDEO_FORMAT_BGRA, FALSE },
-    { DXGI_FORMAT_R10G10B10A2_UNORM, GST_VIDEO_FORMAT_RGB10A2_LE, FALSE },
+    {DXGI_FORMAT_R8G8B8A8_UNORM, GST_VIDEO_FORMAT_RGBA, FALSE},
+    {DXGI_FORMAT_B8G8R8A8_UNORM, GST_VIDEO_FORMAT_BGRA, FALSE},
+    {DXGI_FORMAT_R10G10B10A2_UNORM, GST_VIDEO_FORMAT_RGB10A2_LE, FALSE},
   };
   const GstD3D11WindowDisplayFormat *chosen_format = NULL;
-  const GstDxgiColorSpace * chosen_colorspace = NULL;
-#if (DXGI_HEADER_VERSION >= 4)
+  const GstDxgiColorSpace *chosen_colorspace = NULL;
+#if (GST_D3D11_DXGI_HEADER_VERSION >= 4)
   gboolean have_hdr10 = FALSE;
   DXGI_COLOR_SPACE_TYPE native_colorspace_type =
       DXGI_COLOR_SPACE_RGB_FULL_G22_NONE_P709;
 #endif
-#if (DXGI_HEADER_VERSION >= 5)
+#if (GST_D3D11_DXGI_HEADER_VERSION >= 5)
   DXGI_HDR_METADATA_HDR10 hdr10_metadata = { 0, };
 #endif
-
-  g_return_val_if_fail (GST_IS_D3D11_WINDOW (window), FALSE);
-
-  GST_DEBUG_OBJECT (window, "Prepare window, display resolution %dx%d, caps %"
-      GST_PTR_FORMAT, display_width, display_height, caps);
 
   /* Step 1: Clear old resources and objects */
   gst_clear_buffer (&window->cached_buffer);
   g_clear_pointer (&window->processor, gst_d3d11_video_processor_free);
-  g_clear_pointer (&window->converter, gst_d3d11_color_converter_free);
+  g_clear_pointer (&window->converter, gst_d3d11_converter_free);
   g_clear_pointer (&window->compositor, gst_d3d11_overlay_compositor_free);
+
+  window->processor_in_use = FALSE;
 
   /* Step 2: Decide display color format
    * If upstream format is 10bits, try DXGI_FORMAT_R10G10B10A2_UNORM first
@@ -521,14 +526,32 @@ gst_d3d11_window_prepare (GstD3D11Window * window, guint display_width,
 
   g_assert (chosen_format != NULL);
 
-  GST_DEBUG_OBJECT (window, "chosen rendero format %s (DXGI_FORMAT %d)",
+  GST_DEBUG_OBJECT (window, "chosen render format %s (DXGI_FORMAT %d)",
       gst_video_format_to_string (chosen_format->gst_format),
       chosen_format->dxgi_format);
 
   /* Step 3: Create swapchain
    * (or reuse old swapchain if the format is not changed) */
   window->allow_tearing = FALSE;
-  g_object_get (window->device, "allow-tearing", &window->allow_tearing, NULL);
+
+#if (GST_D3D11_DXGI_HEADER_VERSION >= 5)
+  {
+    ComPtr < IDXGIFactory5 > factory5;
+    IDXGIFactory1 *factory_handle;
+    BOOL allow_tearing = FALSE;
+
+    factory_handle = gst_d3d11_device_get_dxgi_factory_handle (window->device);
+    hr = factory_handle->QueryInterface (IID_PPV_ARGS (&factory5));
+    if (SUCCEEDED (hr)) {
+      hr = factory5->CheckFeatureSupport (DXGI_FEATURE_PRESENT_ALLOW_TEARING,
+          (void *) &allow_tearing, sizeof (allow_tearing));
+    }
+
+    if (SUCCEEDED (hr) && allow_tearing)
+      window->allow_tearing = allow_tearing;
+  }
+#endif
+
   if (window->allow_tearing) {
     GST_DEBUG_OBJECT (window, "device support tearning");
     swapchain_flags |= DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING;
@@ -540,15 +563,13 @@ gst_d3d11_window_prepare (GstD3D11Window * window, guint display_width,
   klass = GST_D3D11_WINDOW_GET_CLASS (window);
   if (!window->swap_chain &&
       !klass->create_swap_chain (window, window->dxgi_format,
-          display_width, display_height, swapchain_flags, &window->swap_chain)) {
+          display_width, display_height, swapchain_flags,
+          &window->swap_chain)) {
     GST_ERROR_OBJECT (window, "Cannot create swapchain");
     g_set_error (error, GST_RESOURCE_ERROR, GST_RESOURCE_ERROR_FAILED,
         "Cannot create swapchain");
-    gst_d3d11_device_unlock (window->device);
-
-    return FALSE;
+    goto error;
   }
-  gst_d3d11_device_unlock (window->device);
 
   /* this rect struct will be used to calculate render area */
   window->render_rect.left = 0;
@@ -562,29 +583,17 @@ gst_d3d11_window_prepare (GstD3D11Window * window, guint display_width,
   window->input_rect.bottom = GST_VIDEO_INFO_HEIGHT (&window->info);
 
   /* Step 4: Decide render color space and set it on converter/processor */
-
-  /* check HDR10 metadata. If HDR APIs are available, BT2020 primaries colorspcae
-   * will be used.
-   *
-   * FIXME: need to query h/w level support. If that's not the case, tone-mapping
-   * should be placed somewhere.
-   *
-   * FIXME: Non-HDR colorspace with BT2020 primaries will break rendering.
-   * https://gitlab.freedesktop.org/gstreamer/gst-plugins-bad/issues/1175
-   * To workaround it, BT709 colorspace will be chosen for non-HDR case.
-   */
-#if (DXGI_HEADER_VERSION >= 5)
+#if (GST_D3D11_DXGI_HEADER_VERSION >= 5)
   {
     GstVideoMasteringDisplayInfo minfo;
     GstVideoContentLightLevel cll;
 
     if (gst_video_mastering_display_info_from_caps (&minfo, caps) &&
         gst_video_content_light_level_from_caps (&cll, caps)) {
-      IDXGISwapChain4 *swapchain4 = NULL;
+      ComPtr < IDXGISwapChain4 > swapchain4;
       HRESULT hr;
 
-      hr = window->swap_chain->QueryInterface (IID_IDXGISwapChain4,
-        (void **) &swapchain4);
+      hr = window->swap_chain->QueryInterface (IID_PPV_ARGS (&swapchain4));
       if (gst_d3d11_result (hr, window->device)) {
         GST_DEBUG_OBJECT (window, "Have HDR metadata, set to DXGI swapchain");
 
@@ -598,8 +607,6 @@ gst_d3d11_window_prepare (GstD3D11Window * window, guint display_width,
         } else {
           have_hdr10 = TRUE;
         }
-
-        swapchain4->Release ();
       }
     }
   }
@@ -613,26 +620,29 @@ gst_d3d11_window_prepare (GstD3D11Window * window, guint display_width,
   window->render_info.colorimetry.primaries =
       window->info.colorimetry.primaries;
   window->render_info.colorimetry.transfer = window->info.colorimetry.transfer;
-  window->render_info.colorimetry.range = window->info.colorimetry.range;
+  /* prefer FULL range RGB. STUDIO range doesn't seem to be well supported
+   * color space by GPUs and we don't need to preserve color range for
+   * target display color space type */
+  window->render_info.colorimetry.range = GST_VIDEO_COLOR_RANGE_0_255;
 
-#if (DXGI_HEADER_VERSION >= 4)
+#if (GST_D3D11_DXGI_HEADER_VERSION >= 4)
   {
-    IDXGISwapChain3 *swapchain3 = NULL;
+    ComPtr < IDXGISwapChain3 > swapchain3;
     HRESULT hr;
 
-    hr = window->swap_chain->QueryInterface (IID_IDXGISwapChain3,
-        (void **) &swapchain3);
+    hr = window->swap_chain->QueryInterface (IID_PPV_ARGS (&swapchain3));
 
     if (gst_d3d11_result (hr, window->device)) {
-      chosen_colorspace = gst_d3d11_find_swap_chain_color_space (&window->render_info,
-          swapchain3, have_hdr10);
+      chosen_colorspace =
+          gst_d3d11_find_swap_chain_color_space (&window->render_info,
+          swapchain3.Get ());
       if (chosen_colorspace) {
         native_colorspace_type =
             (DXGI_COLOR_SPACE_TYPE) chosen_colorspace->dxgi_color_space_type;
         hr = swapchain3->SetColorSpace1 (native_colorspace_type);
         if (!gst_d3d11_result (hr, window->device)) {
           GST_WARNING_OBJECT (window, "Failed to set colorspace %d, hr: 0x%x",
-            native_colorspace_type, (guint) hr);
+              native_colorspace_type, (guint) hr);
           chosen_colorspace = NULL;
           native_colorspace_type = DXGI_COLOR_SPACE_RGB_FULL_G22_NONE_P709;
         } else {
@@ -644,14 +654,10 @@ gst_d3d11_window_prepare (GstD3D11Window * window, guint display_width,
               chosen_colorspace->primaries;
           window->render_info.colorimetry.transfer =
               chosen_colorspace->transfer;
-          window->render_info.colorimetry.range =
-              chosen_colorspace->range;
-          window->render_info.colorimetry.matrix =
-              chosen_colorspace->matrix;
+          window->render_info.colorimetry.range = chosen_colorspace->range;
+          window->render_info.colorimetry.matrix = chosen_colorspace->matrix;
         }
       }
-
-      swapchain3->Release ();
     }
   }
 #endif
@@ -664,128 +670,75 @@ gst_d3d11_window_prepare (GstD3D11Window * window, guint display_width,
     window->render_info.colorimetry.transfer = GST_VIDEO_TRANSFER_BT709;
     window->render_info.colorimetry.range = GST_VIDEO_COLOR_RANGE_0_255;
   }
+#if (GST_D3D11_DXGI_HEADER_VERSION >= 4)
+  if (chosen_colorspace) {
+    const GstDxgiColorSpace *in_color_space =
+        gst_d3d11_video_info_to_dxgi_color_space (&window->info);
+    const GstD3D11Format *in_format =
+        gst_d3d11_device_format_from_gst (window->device,
+        GST_VIDEO_INFO_FORMAT (&window->info));
+    gboolean hardware = FALSE;
+    GstD3D11VideoProcessor *processor = NULL;
 
-  /* FIXME: need to verify video processor on Xbox
-   * https://gitlab.freedesktop.org/gstreamer/gst-plugins-bad/-/issues/1312
-   */
+    if (in_color_space && in_format &&
+        in_format->dxgi_format != DXGI_FORMAT_UNKNOWN) {
+      g_object_get (window->device, "hardware", &hardware, NULL);
+    }
 
-  /* XXX: Depending on driver/vendor, d3d11 video processor might not support
-   * HDR10 metadata. Even worse thing here is,
-   * although the d3d11 video processor's capability flag indicated that
-   * HDR10 metadata is supported, it would result to black screen when HDR10
-   * metadata is passed to d3d11 video processor. (without any error message).
-   * Let's disable d3d11 video processor.
-   */
-  if (!have_hdr10 && gst_d3d11_get_device_vendor (window->device) !=
-      GST_D3D11_DEVICE_VENDOR_XBOX) {
-      window->processor =
+    if (hardware) {
+      processor =
           gst_d3d11_video_processor_new (window->device,
           GST_VIDEO_INFO_WIDTH (&window->info),
-          GST_VIDEO_INFO_HEIGHT (&window->info),
-          display_width, display_height);
-  }
-
-  if (window->processor) {
-    const GstD3D11Format *in_format;
-    const GstD3D11Format *out_format;
-    gboolean input_support = FALSE;
-    gboolean out_support = FALSE;
-
-    in_format = gst_d3d11_device_format_from_gst (window->device,
-        GST_VIDEO_INFO_FORMAT (&window->info));
-    out_format = gst_d3d11_device_format_from_gst (window->device,
-        GST_VIDEO_INFO_FORMAT (&window->render_info));
-
-    if (gst_d3d11_video_processor_supports_input_format (window->processor,
-            in_format->dxgi_format)) {
-      input_support = TRUE;
-    } else {
-      GST_DEBUG_OBJECT (window,
-          "IVideoProcessor cannot support input dxgi format %d",
-          in_format->dxgi_format);
+          GST_VIDEO_INFO_HEIGHT (&window->info), display_width, display_height);
     }
 
-    if (gst_d3d11_video_processor_supports_output_format (window->processor,
-            out_format->dxgi_format)) {
-      out_support = TRUE;
-    } else {
-      GST_DEBUG_OBJECT (window,
-          "IVideoProcessor cannot support output dxgi format %d",
-          out_format->dxgi_format);
-    }
+    if (processor) {
+      DXGI_FORMAT in_dxgi_format = in_format->dxgi_format;
+      DXGI_FORMAT out_dxgi_format = chosen_format->dxgi_format;
+      DXGI_COLOR_SPACE_TYPE in_dxgi_color_space =
+          (DXGI_COLOR_SPACE_TYPE) in_color_space->dxgi_color_space_type;
+      DXGI_COLOR_SPACE_TYPE out_dxgi_color_space = native_colorspace_type;
 
-    if (!input_support || !out_support) {
-      gst_d3d11_video_processor_free (window->processor);
-      window->processor = NULL;
-    } else {
-      gboolean processor_input_configured = FALSE;
-      gboolean processor_output_configured = FALSE;
+      if (!gst_d3d11_video_processor_check_format_conversion (processor,
+              in_dxgi_format, in_dxgi_color_space, out_dxgi_format,
+              out_dxgi_color_space)) {
+        GST_DEBUG_OBJECT (window, "Conversion is not supported by device");
+        gst_d3d11_video_processor_free (processor);
+        processor = NULL;
+      } else {
+        GST_DEBUG_OBJECT (window, "video processor supports conversion");
+        gst_d3d11_video_processor_set_input_dxgi_color_space (processor,
+            in_dxgi_color_space);
+        gst_d3d11_video_processor_set_output_dxgi_color_space (processor,
+            out_dxgi_color_space);
 
-      GST_DEBUG_OBJECT (window, "IVideoProcessor interface available");
-      *video_processor_available = TRUE;
-#if (DXGI_HEADER_VERSION >= 5)
-      if (have_hdr10) {
-        GST_DEBUG_OBJECT (window, "Set HDR metadata on video processor");
-        gst_d3d11_video_processor_set_input_hdr10_metadata (window->processor,
-            &hdr10_metadata);
-        gst_d3d11_video_processor_set_output_hdr10_metadata (window->processor,
-            &hdr10_metadata);
-      }
-#endif
-
-#if (DXGI_HEADER_VERSION >= 4)
-      {
-        DXGI_COLOR_SPACE_TYPE in_native_cs =
-            DXGI_COLOR_SPACE_RGB_FULL_G22_NONE_P709;
-        const GstDxgiColorSpace *in_cs =
-            gst_d3d11_video_info_to_dxgi_color_space (&window->info);
-
-        if (in_cs) {
-          in_native_cs = (DXGI_COLOR_SPACE_TYPE) in_cs->dxgi_color_space_type;
-        } else {
-          GST_WARNING_OBJECT (window,
-              "Cannot figure out input dxgi color space");
-          if (GST_VIDEO_INFO_IS_RGB (&window->info)) {
-            in_native_cs = DXGI_COLOR_SPACE_RGB_FULL_G22_NONE_P709;
-          } else {
-            in_native_cs = DXGI_COLOR_SPACE_YCBCR_STUDIO_G22_LEFT_P709;
-          }
+#if (GST_D3D11_DXGI_HEADER_VERSION >= 5)
+        if (have_hdr10) {
+          GST_DEBUG_OBJECT (window, "Set HDR metadata on video processor");
+          gst_d3d11_video_processor_set_input_hdr10_metadata (processor,
+              &hdr10_metadata);
+          gst_d3d11_video_processor_set_output_hdr10_metadata (processor,
+              &hdr10_metadata);
         }
-
-        GST_DEBUG_OBJECT (window,
-            "Set color space on video processor, in %d, out %d",
-            in_native_cs, native_colorspace_type);
-        processor_input_configured =
-            gst_d3d11_video_processor_set_input_dxgi_color_space
-            (window->processor, in_native_cs);
-        processor_output_configured =
-            gst_d3d11_video_processor_set_output_dxgi_color_space
-            (window->processor, native_colorspace_type);
-      }
 #endif
-      if (!processor_input_configured) {
-        gst_d3d11_video_processor_set_input_color_space (window->processor,
-            &window->info.colorimetry);
       }
 
-      if (!processor_output_configured) {
-        gst_d3d11_video_processor_set_output_color_space (window->processor,
-            &window->render_info.colorimetry);
-      }
+      window->processor = processor;
     }
   }
+#endif
+  *video_processor_available = !!window->processor;
 
   /* configure shader even if video processor is available for fallback */
   window->converter =
-      gst_d3d11_color_converter_new (window->device, &window->info,
-      &window->render_info);
+      gst_d3d11_converter_new (window->device, &window->info,
+      &window->render_info, nullptr);
 
   if (!window->converter) {
     GST_ERROR_OBJECT (window, "Cannot create converter");
     g_set_error (error, GST_RESOURCE_ERROR, GST_RESOURCE_ERROR_FAILED,
         "Cannot create converter");
-
-    return FALSE;
+    goto error;
   }
 
   window->compositor =
@@ -794,9 +747,9 @@ gst_d3d11_window_prepare (GstD3D11Window * window, guint display_width,
     GST_ERROR_OBJECT (window, "Cannot create overlay compositor");
     g_set_error (error, GST_RESOURCE_ERROR, GST_RESOURCE_ERROR_FAILED,
         "Cannot create overlay compositor");
-
-    return FALSE;
+    goto error;
   }
+  gst_d3d11_device_unlock (window->device);
 
   /* call resize to allocated resources */
   klass->on_resize (window, display_width, display_height);
@@ -808,6 +761,11 @@ gst_d3d11_window_prepare (GstD3D11Window * window, guint display_width,
   GST_DEBUG_OBJECT (window, "New swap chain 0x%p created", window->swap_chain);
 
   return TRUE;
+
+error:
+  gst_d3d11_device_unlock (window->device);
+
+  return FALSE;
 }
 
 void
@@ -824,12 +782,30 @@ gst_d3d11_window_show (GstD3D11Window * window)
 }
 
 void
-gst_d3d11_window_set_render_rectangle (GstD3D11Window * window, gint x, gint y,
-    gint width, gint height)
+gst_d3d11_window_set_render_rectangle (GstD3D11Window * window,
+    const GstVideoRectangle * rect)
 {
+  GstD3D11WindowClass *klass;
+
   g_return_if_fail (GST_IS_D3D11_WINDOW (window));
 
-  /* TODO: resize window and view */
+  klass = GST_D3D11_WINDOW_GET_CLASS (window);
+
+  if (klass->set_render_rectangle)
+    klass->set_render_rectangle (window, rect);
+}
+
+void
+gst_d3d11_window_set_title (GstD3D11Window * window, const gchar * title)
+{
+  GstD3D11WindowClass *klass;
+
+  g_return_if_fail (GST_IS_D3D11_WINDOW (window));
+
+  klass = GST_D3D11_WINDOW_GET_CLASS (window);
+
+  if (klass->set_title)
+    klass->set_title (window, title);
 }
 
 static gboolean
@@ -837,8 +813,7 @@ gst_d3d11_window_buffer_ensure_processor_input (GstD3D11Window * self,
     GstBuffer * buffer, ID3D11VideoProcessorInputView ** in_view)
 {
   GstD3D11Memory *mem;
-  ID3D11VideoProcessorInputView *view;
-  GQuark quark;
+  ID3D11VideoProcessorInputView *piv;
 
   if (!self->processor)
     return FALSE;
@@ -847,122 +822,224 @@ gst_d3d11_window_buffer_ensure_processor_input (GstD3D11Window * self,
     return FALSE;
 
   mem = (GstD3D11Memory *) gst_buffer_peek_memory (buffer, 0);
-
-  if (!gst_d3d11_video_processor_check_bind_flags_for_input_view
-      (mem->desc.BindFlags)) {
+  piv = gst_d3d11_video_processor_get_input_view (self->processor, mem);
+  if (!piv) {
+    GST_LOG_OBJECT (self, "Failed to get processor input view");
     return FALSE;
   }
 
-  quark = gst_d3d11_video_processor_input_view_quark ();
-  view = (ID3D11VideoProcessorInputView *)
-      gst_mini_object_get_qdata (GST_MINI_OBJECT (mem), quark);
+  *in_view = piv;
 
-  if (!view) {
-    D3D11_VIDEO_PROCESSOR_INPUT_VIEW_DESC in_desc;
+  return TRUE;
+}
 
-    in_desc.FourCC = 0;
-    in_desc.ViewDimension = D3D11_VPIV_DIMENSION_TEXTURE2D;
-    in_desc.Texture2D.MipSlice = 0;
-    in_desc.Texture2D.ArraySlice = mem->subresource_index;
+static gboolean
+gst_d3d11_window_do_processor (GstD3D11Window * self,
+    ID3D11VideoProcessorInputView * piv, ID3D11VideoProcessorOutputView * pov,
+    RECT * input_rect)
+{
+  gboolean ret;
 
-    GST_TRACE_OBJECT (self, "Create new processor input view");
-
-    if (!gst_d3d11_video_processor_create_input_view (self->processor,
-         &in_desc, mem->texture, &view)) {
-      GST_LOG_OBJECT (self, "Failed to create processor input view");
-      return FALSE;
-    }
-
-    gst_mini_object_set_qdata (GST_MINI_OBJECT (mem), quark, view,
-        (GDestroyNotify) gst_d3d11_video_processor_input_view_release);
+  ret = gst_d3d11_video_processor_render_unlocked (self->processor,
+      input_rect, piv, &self->render_rect, pov);
+  if (!ret) {
+    GST_ERROR_OBJECT (self, "Couldn't render to backbuffer using processor");
   } else {
-    GST_TRACE_OBJECT (self, "Reuse existing processor input view %p", view);
+    GST_TRACE_OBJECT (self, "Rendered using processor");
+    self->processor_in_use = TRUE;
   }
 
-  *in_view = view;
+  return ret;
+}
+
+static gboolean
+gst_d3d11_window_do_convert (GstD3D11Window * self,
+    ID3D11ShaderResourceView * srv[GST_VIDEO_MAX_PLANES],
+    ID3D11RenderTargetView * rtv, RECT * input_rect)
+{
+  if (!gst_d3d11_converter_update_src_rect (self->converter, input_rect)) {
+    GST_ERROR_OBJECT (self, "Failed to update src rect");
+    return FALSE;
+  }
+
+  if (!gst_d3d11_converter_convert_unlocked (self->converter,
+          srv, &rtv, NULL, NULL)) {
+    GST_ERROR_OBJECT (self, "Couldn't render to backbuffer using converter");
+    return FALSE;
+  } else {
+    GST_TRACE_OBJECT (self, "Rendered using converter");
+  }
 
   return TRUE;
 }
 
 static GstFlowReturn
-gst_d3d111_window_present (GstD3D11Window * self, GstBuffer * buffer)
+gst_d3d111_window_present (GstD3D11Window * self, GstBuffer * buffer,
+    ID3D11VideoProcessorOutputView * pov, ID3D11RenderTargetView * rtv)
 {
   GstD3D11WindowClass *klass = GST_D3D11_WINDOW_GET_CLASS (self);
   GstFlowReturn ret = GST_FLOW_OK;
   guint present_flags = 0;
 
-  if (buffer) {
-    gst_buffer_replace (&self->cached_buffer, buffer);
-  }
+  if (!buffer)
+    return GST_FLOW_OK;
 
-  if (self->cached_buffer) {
+  {
+    GstMapInfo infos[GST_VIDEO_MAX_PLANES];
     ID3D11ShaderResourceView *srv[GST_VIDEO_MAX_PLANES];
     ID3D11VideoProcessorInputView *piv = NULL;
-    guint i, j, k;
+    ID3D11Device *device_handle =
+        gst_d3d11_device_get_device_handle (self->device);
+    gboolean can_convert = FALSE;
+    gboolean can_process = FALSE;
+    gboolean convert_ret = FALSE;
+    RECT input_rect = self->input_rect;
+    GstVideoCropMeta *crop_meta;
 
-    if (!gst_d3d11_window_buffer_ensure_processor_input (self,
-        self->cached_buffer, &piv)) {
-      for (i = 0, j = 0; i < gst_buffer_n_memory (self->cached_buffer); i++) {
-        GstD3D11Memory *mem =
-            (GstD3D11Memory *) gst_buffer_peek_memory (self->cached_buffer, i);
-        for (k = 0; k < mem->num_shader_resource_views; k++) {
-          srv[j] = mem->shader_resource_view[k];
-          j++;
-        }
+    /* Map memory in any case so that we can upload pending stage texture */
+    if (!gst_d3d11_buffer_map (buffer, device_handle, infos, GST_MAP_READ)) {
+      GST_ERROR_OBJECT (self, "Couldn't map buffer");
+      return GST_FLOW_ERROR;
+    }
+
+    can_convert = gst_d3d11_buffer_get_shader_resource_view (buffer, srv);
+    if (pov) {
+      can_process = gst_d3d11_window_buffer_ensure_processor_input (self,
+          buffer, &piv);
+    }
+
+    if (!can_convert && !can_process) {
+      GST_ERROR_OBJECT (self, "Input texture cannot be used for converter");
+      return GST_FLOW_ERROR;
+    }
+
+    crop_meta = gst_buffer_get_video_crop_meta (buffer);
+    /* Do minimal validate */
+    if (crop_meta) {
+      ID3D11Texture2D *texture = (ID3D11Texture2D *) infos[0].data;
+      D3D11_TEXTURE2D_DESC desc = { 0, };
+
+      texture->GetDesc (&desc);
+
+      if (desc.Width < crop_meta->x + crop_meta->width ||
+          desc.Height < crop_meta->y + crop_meta->height) {
+        GST_WARNING_OBJECT (self, "Invalid crop meta, ignore");
+
+        crop_meta = nullptr;
       }
+    }
+
+    if (crop_meta) {
+      input_rect.left = crop_meta->x;
+      input_rect.right = crop_meta->x + crop_meta->width;
+      input_rect.top = crop_meta->y;
+      input_rect.bottom = crop_meta->y + crop_meta->height;
     }
 
     if (self->first_present) {
-      gst_d3d11_color_converter_update_rect (self->converter,
-          &self->render_rect);
-      gst_d3d11_overlay_compositor_update_rect (self->compositor,
-          &self->render_rect);
+      D3D11_VIEWPORT viewport;
+
+      viewport.TopLeftX = self->render_rect.left;
+      viewport.TopLeftY = self->render_rect.top;
+      viewport.Width = self->render_rect.right - self->render_rect.left;
+      viewport.Height = self->render_rect.bottom - self->render_rect.top;
+      viewport.MinDepth = 0.0f;
+      viewport.MaxDepth = 1.0f;
+      gst_d3d11_converter_update_viewport (self->converter, &viewport);
+      gst_d3d11_overlay_compositor_update_viewport (self->compositor,
+          &viewport);
     }
 
-    if (self->processor && piv && self->pov) {
-      if (!gst_d3d11_video_processor_render_unlocked (self->processor,
-          &self->input_rect, piv, &self->render_rect, self->pov)) {
-        GST_ERROR_OBJECT (self, "Couldn't render to backbuffer using processor");
-        return GST_FLOW_ERROR;
-      } else {
-        GST_TRACE_OBJECT (self, "Rendered using processor");
-      }
+    /* Converter preference order
+     * 1) If this texture can be converted via processor, and we used processor
+     *    previously, use processor
+     * 2) If SRV is available, use converter
+     * 3) otherwise, use processor
+     */
+    if (can_process && self->processor_in_use) {
+      convert_ret = gst_d3d11_window_do_processor (self, piv, pov, &input_rect);
+    } else if (can_convert) {
+      convert_ret = gst_d3d11_window_do_convert (self, srv, rtv, &input_rect);
+    } else if (can_process) {
+      convert_ret = gst_d3d11_window_do_processor (self, piv, pov, &input_rect);
     } else {
-      if (!gst_d3d11_color_converter_convert_unlocked (self->converter,
-          srv, &self->rtv)) {
-        GST_ERROR_OBJECT (self, "Couldn't render to backbuffer using converter");
-        return GST_FLOW_ERROR;
-      } else {
-        GST_TRACE_OBJECT (self, "Rendered using converter");
-      }
+      g_assert_not_reached ();
+      ret = GST_FLOW_ERROR;
+      goto unmap_and_out;
     }
 
-    gst_d3d11_overlay_compositor_upload (self->compositor, self->cached_buffer);
-    gst_d3d11_overlay_compositor_draw_unlocked (self->compositor, &self->rtv);
+    if (!convert_ret) {
+      ret = GST_FLOW_ERROR;
+      goto unmap_and_out;
+    }
 
-#if (DXGI_HEADER_VERSION >= 5)
+    gst_d3d11_overlay_compositor_upload (self->compositor, buffer);
+    gst_d3d11_overlay_compositor_draw_unlocked (self->compositor, &rtv);
+
+#if (GST_D3D11_DXGI_HEADER_VERSION >= 5)
     if (self->allow_tearing && self->fullscreen) {
       present_flags |= DXGI_PRESENT_ALLOW_TEARING;
     }
 #endif
 
-    ret = klass->present (self, present_flags);
+    if (klass->present)
+      ret = klass->present (self, present_flags);
 
     self->first_present = FALSE;
+
+  unmap_and_out:
+    gst_d3d11_buffer_unmap (buffer, infos);
   }
 
   return ret;
 }
 
 GstFlowReturn
-gst_d3d11_window_render (GstD3D11Window * window, GstBuffer * buffer,
-    GstVideoRectangle * rect)
+gst_d3d11_window_render (GstD3D11Window * window, GstBuffer * buffer)
 {
   GstMemory *mem;
   GstFlowReturn ret;
 
   g_return_val_if_fail (GST_IS_D3D11_WINDOW (window), GST_FLOW_ERROR);
-  g_return_val_if_fail (rect != NULL, GST_FLOW_ERROR);
+
+  if (buffer) {
+    mem = gst_buffer_peek_memory (buffer, 0);
+    if (!gst_is_d3d11_memory (mem)) {
+      GST_ERROR_OBJECT (window, "Invalid buffer");
+
+      return GST_FLOW_ERROR;
+    }
+  }
+
+  gst_d3d11_device_lock (window->device);
+  if (buffer)
+    gst_buffer_replace (&window->cached_buffer, buffer);
+
+  ret = gst_d3d111_window_present (window, window->cached_buffer,
+      window->pov, window->rtv);
+  gst_d3d11_device_unlock (window->device);
+
+  return ret;
+}
+
+GstFlowReturn
+gst_d3d11_window_render_on_shared_handle (GstD3D11Window * window,
+    GstBuffer * buffer, HANDLE shared_handle, guint texture_misc_flags,
+    guint64 acquire_key, guint64 release_key)
+{
+  GstD3D11WindowClass *klass;
+  GstMemory *mem;
+  GstFlowReturn ret = GST_FLOW_OK;
+  GstD3D11WindowSharedHandleData data = { NULL, };
+  ID3D11VideoProcessorOutputView *pov = NULL;
+  ID3D11RenderTargetView *rtv = NULL;
+
+  g_return_val_if_fail (GST_IS_D3D11_WINDOW (window), GST_FLOW_ERROR);
+
+  klass = GST_D3D11_WINDOW_GET_CLASS (window);
+
+  g_assert (klass->open_shared_handle != NULL);
+  g_assert (klass->release_shared_handle != NULL);
 
   mem = gst_buffer_peek_memory (buffer, 0);
   if (!gst_is_d3d11_memory (mem)) {
@@ -971,8 +1048,29 @@ gst_d3d11_window_render (GstD3D11Window * window, GstBuffer * buffer,
     return GST_FLOW_ERROR;
   }
 
+  data.shared_handle = shared_handle;
+  data.texture_misc_flags = texture_misc_flags;
+  data.acquire_key = acquire_key;
+  data.release_key = release_key;
+
   gst_d3d11_device_lock (window->device);
-  ret = gst_d3d111_window_present (window, buffer);
+  if (!klass->open_shared_handle (window, &data)) {
+    GST_ERROR_OBJECT (window, "Couldn't open shared handle");
+    gst_d3d11_device_unlock (window->device);
+    return GST_FLOW_OK;
+  }
+
+  if (data.fallback_rtv) {
+    rtv = data.fallback_rtv;
+    pov = data.fallback_pov;
+  } else {
+    rtv = data.rtv;
+    pov = data.pov;
+  }
+
+  ret = gst_d3d111_window_present (window, buffer, pov, rtv);
+
+  klass->release_shared_handle (window, &data);
   gst_d3d11_device_unlock (window->device);
 
   return ret;
@@ -1036,11 +1134,14 @@ gst_d3d11_window_get_native_type_from_handle (guintptr handle)
 #if (!GST_D3D11_WINAPI_ONLY_APP)
   if (IsWindow ((HWND) handle))
     return GST_D3D11_WINDOW_NATIVE_TYPE_HWND;
-#else
+#endif
+#if GST_D3D11_WINAPI_ONLY_APP
   {
+    /* *INDENT-OFF* */
     ComPtr<IInspectable> window = reinterpret_cast<IInspectable*> (handle);
     ComPtr<ABI::Windows::UI::Core::ICoreWindow> core_window;
     ComPtr<ABI::Windows::UI::Xaml::Controls::ISwapChainPanel> panel;
+    /* *INDENT-ON* */
 
     if (SUCCEEDED (window.As (&core_window)))
       return GST_D3D11_WINDOW_NATIVE_TYPE_CORE_WINDOW;

@@ -95,6 +95,8 @@ static GstCaps *gst_fdkaacenc_get_caps (GstAudioEncoder * enc,
 static void gst_fdkaacenc_flush (GstAudioEncoder * enc);
 
 G_DEFINE_TYPE (GstFdkAacEnc, gst_fdkaacenc, GST_TYPE_AUDIO_ENCODER);
+GST_ELEMENT_REGISTER_DEFINE (fdkaacenc, "fdkaacenc", GST_RANK_PRIMARY,
+    GST_TYPE_FDKAACENC);
 
 static void
 gst_fdkaacenc_set_property (GObject * object, guint prop_id,
@@ -396,8 +398,7 @@ gst_fdkaacenc_set_format (GstAudioEncoder * enc, GstAudioInfo * info)
   /* raw */
   if (transmux == 0) {
     GstBuffer *codec_data =
-        gst_buffer_new_wrapped (g_memdup (enc_info.confBuf, enc_info.confSize),
-        enc_info.confSize);
+        gst_buffer_new_memdup (enc_info.confBuf, enc_info.confSize);
     gst_caps_set_simple (src_caps, "codec_data", GST_TYPE_BUFFER, codec_data,
         "stream-format", G_TYPE_STRING, "raw", NULL);
     gst_buffer_unref (codec_data);
@@ -579,7 +580,7 @@ gst_fdkaacenc_class_init (GstFdkAacEncClass * klass)
   gst_element_class_add_static_pad_template (element_class, &src_template);
 
   gst_element_class_set_static_metadata (element_class, "FDK AAC audio encoder",
-      "Codec/Encoder/Audio", "FDK AAC audio encoder",
+      "Codec/Encoder/Audio/Converter", "FDK AAC audio encoder",
       "Sebastian Dröge <sebastian@centricular.com>");
 
   GST_DEBUG_CATEGORY_INIT (gst_fdkaacenc_debug, "fdkaacenc", 0,

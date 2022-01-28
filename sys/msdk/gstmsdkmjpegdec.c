@@ -29,6 +29,22 @@
  * EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
+/**
+ * SECTION: element-msdkmjpegdec
+ * @title: msdkmjpegdec
+ * @short_description: Intel MSDK MJPEG decoder
+ *
+ * MJPEG video decoder based on Intel MFX
+ *
+ * ## Example launch line
+ * ```
+ * gst-launch-1.0 filesrc location=sample.jpg ! jpegparse ! msdkmjpegdec ! glimagesink
+ * ```
+ *
+ * Since: 1.12
+ *
+ */
+
 #ifdef HAVE_CONFIG_H
 #  include <config.h>
 #endif
@@ -109,7 +125,7 @@ gst_msdkmjpegdec_class_init (GstMsdkMJPEGDecClass * klass)
   gst_element_class_set_static_metadata (element_class,
       "Intel MSDK MJPEG decoder",
       "Codec/Decoder/Video/Hardware",
-      "MJPEG video decoder based on Intel Media SDK",
+      "MJPEG video decoder based on " MFX_API_SDK,
       "Scott D Phillips <scott.d.phillips@intel.com>");
 
   gst_element_class_add_static_pad_template (element_class, &sink_factory);

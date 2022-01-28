@@ -62,8 +62,16 @@ struct _GstMsdkH265Enc
   guint max_slice_size;
   gint tune_mode;
   guint prop_flag;
+  gushort transform_skip;
+  guint b_pyramid;
+  guint p_pyramid;
+  guint min_qp;
+  guint max_qp;
+  guint intra_refresh_type;
+  guint dblk_idc;
 
   mfxExtHEVCTiles ext_tiles;
+  mfxExtHEVCParam ext_param;
   /* roi[0] for current ROI and roi[1] for previous ROI */
   mfxExtEncoderROI roi[2];
 

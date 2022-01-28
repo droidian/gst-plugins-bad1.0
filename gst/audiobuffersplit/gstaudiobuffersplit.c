@@ -45,6 +45,7 @@ enum
 {
   PROP_0,
   PROP_OUTPUT_BUFFER_DURATION,
+  PROP_OUTPUT_BUFFER_SIZE,
   PROP_ALIGNMENT_THRESHOLD,
   PROP_DISCONT_WAIT,
   PROP_STRICT_BUFFER_SIZE,
@@ -62,7 +63,11 @@ enum
 #define DEFAULT_MAX_SILENCE_TIME (0)
 
 #define parent_class gst_audio_buffer_split_parent_class
-G_DEFINE_TYPE (GstAudioBufferSplit, gst_audio_buffer_split, GST_TYPE_ELEMENT);
+G_DEFINE_TYPE_WITH_CODE (GstAudioBufferSplit, gst_audio_buffer_split,
+    GST_TYPE_ELEMENT, GST_DEBUG_CATEGORY_INIT (gst_audio_buffer_split_debug,
+        "audiobuffersplit", 0, "Audio buffer splitter"););
+GST_ELEMENT_REGISTER_DEFINE (audiobuffersplit, "audiobuffersplit",
+    GST_RANK_NONE, GST_TYPE_AUDIO_BUFFER_SPLIT);
 
 static GstFlowReturn gst_audio_buffer_split_sink_chain (GstPad * pad,
     GstObject * parent, GstBuffer * buffer);
@@ -95,6 +100,22 @@ gst_audio_buffer_split_class_init (GstAudioBufferSplitClass * klass)
           "Output Buffer Duration", "Output block size in seconds", 1, G_MAXINT,
           G_MAXINT, 1, DEFAULT_OUTPUT_BUFFER_DURATION_N,
           DEFAULT_OUTPUT_BUFFER_DURATION_D,
+          G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS |
+          GST_PARAM_MUTABLE_READY));
+
+  /**
+   * GstAudioBufferSplit:output-buffer-size
+   *
+   * Allow specifying a buffer size for splitting. Zero by default.
+   * Takes precedence over output-buffer-duration when set to a
+   * non zero value else will not be in effect.
+   *
+   * Since: 1.20
+   */
+  g_object_class_install_property (gobject_class, PROP_OUTPUT_BUFFER_SIZE,
+      g_param_spec_uint ("output-buffer-size", "Output buffer size",
+          "Output block size in bytes, takes precedence over "
+          "buffer duration when set to non zero", 0, G_MAXINT, 0,
           G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS |
           GST_PARAM_MUTABLE_READY));
 
@@ -171,6 +192,7 @@ gst_audio_buffer_split_init (GstAudioBufferSplit * self)
   self->output_buffer_duration_d = DEFAULT_OUTPUT_BUFFER_DURATION_D;
   self->strict_buffer_size = DEFAULT_STRICT_BUFFER_SIZE;
   self->gapless = DEFAULT_GAPLESS;
+  self->output_buffer_size = 0;
 
   self->adapter = gst_adapter_new ();
 
@@ -211,6 +233,12 @@ gst_audio_buffer_split_update_samples_per_buffer (GstAudioBufferSplit * self)
     goto out;
   }
 
+  if (self->output_buffer_size) {
+    self->output_buffer_duration_n =
+        self->output_buffer_size / GST_AUDIO_INFO_BPF (&self->info);
+    self->output_buffer_duration_d = GST_AUDIO_INFO_RATE (&self->info);
+  }
+
   self->samples_per_buffer =
       (((guint64) GST_AUDIO_INFO_RATE (&self->info)) *
       self->output_buffer_duration_n) / self->output_buffer_duration_d;
@@ -246,6 +274,10 @@ gst_audio_buffer_split_set_property (GObject * object, guint property_id,
       self->output_buffer_duration_n = gst_value_get_fraction_numerator (value);
       self->output_buffer_duration_d =
           gst_value_get_fraction_denominator (value);
+      gst_audio_buffer_split_update_samples_per_buffer (self);
+      break;
+    case PROP_OUTPUT_BUFFER_SIZE:
+      self->output_buffer_size = g_value_get_uint (value);
       gst_audio_buffer_split_update_samples_per_buffer (self);
       break;
     case PROP_ALIGNMENT_THRESHOLD:
@@ -285,6 +317,9 @@ gst_audio_buffer_split_get_property (GObject * object, guint property_id,
     case PROP_OUTPUT_BUFFER_DURATION:
       gst_value_set_fraction (value, self->output_buffer_duration_n,
           self->output_buffer_duration_d);
+      break;
+    case PROP_OUTPUT_BUFFER_SIZE:
+      g_value_set_uint (value, self->output_buffer_size);
       break;
     case PROP_ALIGNMENT_THRESHOLD:
       GST_OBJECT_LOCK (self);
@@ -558,7 +593,7 @@ gst_audio_buffer_split_handle_discont (GstAudioBufferSplit * self,
             silence = gst_buffer_new_and_alloc (n_samples * bpf);
             GST_BUFFER_FLAG_SET (silence, GST_BUFFER_FLAG_GAP);
             gst_buffer_map (silence, &map, GST_MAP_WRITE);
-            gst_audio_format_fill_silence (info, map.data, map.size);
+            gst_audio_format_info_fill_silence (info, map.data, map.size);
             gst_buffer_unmap (silence, &map);
 
             gst_adapter_push (self->adapter, silence);
@@ -625,13 +660,6 @@ gst_audio_buffer_split_handle_discont (GstAudioBufferSplit * self,
   }
 
   return ret;
-}
-
-static GstBuffer *
-gst_audio_buffer_split_clip_buffer (GstAudioBufferSplit * self,
-    GstBuffer * buffer, const GstSegment * segment, gint rate, gint bpf)
-{
-  return gst_audio_buffer_clip (buffer, segment, rate, bpf);
 }
 
 static GstBuffer *
@@ -702,9 +730,7 @@ gst_audio_buffer_split_sink_chain (GstPad * pad, GstObject * parent,
     return GST_FLOW_NOT_NEGOTIATED;
   }
 
-  buffer =
-      gst_audio_buffer_split_clip_buffer (self, buffer, &self->in_segment, rate,
-      bpf);
+  buffer = gst_audio_buffer_clip (buffer, &self->in_segment, rate, bpf);
   if (!buffer)
     return GST_FLOW_OK;
 
@@ -892,13 +918,7 @@ gst_audio_buffer_split_src_query (GstPad * pad,
 static gboolean
 plugin_init (GstPlugin * plugin)
 {
-  GST_DEBUG_CATEGORY_INIT (gst_audio_buffer_split_debug, "audiobuffersplit",
-      0, "Audio buffer splitter");
-
-  gst_element_register (plugin, "audiobuffersplit", GST_RANK_NONE,
-      GST_TYPE_AUDIO_BUFFER_SPLIT);
-
-  return TRUE;
+  return GST_ELEMENT_REGISTER (audiobuffersplit, plugin);
 }
 
 GST_PLUGIN_DEFINE (GST_VERSION_MAJOR,

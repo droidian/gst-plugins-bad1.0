@@ -98,7 +98,6 @@ struct _GstSrtpDecClass
 
 GType gst_srtp_dec_get_type (void);
 
-gboolean gst_srtp_dec_plugin_init (GstPlugin * plugin);
 
 G_END_DECLS
 

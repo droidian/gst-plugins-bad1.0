@@ -32,6 +32,8 @@
 
 #include "dtlstransport.h"
 
+#include "webrtc-priv.h"
+
 #define GST_CAT_DEFAULT gst_webrtc_dtls_transport_debug
 GST_DEBUG_CATEGORY_STATIC (GST_CAT_DEFAULT);
 
@@ -55,8 +57,7 @@ enum
   PROP_STATE,
   PROP_CLIENT,
   PROP_CERTIFICATE,
-  PROP_REMOTE_CERTIFICATE,
-  PROP_RTCP,
+  PROP_REMOTE_CERTIFICATE
 };
 
 void
@@ -87,9 +88,6 @@ gst_webrtc_dtls_transport_set_property (GObject * object, guint prop_id,
       break;
     case PROP_CERTIFICATE:
       g_object_set_property (G_OBJECT (webrtc->dtlssrtpdec), "pem", value);
-      break;
-    case PROP_RTCP:
-      webrtc->is_rtcp = g_value_get_boolean (value);
       break;
     default:
       G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
@@ -122,9 +120,6 @@ gst_webrtc_dtls_transport_get_property (GObject * object, guint prop_id,
       break;
     case PROP_REMOTE_CERTIFICATE:
       g_object_get_property (G_OBJECT (webrtc->dtlssrtpdec), "peer-pem", value);
-      break;
-    case PROP_RTCP:
-      g_value_set_boolean (value, webrtc->is_rtcp);
       break;
     default:
       G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
@@ -184,12 +179,12 @@ gst_webrtc_dtls_transport_constructed (GObject * object)
   /* XXX: this may collide with another connection_id however this is only a
    * problem if multiple dtls element sets are being used within the same
    * process */
-  connection_id = g_strdup_printf ("%s_%u_%u", webrtc->is_rtcp ? "rtcp" : "rtp",
-      webrtc->session_id, g_random_int ());
+  connection_id = g_strdup_printf ("rtp_%u_%u", webrtc->session_id,
+      g_random_int ());
 
   webrtc->dtlssrtpenc = gst_element_factory_make ("dtlssrtpenc", NULL);
   g_object_set (webrtc->dtlssrtpenc, "connection-id", connection_id,
-      "is-client", webrtc->client, "rtp-sync", TRUE, NULL);
+      "is-client", webrtc->client, "rtp-sync", FALSE, NULL);
 
   webrtc->dtlssrtpdec = gst_element_factory_make ("dtlssrtpdec", NULL);
   g_object_set (webrtc->dtlssrtpdec, "connection-id", connection_id, NULL);
@@ -249,12 +244,6 @@ gst_webrtc_dtls_transport_class_init (GstWebRTCDTLSTransportClass * klass)
       g_param_spec_string ("remote-certificate", "Remote DTLS certificate",
           "Remote DTLS certificate", NULL,
           G_PARAM_READABLE | G_PARAM_STATIC_STRINGS));
-
-  g_object_class_install_property (gobject_class,
-      PROP_RTCP,
-      g_param_spec_boolean ("rtcp", "RTCP",
-          "The transport is being used solely for RTCP", FALSE,
-          G_PARAM_READWRITE | G_PARAM_CONSTRUCT_ONLY | G_PARAM_STATIC_STRINGS));
 }
 
 static void
@@ -263,8 +252,8 @@ gst_webrtc_dtls_transport_init (GstWebRTCDTLSTransport * webrtc)
 }
 
 GstWebRTCDTLSTransport *
-gst_webrtc_dtls_transport_new (guint session_id, gboolean is_rtcp)
+gst_webrtc_dtls_transport_new (guint session_id)
 {
   return g_object_new (GST_TYPE_WEBRTC_DTLS_TRANSPORT, "session-id", session_id,
-      "rtcp", is_rtcp, NULL);
+      NULL);
 }

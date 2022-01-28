@@ -118,6 +118,7 @@
 
 #include <gst/gst-i18n-plugin.h>
 
+#include "gstcurlelements.h"
 #include "gstcurlhttpsrc.h"
 #include "gstcurlqueue.h"
 #include "gstcurldefaults.h"
@@ -254,6 +255,8 @@ gst_curl_http_version_get_type (void)
 G_DEFINE_TYPE_WITH_CODE (GstCurlHttpSrc, gst_curl_http_src, GST_TYPE_PUSH_SRC,
     G_IMPLEMENT_INTERFACE (GST_TYPE_URI_HANDLER,
         gst_curl_http_src_uri_handler_init));
+GST_ELEMENT_REGISTER_DEFINE_WITH_CODE (curlhttpsrc, "curlhttpsrc",
+    GST_RANK_SECONDARY, GST_TYPE_CURLHTTPSRC, curl_element_init (plugin));
 
 static void
 gst_curl_http_src_class_init (GstCurlHttpSrcClass * klass)
@@ -2124,7 +2127,7 @@ gst_curl_http_src_get_debug (CURL * handle, curl_infotype type, char *data,
   switch (type) {
     case CURLINFO_TEXT:
     case CURLINFO_HEADER_OUT:
-      msg = g_memdup (data, size);
+      msg = g_memdup2 (data, size);
       if (size > 0) {
         msg[size - 1] = '\0';
         g_strchomp (msg);

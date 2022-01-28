@@ -271,7 +271,7 @@ gst_h264_pps_copy (GstH264PPS * dst_pps, const GstH264PPS * src_pps)
   *dst_pps = *src_pps;
 
   if (src_pps->slice_group_id)
-    dst_pps->slice_group_id = g_memdup (src_pps->slice_group_id,
+    dst_pps->slice_group_id = g_memdup2 (src_pps->slice_group_id,
         src_pps->pic_size_in_map_units_minus1 + 1);
 
   return TRUE;
@@ -704,11 +704,12 @@ gst_h264_slice_parse_dec_ref_pic_marking (GstH264SliceHdr * slice,
     GstH264NalUnit * nalu, NalReader * nr)
 {
   GstH264DecRefPicMarking *dec_ref_pic_m;
-  guint start_pos;
+  guint start_pos, start_epb;
 
   GST_DEBUG ("parsing \"Decoded reference picture marking\"");
 
   start_pos = nal_reader_get_pos (nr);
+  start_epb = nal_reader_get_epb_count (nr);
 
   dec_ref_pic_m = &slice->dec_ref_pic_marking;
 
@@ -723,7 +724,7 @@ gst_h264_slice_parse_dec_ref_pic_marking (GstH264SliceHdr * slice,
 
       dec_ref_pic_m->n_ref_pic_marking = 0;
       while (1) {
-        READ_UE (nr, mem_mgmt_ctrl_op);
+        READ_UE_MAX (nr, mem_mgmt_ctrl_op, 6);
         if (mem_mgmt_ctrl_op == 0)
           break;
 
@@ -753,7 +754,8 @@ gst_h264_slice_parse_dec_ref_pic_marking (GstH264SliceHdr * slice,
     }
   }
 
-  dec_ref_pic_m->bit_size = nal_reader_get_pos (nr) - start_pos;
+  dec_ref_pic_m->bit_size = (nal_reader_get_pos (nr) - start_pos) -
+      (8 * (nal_reader_get_epb_count (nr) - start_epb));
 
   return TRUE;
 
@@ -2228,7 +2230,7 @@ gst_h264_parser_parse_slice_hdr (GstH264NalParser * nalparser,
   gint pps_id;
   GstH264PPS *pps;
   GstH264SPS *sps;
-  guint start_pos;
+  guint start_pos, start_epb;
 
   memset (slice, 0, sizeof (*slice));
 
@@ -2304,6 +2306,7 @@ gst_h264_parser_parse_slice_hdr (GstH264NalParser * nalparser,
     READ_UE_MAX (&nr, slice->idr_pic_id, G_MAXUINT16);
 
   start_pos = nal_reader_get_pos (&nr);
+  start_epb = nal_reader_get_epb_count (&nr);
 
   if (sps->pic_order_cnt_type == 0) {
     READ_UINT16 (&nr, slice->pic_order_cnt_lsb,
@@ -2319,7 +2322,8 @@ gst_h264_parser_parse_slice_hdr (GstH264NalParser * nalparser,
       READ_SE (&nr, slice->delta_pic_order_cnt[1]);
   }
 
-  slice->pic_order_cnt_bit_size = nal_reader_get_pos (&nr) - start_pos;
+  slice->pic_order_cnt_bit_size = (nal_reader_get_pos (&nr) - start_pos) -
+      (8 * (nal_reader_get_epb_count (&nr) - start_epb));
 
   if (pps->redundant_pic_cnt_present_flag)
     READ_UE_MAX (&nr, slice->redundant_pic_cnt, G_MAXINT8);
@@ -3138,14 +3142,14 @@ gst_h264_create_sei_memory_internal (guint8 nal_prefix_size,
     /* write payload type bytes */
     while (payload_type_data >= 0xff) {
       WRITE_UINT8 (&nw, 0xff, 8);
-      payload_type_data -= -0xff;
+      payload_type_data -= 0xff;
     }
     WRITE_UINT8 (&nw, payload_type_data, 8);
 
     /* write payload size bytes */
     while (payload_size_data >= 0xff) {
       WRITE_UINT8 (&nw, 0xff, 8);
-      payload_size_data -= -0xff;
+      payload_size_data -= 0xff;
     }
     WRITE_UINT8 (&nw, payload_size_data, 8);
 
@@ -3169,7 +3173,7 @@ gst_h264_create_sei_memory_internal (guint8 nal_prefix_size,
         have_written_data = TRUE;
         break;
       case GST_H264_SEI_MASTERING_DISPLAY_COLOUR_VOLUME:
-        GST_DEBUG ("Wrtiting \"Mastering display colour volume\"");
+        GST_DEBUG ("Writing \"Mastering display colour volume\"");
         if (!gst_h264_write_sei_mastering_display_colour_volume (&nw,
                 &msg->payload.mastering_display_colour_volume)) {
           GST_WARNING ("Failed to write \"Mastering display colour volume\"");

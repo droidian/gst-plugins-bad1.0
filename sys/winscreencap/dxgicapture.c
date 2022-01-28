@@ -60,6 +60,7 @@ typedef struct _DxgiCapture
   /*Direct3D pointers */
   ID3D11Device *d3d11_device;
   ID3D11DeviceContext *d3d11_context;
+  IDXGIOutput1 *dxgi_output1;
   IDXGIOutputDuplication *dxgi_dupl;
 
   /* Texture that has been rotated and combined fragments. */
@@ -205,13 +206,67 @@ gst_dxgicap_shader_init (void)
   return ! !GstD3DCompileFunc;
 }
 
+static GstFlowReturn
+initialize_output_duplication (DxgiCapture * self)
+{
+  HDESK hdesk;
+  HRESULT hr;
+  DXGI_OUTDUPL_DESC old_dupl_desc;
+  GstDXGIScreenCapSrc *src = self->src;
+
+  PTR_RELEASE (self->dxgi_dupl);
+
+  hdesk = OpenInputDesktop (0, FALSE, GENERIC_ALL);
+  if (hdesk) {
+    if (!SetThreadDesktop (hdesk)) {
+      GST_WARNING_OBJECT (src, "SetThreadDesktop() failed. Error code: %lu",
+          GetLastError ());
+    }
+
+    CloseDesktop (hdesk);
+  } else {
+    GST_WARNING_OBJECT (src, "OpenInputDesktop() failed. Error code: %lu",
+        GetLastError ());
+  }
+
+  hr = IDXGIOutput1_DuplicateOutput (self->dxgi_output1,
+      (IUnknown *) (self->d3d11_device), &self->dxgi_dupl);
+  if (hr != S_OK) {
+    gchar *msg = get_hresult_to_string (hr);
+    GST_WARNING_OBJECT (src, "IDXGIOutput1::DuplicateOutput() failed (%x): %s",
+        (guint) hr, msg);
+    g_free (msg);
+    if (hr == E_ACCESSDENIED) {
+      /* Happens temporarily during resolution changes. */
+      return GST_FLOW_OK;
+    }
+    return GST_FLOW_ERROR;
+  }
+
+  old_dupl_desc = self->dupl_desc;
+  IDXGIOutputDuplication_GetDesc (self->dxgi_dupl, &self->dupl_desc);
+
+  if (self->readable_texture &&
+      (self->dupl_desc.ModeDesc.Width != old_dupl_desc.ModeDesc.Width ||
+          self->dupl_desc.ModeDesc.Height != old_dupl_desc.ModeDesc.Height ||
+          self->dupl_desc.Rotation != old_dupl_desc.Rotation)) {
+    PTR_RELEASE (self->readable_texture);
+    PTR_RELEASE (self->work_texture);
+
+    _setup_texture (self);
+
+    return GST_DXGICAP_FLOW_RESOLUTION_CHANGE;
+  }
+
+  return GST_FLOW_OK;
+}
+
 DxgiCapture *
 dxgicap_new (HMONITOR monitor, GstDXGIScreenCapSrc * src)
 {
   int i, j;
   HRESULT hr;
   IDXGIFactory1 *dxgi_factory1 = NULL;
-  IDXGIOutput1 *dxgi_output1 = NULL;
   IDXGIAdapter1 *dxgi_adapter1 = NULL;
   ID3D11InputLayout *vertex_input_layout = NULL;
   ID3DBlob *vertex_shader_blob = NULL;
@@ -227,7 +282,6 @@ dxgicap_new (HMONITOR monitor, GstDXGIScreenCapSrc * src)
   hr = CreateDXGIFactory1 (&IID_IDXGIFactory1, (void **) &dxgi_factory1);
   HR_FAILED_GOTO (hr, CreateDXGIFactory1, new_error);
 
-  dxgi_output1 = NULL;
   for (i = 0;
       IDXGIFactory1_EnumAdapters1 (dxgi_factory1, i,
           &dxgi_adapter1) != DXGI_ERROR_NOT_FOUND; ++i) {
@@ -249,11 +303,11 @@ dxgicap_new (HMONITOR monitor, GstDXGIScreenCapSrc * src)
         DXGI_ERROR_NOT_FOUND; ++j) {
       DXGI_OUTPUT_DESC output_desc;
       hr = IDXGIOutput_QueryInterface (dxgi_output, &IID_IDXGIOutput1,
-          (void **) &dxgi_output1);
+          (void **) &self->dxgi_output1);
       PTR_RELEASE (dxgi_output);
       HR_FAILED_GOTO (hr, IDXGIOutput::QueryInterface, new_error);
 
-      hr = IDXGIOutput1_GetDesc (dxgi_output1, &output_desc);
+      hr = IDXGIOutput1_GetDesc (self->dxgi_output1, &output_desc);
       HR_FAILED_GOTO (hr, IDXGIOutput1::GetDesc, new_error);
 
       if (output_desc.Monitor == monitor) {
@@ -261,13 +315,12 @@ dxgicap_new (HMONITOR monitor, GstDXGIScreenCapSrc * src)
         break;
       }
 
-      PTR_RELEASE (dxgi_output1);
-      dxgi_output1 = NULL;
+      PTR_RELEASE (self->dxgi_output1);
     }
 
     PTR_RELEASE (dxgi_adapter1);
 
-    if (NULL != dxgi_output1) {
+    if (NULL != self->dxgi_output1) {
       break;
     }
 
@@ -275,18 +328,16 @@ dxgicap_new (HMONITOR monitor, GstDXGIScreenCapSrc * src)
     PTR_RELEASE (self->d3d11_context);
   }
 
-  if (NULL == dxgi_output1) {
+  if (NULL == self->dxgi_output1) {
     goto new_error;
   }
 
   PTR_RELEASE (dxgi_factory1);
 
-  hr = IDXGIOutput1_DuplicateOutput (dxgi_output1,
-      (IUnknown *) (self->d3d11_device), &self->dxgi_dupl);
-  PTR_RELEASE (dxgi_output1);
-  HR_FAILED_GOTO (hr, IDXGIOutput1::DuplicateOutput, new_error);
+  if (initialize_output_duplication (self) == GST_FLOW_ERROR) {
+    goto new_error;
+  }
 
-  IDXGIOutputDuplication_GetDesc (self->dxgi_dupl, &self->dupl_desc);
   self->pointer_buffer_capacity = INITIAL_POINTER_BUFFER_CAPACITY;
   self->pointer_buffer = g_malloc (self->pointer_buffer_capacity);
   if (NULL == self->pointer_buffer) {
@@ -388,6 +439,7 @@ dxgicap_destory (DxgiCapture * self)
   PTR_RELEASE (self->target_view);
   PTR_RELEASE (self->readable_texture);
   PTR_RELEASE (self->work_texture);
+  PTR_RELEASE (self->dxgi_output1);
   PTR_RELEASE (self->dxgi_dupl);
   PTR_RELEASE (self->d3d11_context);
   PTR_RELEASE (self->d3d11_device);
@@ -418,16 +470,23 @@ dxgicap_stop (DxgiCapture * self)
   PTR_RELEASE (self->work_texture);
 }
 
-gboolean
+GstFlowReturn
 dxgicap_acquire_next_frame (DxgiCapture * self, gboolean show_cursor,
     guint timeout)
 {
-  gboolean ret = FALSE;
+  GstFlowReturn ret = GST_FLOW_ERROR;
   HRESULT hr;
   GstDXGIScreenCapSrc *src = self->src;
 
   DXGI_OUTDUPL_FRAME_INFO frame_info;
   IDXGIResource *desktop_resource = NULL;
+
+  if (!self->dxgi_dupl) {
+    /* Desktop duplication interface became invalid due to desktop switch,
+     * UAC prompt popping up, or similar event. Try to reinitialize. */
+    ret = initialize_output_duplication (self);
+    goto end;
+  }
 
   /* Get the latest desktop frames. */
   hr = IDXGIOutputDuplication_AcquireNextFrame (self->dxgi_dupl,
@@ -436,7 +495,13 @@ dxgicap_acquire_next_frame (DxgiCapture * self, gboolean show_cursor,
     /* In case of DXGI_ERROR_WAIT_TIMEOUT,
      * it has not changed from the last time. */
     GST_LOG_OBJECT (src, "DXGI_ERROR_WAIT_TIMEOUT");
-    ret = TRUE;
+    ret = GST_FLOW_OK;
+    goto end;
+  } else if (hr == DXGI_ERROR_ACCESS_LOST) {
+    GST_LOG_OBJECT (src, "DXGI_ERROR_ACCESS_LOST; reinitializing output "
+        "duplication...");
+    PTR_RELEASE (self->dxgi_dupl);
+    ret = GST_FLOW_OK;
     goto end;
   }
   HR_FAILED_GOTO (hr, IDXGIOutputDuplication::AcquireNextFrame, end);
@@ -476,15 +541,17 @@ dxgicap_acquire_next_frame (DxgiCapture * self, gboolean show_cursor,
       }
       HR_FAILED_GOTO (hr, IDXGIOutputDuplication::GetFramePointerShape, end);
       self->pointer_shape_info = pointer_shape_info;
-      ret = TRUE;
+      ret = GST_FLOW_OK;
     } else {
-      ret = TRUE;
+      ret = GST_FLOW_OK;
     }
   } else {
-    ret = TRUE;
+    ret = GST_FLOW_OK;
   }
 end:
-  IDXGIOutputDuplication_ReleaseFrame (self->dxgi_dupl);
+  if (self->dxgi_dupl) {
+    IDXGIOutputDuplication_ReleaseFrame (self->dxgi_dupl);
+  }
   PTR_RELEASE (desktop_resource);
   return ret;
 }

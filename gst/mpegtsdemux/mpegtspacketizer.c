@@ -21,6 +21,9 @@
  * Free Software Foundation, Inc., 51 Franklin St, Fifth Floor,
  * Boston, MA 02110-1301, USA.
  */
+#ifdef HAVE_CONFIG_H
+#include "config.h"
+#endif
 
 #include <string.h>
 #include <stdlib.h>
@@ -154,7 +157,7 @@ find_subtable (GSList * subtables, guint8 table_id, guint16 subtable_extension)
 static gboolean
 seen_section_before (MpegTSPacketizerStream * stream, guint8 table_id,
     guint16 subtable_extension, guint8 version_number, guint8 section_number,
-    guint8 last_section_number)
+    guint8 last_section_number, guint8 * data_start, gsize to_read)
 {
   MpegTSPacketizerStreamSubtable *subtable;
 
@@ -175,7 +178,17 @@ seen_section_before (MpegTSPacketizerStream * stream, guint8 table_id,
     return FALSE;
   }
   /* Finally return whether we saw that section or not */
-  return MPEGTS_BIT_IS_SET (subtable->seen_section, section_number);
+  if (!MPEGTS_BIT_IS_SET (subtable->seen_section, section_number)) {
+    GST_DEBUG ("Different section_number");
+    return FALSE;
+  }
+
+  if (stream->section_data) {
+    /* Everything else is the same, fall back to memcmp */
+    return (memcmp (stream->section_data, data_start, to_read) != 0);
+  }
+
+  return FALSE;
 }
 
 static MpegTSPacketizerStreamSubtable *
@@ -272,6 +285,7 @@ mpegts_packetizer_init (MpegTSPacketizer2 * packetizer)
   packetizer->pcr_discont_threshold = GST_SECOND;
   packetizer->last_pts = GST_CLOCK_TIME_NONE;
   packetizer->last_dts = GST_CLOCK_TIME_NONE;
+  packetizer->extra_shift = 0;
 }
 
 static void
@@ -1113,7 +1127,7 @@ section_start:
     /* Only do fast-path if we have enough byte */
     if (data + section_length <= packet->data_end) {
       if ((section =
-              gst_mpegts_section_new (packet->pid, g_memdup (data,
+              gst_mpegts_section_new (packet->pid, g_memdup2 (data,
                       section_length), section_length))) {
         GST_DEBUG ("PID 0x%04x Short section complete !", packet->pid);
         section->offset = packet->offset;
@@ -1189,7 +1203,8 @@ section_start:
    * * same section_number was seen
    */
   if (seen_section_before (stream, table_id, subtable_extension,
-          version_number, section_number, last_section_number)) {
+          version_number, section_number, last_section_number, data_start,
+          to_read)) {
     GST_DEBUG
         ("PID 0x%04x Already processed table_id:0x%02x subtable_extension:0x%04x, version_number:%d, section_number:%d",
         packet->pid, table_id, subtable_extension, version_number,
@@ -2263,23 +2278,24 @@ mpegts_packetizer_pts_to_ts (MpegTSPacketizer2 * packetizer,
         GST_TIME_ARGS (pcrtable->base_pcrtime),
         GST_TIME_ARGS (pcrtable->base_time),
         GST_TIME_ARGS (pcrtable->pcroffset));
-    res = pts + pcrtable->pcroffset;
+    res = pts + pcrtable->pcroffset + packetizer->extra_shift;
 
     /* Don't return anything if we differ too much against last seen PCR */
-    /* FIXME : Ideally we want to figure out whether we have a wraparound or
-     * a reset so we can provide actual values.
-     * That being said, this will only happen for the small interval of time
-     * where PTS/DTS are wrapping just before we see the first reset/wrap PCR
-     */
     if (G_UNLIKELY (pcr_pid != 0x1fff &&
             ABSDIFF (res, pcrtable->last_pcrtime) > 15 * GST_SECOND))
       res = GST_CLOCK_TIME_NONE;
     else {
       GstClockTime tmp = pcrtable->base_time + pcrtable->skew;
-      if (tmp + res >= pcrtable->base_pcrtime)
+      if (tmp + res >= pcrtable->base_pcrtime) {
         res += tmp - pcrtable->base_pcrtime;
-      else
+      } else if (ABSDIFF (tmp + res + PCR_GST_MAX_VALUE,
+              pcrtable->base_pcrtime) < PCR_GST_MAX_VALUE / 2) {
+        /* Handle wrapover */
+        res += tmp + PCR_GST_MAX_VALUE - pcrtable->base_pcrtime;
+      } else {
+        /* Fallback for values that differ way too much */
         res = GST_CLOCK_TIME_NONE;
+      }
     }
   } else if (packetizer->calculate_offset && pcrtable->groups) {
     gint64 refpcr = G_MAXINT64, refpcroffset;
