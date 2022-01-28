@@ -6,6 +6,7 @@ debian/tmp/usr/lib/*/libgstinsertbin-1.0.so.*
 debian/tmp/usr/lib/*/libgstcodecparsers-1.0.so.*
 debian/tmp/usr/lib/*/libgstcodecs-1.0.so.*
 debian/tmp/usr/lib/*/libgstmpegts-1.0.so.*
+debian/tmp/usr/lib/*/libgstplay-1.0.so.*
 debian/tmp/usr/lib/*/libgstplayer-1.0.so.*
 debian/tmp/usr/lib/*/libgsturidownloader-1.0.so.*
 debian/tmp/usr/lib/*/libgstisoff-1.0.so.*

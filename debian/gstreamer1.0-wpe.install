@@ -1,1 +1,2 @@
 debian/tmp/usr/lib/*/gstreamer-1.0/libgstwpe.so
+debian/tmp/usr/lib/*/gstreamer-1.0/wpe-extension/libgstwpeextension.so
