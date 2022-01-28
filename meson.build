@@ -1,6 +1,6 @@
 project('gst-plugins-bad', 'c', 'cpp',
-  version : '1.18.5',
-  meson_version : '>= 0.49',
+  version : '1.19.90',
+  meson_version : '>= 0.59',
   default_options : [ 'warning_level=1',
                       'buildtype=debugoptimized' ])
 
@@ -14,11 +14,17 @@ gst_version_micro = version_arr[2].to_int()
 else
   gst_version_nano = 0
 endif
-gst_version_is_dev = gst_version_minor % 2 == 1 and gst_version_micro < 90
+gst_version_is_stable = gst_version_minor.is_even()
+gst_version_is_dev = gst_version_minor.is_odd() and gst_version_micro < 90
 
-glib_req = '>= 2.44.0'
+glib_req = '>= 2.56.0'
 orc_req = '>= 0.4.17'
-gst_req = '>= @0@.@1@.0'.format(gst_version_major, gst_version_minor)
+
+if gst_version_is_stable
+  gst_req = '>= @0@.@1@.0'.format(gst_version_major, gst_version_minor)
+else
+  gst_req = '>= ' + gst_version
+endif
 
 api_version = '1.0'
 soversion = 0
@@ -29,7 +35,9 @@ libversion = '@0@.@1@.0'.format(soversion, curversion)
 osxversion = curversion + 1
 
 plugins_install_dir = join_paths(get_option('libdir'), 'gstreamer-1.0')
+static_build = get_option('default_library') == 'static'
 plugins = []
+libraries = []
 
 cc = meson.get_compiler('c')
 cxx = meson.get_compiler('cpp')
@@ -46,19 +54,23 @@ endif
 cdata = configuration_data()
 
 if cc.get_id() == 'msvc'
-  # Ignore several spurious warnings for things gstreamer does very commonly
-  # If a warning is completely useless and spammy, use '/wdXXXX' to suppress it
-  # If a warning is harmless but hard to fix, use '/woXXXX' so it's shown once
-  # NOTE: Only add warnings here if you are sure they're spurious
   msvc_args = [
+      # Ignore several spurious warnings for things gstreamer does very commonly
+      # If a warning is completely useless and spammy, use '/wdXXXX' to suppress it
+      # If a warning is harmless but hard to fix, use '/woXXXX' so it's shown once
+      # NOTE: Only add warnings here if you are sure they're spurious
       '/wd4018', # implicit signed/unsigned conversion
       '/wd4146', # unary minus on unsigned (beware INT_MIN)
       '/wd4244', # lossy type conversion (e.g. double -> int)
       '/wd4305', # truncating type conversion (e.g. double -> float)
       cc.get_supported_arguments(['/utf-8']), # set the input encoding to utf-8
+
+      # Enable some warnings on MSVC to match GCC/Clang behaviour
+      '/w14062', # enumerator 'identifier' in switch of enum 'enumeration' is not handled
+      '/w14101', # 'identifier' : unreferenced local variable
+      '/w14189', # 'identifier' : local variable is initialized but not referenced
   ]
-  add_project_arguments(msvc_args, language : 'c')
-  add_project_arguments(msvc_args, language : 'cpp')
+  add_project_arguments(msvc_args, language: ['c', 'cpp'])
   # Disable SAFESEH with MSVC for plugins and libs that use external deps that
   # are built with MinGW
   noseh_link_args = ['/SAFESEH:NO']
@@ -158,6 +170,7 @@ check_functions = [
   ['HAVE_DCGETTEXT', 'dcgettext'],
   ['HAVE_GETPAGESIZE', 'getpagesize'],
   ['HAVE_GMTIME_R', 'gmtime_r'],
+  ['HAVE_MEMFD_CREATE', 'memfd_create'],
   ['HAVE_MMAP', 'mmap'],
   ['HAVE_PIPE2', 'pipe2'],
   ['HAVE_GETRUSAGE', 'getrusage', '#include<sys/resource.h>'],
@@ -308,9 +321,9 @@ gstglegl_dep = dependency('', required : false)
 
 if gstgl_dep.found()
   if gstgl_dep.type_name() == 'pkgconfig'
-    gst_gl_apis = gstgl_dep.get_pkgconfig_variable('gl_apis').split()
-    gst_gl_winsys = gstgl_dep.get_pkgconfig_variable('gl_winsys').split()
-    gst_gl_platforms = gstgl_dep.get_pkgconfig_variable('gl_platforms').split()
+    gst_gl_apis = gstgl_dep.get_variable('gl_apis').split()
+    gst_gl_winsys = gstgl_dep.get_variable('gl_winsys').split()
+    gst_gl_platforms = gstgl_dep.get_variable('gl_platforms').split()
   else
     gstbase = subproject('gst-plugins-base')
     gst_gl_apis = gstbase.get_variable('enabled_gl_apis')
@@ -461,6 +474,26 @@ if get_option('default_library') == 'shared'
   plugins_pkgconfig_install_dir = disabler()
 endif
 
+pkgconfig_variables = ['exec_prefix=${prefix}',
+    'toolsdir=${exec_prefix}/bin',
+    'pluginsdir=${libdir}/gstreamer-1.0',
+    'datarootdir=${prefix}/share',
+    'datadir=${datarootdir}',
+    'girdir=${datadir}/gir-1.0',
+    'typelibdir=${libdir}/girepository-1.0']
+
+pkgconfig_subdirs = ['gstreamer-1.0']
+
+pkgconfig.generate(
+  libraries : [gst_dep],
+  variables : pkgconfig_variables,
+  subdirs : pkgconfig_subdirs,
+  name : 'gstreamer-plugins-bad-1.0',
+  description : 'Streaming media framework, bad plugins libraries',
+)
+
+gpl_allowed = get_option('gpl').allowed()
+
 subdir('gst-libs')
 subdir('gst')
 subdir('sys')
@@ -468,7 +501,6 @@ subdir('ext')
 subdir('tests')
 subdir('data')
 subdir('tools')
-subdir('pkgconfig')
 
 if have_orcc
   update_orc_dist_files = find_program('scripts/update-orc-dist-files.py')
@@ -488,7 +520,7 @@ if have_orcc
     ]
   endforeach
 
-  if meson.version().version_compare('>= 0.52') and orc_update_targets.length() > 0
+  if orc_update_targets.length() > 0
     update_orc_dist_target = alias_target('update-orc-dist', orc_update_targets)
   endif
 endif
@@ -504,34 +536,30 @@ subdir('scripts')
 # Set release date
 if gst_version_nano == 0
   extract_release_date = find_program('scripts/extract-release-date-from-doap-file.py')
-  run_result = run_command(extract_release_date, gst_version, files('gst-plugins-bad.doap'))
-  if run_result.returncode() == 0
-    release_date = run_result.stdout().strip()
-    cdata.set_quoted('GST_PACKAGE_RELEASE_DATETIME', release_date)
-    message('Package release date: ' + release_date)
-  else
-    # Error out if our release can't be found in the .doap file
-    error(run_result.stderr())
-  endif
+  run_result = run_command(extract_release_date, gst_version, files('gst-plugins-bad.doap'), check: true)
+  release_date = run_result.stdout().strip()
+  cdata.set_quoted('GST_PACKAGE_RELEASE_DATETIME', release_date)
+  message('Package release date: ' + release_date)
+endif
+
+if glib_dep.version().version_compare('< 2.67.4')
+  cdata.set('g_memdup2(ptr,sz)', '(G_LIKELY(((guint64)(sz)) < G_MAXUINT)) ? g_memdup(ptr,sz) : (g_abort(),NULL)')
 endif
 
 configure_file(output : 'config.h', configuration : cdata)
 
-run_command(python3, '-c', 'import shutil; shutil.copy("hooks/pre-commit.hook", ".git/hooks/pre-commit")')
-
 subdir('docs')
 
-if meson.version().version_compare('>= 0.54')
-  plugin_names = []
-  foreach plugin: plugins
-    # FIXME: Use str.subtring() when we can depend on Meson 0.56
-    split = plugin.name().split('gst')
-    if split.length() == 2
-      plugin_names += [split[1]]
-    else
-      warning('Need substring API in meson >= 0.56 to properly parse plugin name: ' + plugin.name())
-      plugin_names += [plugin.name()]
-    endif
-  endforeach
-  summary({'Plugins':plugin_names}, list_sep: ', ')
-endif
+plugin_names = []
+foreach plugin: plugins
+  if plugin.name().startswith('gst')
+    plugin_names += [plugin.name().substring(3)]
+  else
+    plugin_names += [plugin.name()]
+  endif
+endforeach
+
+summary({
+    'Plugins': plugin_names,
+      '(A)GPL license allowed': gpl_allowed,
+}, list_sep: ', ')

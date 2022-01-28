@@ -25,6 +25,7 @@
 #include "gstvapool.h"
 
 #include "gstvaallocator.h"
+#include "gstvacaps.h"
 
 GST_DEBUG_CATEGORY_STATIC (gst_va_pool_debug);
 #define GST_CAT_DEFAULT gst_va_pool_debug
@@ -36,10 +37,12 @@ struct _GstVaPool
   GstVideoInfo alloc_info;
   GstVideoInfo caps_info;
   GstAllocator *allocator;
-  guint32 usage_hint;
+  gboolean force_videometa;
   gboolean add_videometa;
-  gboolean need_alignment;
-  GstVideoAlignment video_align;
+  gint crop_left;
+  gint crop_top;
+
+  gboolean starting;
 };
 
 #define gst_va_pool_parent_class parent_class
@@ -74,10 +77,11 @@ gst_va_pool_set_config (GstBufferPool * pool, GstStructure * config)
   GstVideoAlignment video_align = { 0, };
   GstVideoInfo caps_info, alloc_info;
   gint width, height;
-  guint size, min_buffers, max_buffers;
+  guint i, min_buffers, max_buffers;
   guint32 usage_hint;
+  gboolean has_alignment;
 
-  if (!gst_buffer_pool_config_get_params (config, &caps, &size, &min_buffers,
+  if (!gst_buffer_pool_config_get_params (config, &caps, NULL, &min_buffers,
           &max_buffers))
     goto wrong_config;
 
@@ -86,9 +90,6 @@ gst_va_pool_set_config (GstBufferPool * pool, GstStructure * config)
 
   if (!gst_video_info_from_caps (&caps_info, caps))
     goto wrong_caps;
-
-  if (size < GST_VIDEO_INFO_SIZE (&caps_info))
-    goto wrong_size;
 
   if (!gst_buffer_pool_config_get_allocator (config, &allocator, NULL))
     goto wrong_config;
@@ -103,49 +104,61 @@ gst_va_pool_set_config (GstBufferPool * pool, GstStructure * config)
   width = GST_VIDEO_INFO_WIDTH (&caps_info);
   height = GST_VIDEO_INFO_HEIGHT (&caps_info);
 
-  GST_LOG_OBJECT (vpool, "%dx%d - %u | caps %" GST_PTR_FORMAT, width, height,
-      size, caps);
-
-  if (vpool->allocator)
-    gst_object_unref (vpool->allocator);
-  if ((vpool->allocator = allocator))
-    gst_object_ref (allocator);
+  GST_LOG_OBJECT (vpool, "%dx%d | %" GST_PTR_FORMAT, width, height, caps);
 
   /* enable metadata based on config of the pool */
   vpool->add_videometa = gst_buffer_pool_config_has_option (config,
       GST_BUFFER_POOL_OPTION_VIDEO_META);
 
   /* parse extra alignment info */
-  vpool->need_alignment = gst_buffer_pool_config_has_option (config,
+  has_alignment = gst_buffer_pool_config_has_option (config,
       GST_BUFFER_POOL_OPTION_VIDEO_ALIGNMENT);
 
-  if (vpool->need_alignment && vpool->add_videometa) {
+  if (has_alignment) {
     gst_buffer_pool_config_get_video_alignment (config, &video_align);
 
     width += video_align.padding_left + video_align.padding_right;
     height += video_align.padding_bottom + video_align.padding_top;
 
-    /* apply the alignment to the info */
-    if (!gst_video_info_align (&caps_info, &video_align))
-      goto failed_to_align;
-
-    gst_buffer_pool_config_set_video_alignment (config, &video_align);
+    if (video_align.padding_left > 0)
+      vpool->crop_left = video_align.padding_left;
+    if (video_align.padding_top > 0)
+      vpool->crop_top = video_align.padding_top;
   }
 
-  GST_VIDEO_INFO_SIZE (&caps_info) =
-      MAX (size, GST_VIDEO_INFO_SIZE (&caps_info));
-
+  /* update allocation info with aligned size */
   alloc_info = caps_info;
   GST_VIDEO_INFO_WIDTH (&alloc_info) = width;
   GST_VIDEO_INFO_HEIGHT (&alloc_info) = height;
 
+  if (GST_IS_VA_DMABUF_ALLOCATOR (allocator)) {
+    if (!gst_va_dmabuf_allocator_set_format (allocator, &alloc_info,
+            usage_hint))
+      goto failed_allocator;
+  } else if (GST_IS_VA_ALLOCATOR (allocator)) {
+    if (!gst_va_allocator_set_format (allocator, &alloc_info, usage_hint))
+      goto failed_allocator;
+  }
+
+  gst_object_replace ((GstObject **) & vpool->allocator,
+      GST_OBJECT (allocator));
+
   vpool->caps_info = caps_info;
   vpool->alloc_info = alloc_info;
-  vpool->usage_hint = usage_hint;
-  vpool->video_align = video_align;
+
+  for (i = 0; i < GST_VIDEO_INFO_N_PLANES (&caps_info); i++) {
+    if (GST_VIDEO_INFO_PLANE_STRIDE (&caps_info, i) !=
+        GST_VIDEO_INFO_PLANE_STRIDE (&alloc_info, i) ||
+        GST_VIDEO_INFO_PLANE_OFFSET (&caps_info, i) !=
+        GST_VIDEO_INFO_PLANE_OFFSET (&alloc_info, i)) {
+      GST_INFO_OBJECT (vpool, "Video meta is required in buffer.");
+      vpool->force_videometa = TRUE;
+      break;
+    }
+  }
 
   gst_buffer_pool_config_set_params (config, caps,
-      GST_VIDEO_INFO_SIZE (&caps_info), min_buffers, max_buffers);
+      GST_VIDEO_INFO_SIZE (&alloc_info), min_buffers, max_buffers);
 
   return GST_BUFFER_POOL_CLASS (parent_class)->set_config (pool, config);
 
@@ -166,16 +179,9 @@ wrong_caps:
         "failed getting geometry from caps %" GST_PTR_FORMAT, caps);
     return FALSE;
   }
-wrong_size:
+failed_allocator:
   {
-    GST_WARNING_OBJECT (vpool,
-        "Provided size is to small for the caps: %u < %" G_GSIZE_FORMAT, size,
-        GST_VIDEO_INFO_SIZE (&caps_info));
-    return FALSE;
-  }
-failed_to_align:
-  {
-    GST_WARNING_OBJECT (pool, "Failed to align");
+    GST_WARNING_OBJECT (vpool, "Failed to set format to allocator");
     return FALSE;
   }
 }
@@ -185,38 +191,57 @@ gst_va_pool_alloc (GstBufferPool * pool, GstBuffer ** buffer,
     GstBufferPoolAcquireParams * params)
 {
   GstBuffer *buf;
-  GstVideoMeta *vmeta;
   GstVaPool *vpool = GST_VA_POOL (pool);
-  GstVaAllocationParams alloc_params = {
-    .info = vpool->alloc_info,
-    .usage_hint = vpool->usage_hint,
-  };
 
   buf = gst_buffer_new ();
 
   if (GST_IS_VA_DMABUF_ALLOCATOR (vpool->allocator)) {
-    if (!gst_va_dmabuf_setup_buffer (vpool->allocator, buf, &alloc_params))
-      goto no_memory;
+    if (vpool->starting) {
+      if (!gst_va_dmabuf_allocator_setup_buffer (vpool->allocator, buf))
+        goto no_memory;
+    } else if (!gst_va_dmabuf_allocator_prepare_buffer (vpool->allocator, buf)) {
+      if (!gst_va_dmabuf_allocator_setup_buffer (vpool->allocator, buf))
+        goto no_memory;
+    }
   } else if (GST_IS_VA_ALLOCATOR (vpool->allocator)) {
-    GstMemory *mem = gst_va_allocator_alloc (vpool->allocator, &alloc_params);
-    if (!mem)
-      goto no_memory;
-    gst_buffer_append_memory (buf, mem);
+    if (vpool->starting) {
+      if (!gst_va_allocator_setup_buffer (vpool->allocator, buf))
+        goto no_memory;
+    } else if (!gst_va_allocator_prepare_buffer (vpool->allocator, buf)) {
+      if (!gst_va_allocator_setup_buffer (vpool->allocator, buf))
+        goto no_memory;
+    }
   } else
     goto no_memory;
 
   if (vpool->add_videometa) {
-    /* GstVaAllocator may update offset/stride given the physical
-     * memory */
-    vmeta = gst_buffer_add_video_meta_full (buf, GST_VIDEO_FRAME_FLAG_NONE,
-        GST_VIDEO_INFO_FORMAT (&vpool->caps_info),
-        GST_VIDEO_INFO_WIDTH (&vpool->caps_info),
-        GST_VIDEO_INFO_HEIGHT (&vpool->caps_info),
-        GST_VIDEO_INFO_N_PLANES (&vpool->caps_info),
-        alloc_params.info.offset, alloc_params.info.stride);
+    if (vpool->crop_left > 0 || vpool->crop_top > 0) {
+      GstVideoCropMeta *crop_meta;
 
-    if (vpool->need_alignment)
-      gst_video_meta_set_alignment (vmeta, vpool->video_align);
+      /* For video crop, its video meta's width and height should be
+         the full size of uncropped resolution. */
+      gst_buffer_add_video_meta_full (buf, GST_VIDEO_FRAME_FLAG_NONE,
+          GST_VIDEO_INFO_FORMAT (&vpool->alloc_info),
+          GST_VIDEO_INFO_WIDTH (&vpool->alloc_info),
+          GST_VIDEO_INFO_HEIGHT (&vpool->alloc_info),
+          GST_VIDEO_INFO_N_PLANES (&vpool->alloc_info),
+          vpool->alloc_info.offset, vpool->alloc_info.stride);
+
+      crop_meta = gst_buffer_add_video_crop_meta (buf);
+      crop_meta->x = vpool->crop_left;
+      crop_meta->y = vpool->crop_top;
+      crop_meta->width = GST_VIDEO_INFO_WIDTH (&vpool->caps_info);
+      crop_meta->height = GST_VIDEO_INFO_HEIGHT (&vpool->caps_info);
+    } else {
+      /* GstVaAllocator may update offset/stride given the physical
+       * memory */
+      gst_buffer_add_video_meta_full (buf, GST_VIDEO_FRAME_FLAG_NONE,
+          GST_VIDEO_INFO_FORMAT (&vpool->caps_info),
+          GST_VIDEO_INFO_WIDTH (&vpool->caps_info),
+          GST_VIDEO_INFO_HEIGHT (&vpool->caps_info),
+          GST_VIDEO_INFO_N_PLANES (&vpool->caps_info),
+          vpool->alloc_info.offset, vpool->alloc_info.stride);
+    }
   }
 
   *buffer = buf;
@@ -230,6 +255,35 @@ no_memory:
     GST_WARNING_OBJECT (vpool, "can't create memory");
     return GST_FLOW_ERROR;
   }
+}
+
+static gboolean
+gst_va_pool_start (GstBufferPool * pool)
+{
+  GstVaPool *vpool = GST_VA_POOL (pool);
+  gboolean ret;
+
+  vpool->starting = TRUE;
+  ret = GST_BUFFER_POOL_CLASS (parent_class)->start (pool);
+  vpool->starting = FALSE;
+
+  return ret;
+}
+
+static gboolean
+gst_va_pool_stop (GstBufferPool * pool)
+{
+  GstVaPool *vpool = GST_VA_POOL (pool);
+  gboolean ret;
+
+  ret = GST_BUFFER_POOL_CLASS (parent_class)->stop (pool);
+
+  if (GST_IS_VA_DMABUF_ALLOCATOR (vpool->allocator))
+    gst_va_dmabuf_allocator_flush (vpool->allocator);
+  else if (GST_IS_VA_ALLOCATOR (vpool->allocator))
+    gst_va_allocator_flush (vpool->allocator);
+
+  return ret;
 }
 
 static void
@@ -255,6 +309,8 @@ gst_va_pool_class_init (GstVaPoolClass * klass)
   gstbufferpool_class->get_options = gst_va_pool_get_options;
   gstbufferpool_class->set_config = gst_va_pool_set_config;
   gstbufferpool_class->alloc_buffer = gst_va_pool_alloc;
+  gstbufferpool_class->start = gst_va_pool_start;
+  gstbufferpool_class->stop = gst_va_pool_stop;
 }
 
 static void
@@ -280,4 +336,33 @@ gst_buffer_pool_config_set_va_allocation_params (GstStructure * config,
     guint usage_hint)
 {
   gst_structure_set (config, "usage-hint", G_TYPE_UINT, usage_hint, NULL);
+}
+
+gboolean
+gst_va_pool_requires_video_meta (GstBufferPool * pool)
+{
+  return GST_VA_POOL (pool)->force_videometa;
+}
+
+GstBufferPool *
+gst_va_pool_new_with_config (GstCaps * caps, guint size, guint min_buffers,
+    guint max_buffers, guint usage_hint, GstAllocator * allocator,
+    GstAllocationParams * alloc_params)
+{
+  GstBufferPool *pool;
+  GstStructure *config;
+
+  pool = gst_va_pool_new ();
+
+  config = gst_buffer_pool_get_config (pool);
+  gst_buffer_pool_config_set_params (config, caps, size, min_buffers,
+      max_buffers);
+  gst_buffer_pool_config_set_va_allocation_params (config, usage_hint);
+  gst_buffer_pool_config_set_allocator (config, allocator, alloc_params);
+  gst_buffer_pool_config_add_option (config, GST_BUFFER_POOL_OPTION_VIDEO_META);
+
+  if (!gst_buffer_pool_set_config (pool, config))
+    gst_clear_object (&pool);
+
+  return pool;
 }

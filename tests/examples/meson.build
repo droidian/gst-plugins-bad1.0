@@ -2,7 +2,7 @@ subdir('audiomixmatrix')
 subdir('avsamplesink')
 subdir('camerabin2')
 subdir('codecparsers')
-subdir('d3d11videosink')
+subdir('d3d11')
 subdir('directfb')
 subdir('ipcpipeline')
 subdir('mpegts')
@@ -14,6 +14,7 @@ subdir('uvch264')
 subdir('va')
 subdir('waylandsink')
 subdir('webrtc')
+subdir('wpe')
 
 executable('playout',
   'playout.c',

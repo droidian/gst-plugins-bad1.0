@@ -42,25 +42,58 @@
 
 #include <gst/webrtc/webrtc-enumtypes.h>
 
+/**
+ * GstWebRTCDTLSTransport:
+ */
 typedef struct _GstWebRTCDTLSTransport GstWebRTCDTLSTransport;
 typedef struct _GstWebRTCDTLSTransportClass GstWebRTCDTLSTransportClass;
 
+/**
+ * GstWebRTCICETransport:
+ */
 typedef struct _GstWebRTCICETransport GstWebRTCICETransport;
 typedef struct _GstWebRTCICETransportClass GstWebRTCICETransportClass;
 
+/**
+ * GstWebRTCRTPReceiver:
+ *
+ * An object to track the receiving aspect of the stream
+ *
+ * Mostly matches the WebRTC RTCRtpReceiver interface.
+ */
 typedef struct _GstWebRTCRTPReceiver GstWebRTCRTPReceiver;
 typedef struct _GstWebRTCRTPReceiverClass GstWebRTCRTPReceiverClass;
 
+/**
+ * GstWebRTCRTPSender:
+ *
+ * An object to track the sending aspect of the stream
+ *
+ * Mostly matches the WebRTC RTCRtpSender interface.
+ */
 typedef struct _GstWebRTCRTPSender GstWebRTCRTPSender;
 typedef struct _GstWebRTCRTPSenderClass GstWebRTCRTPSenderClass;
 
 typedef struct _GstWebRTCSessionDescription GstWebRTCSessionDescription;
 
+/**
+ * GstWebRTCRTPTransceiver:
+ *
+ * Mostly matches the WebRTC RTCRtpTransceiver interface.
+ */
 typedef struct _GstWebRTCRTPTransceiver GstWebRTCRTPTransceiver;
 typedef struct _GstWebRTCRTPTransceiverClass GstWebRTCRTPTransceiverClass;
 
+/**
+ * GstWebRTCDataChannel:
+ *
+ * Since: 1.18
+ */
 typedef struct _GstWebRTCDataChannel GstWebRTCDataChannel;
 typedef struct _GstWebRTCDataChannelClass GstWebRTCDataChannelClass;
+
+typedef struct _GstWebRTCSCTPTransport GstWebRTCSCTPTransport;
+typedef struct _GstWebRTCSCTPTransportClass GstWebRTCSCTPTransportClass;
 
 /**
  * GstWebRTCDTLSTransportState:
@@ -280,10 +313,10 @@ typedef enum /*< underscore_name=gst_webrtc_fec_type >*/
 
 /**
  * GstWebRTCSCTPTransportState:
- * GST_WEBRTC_SCTP_TRANSPORT_STATE_NEW: new
- * GST_WEBRTC_SCTP_TRANSPORT_STATE_CONNECTING: connecting
- * GST_WEBRTC_SCTP_TRANSPORT_STATE_CONNECTED: connected
- * GST_WEBRTC_SCTP_TRANSPORT_STATE_CLOSED: closed
+ * @GST_WEBRTC_SCTP_TRANSPORT_STATE_NEW: new
+ * @GST_WEBRTC_SCTP_TRANSPORT_STATE_CONNECTING: connecting
+ * @GST_WEBRTC_SCTP_TRANSPORT_STATE_CONNECTED: connected
+ * @GST_WEBRTC_SCTP_TRANSPORT_STATE_CLOSED: closed
  *
  * See <http://w3c.github.io/webrtc-pc/#dom-rtcsctptransportstate>
  *
@@ -299,10 +332,10 @@ typedef enum /*< underscore_name=gst_webrtc_sctp_transport_state >*/
 
 /**
  * GstWebRTCPriorityType:
- * GST_WEBRTC_PRIORITY_TYPE_VERY_LOW: very-low
- * GST_WEBRTC_PRIORITY_TYPE_LOW: low
- * GST_WEBRTC_PRIORITY_TYPE_MEDIUM: medium
- * GST_WEBRTC_PRIORITY_TYPE_HIGH: high
+ * @GST_WEBRTC_PRIORITY_TYPE_VERY_LOW: very-low
+ * @GST_WEBRTC_PRIORITY_TYPE_LOW: low
+ * @GST_WEBRTC_PRIORITY_TYPE_MEDIUM: medium
+ * @GST_WEBRTC_PRIORITY_TYPE_HIGH: high
  *
  * See <http://w3c.github.io/webrtc-pc/#dom-rtcprioritytype>
  *
@@ -318,11 +351,11 @@ typedef enum /*< underscore_name=gst_webrtc_priority_type >*/
 
 /**
  * GstWebRTCDataChannelState:
- * GST_WEBRTC_DATA_CHANNEL_STATE_NEW: new
- * GST_WEBRTC_DATA_CHANNEL_STATE_CONNECTING: connection
- * GST_WEBRTC_DATA_CHANNEL_STATE_OPEN: open
- * GST_WEBRTC_DATA_CHANNEL_STATE_CLOSING: closing
- * GST_WEBRTC_DATA_CHANNEL_STATE_CLOSED: closed
+ * @GST_WEBRTC_DATA_CHANNEL_STATE_NEW: new
+ * @GST_WEBRTC_DATA_CHANNEL_STATE_CONNECTING: connection
+ * @GST_WEBRTC_DATA_CHANNEL_STATE_OPEN: open
+ * @GST_WEBRTC_DATA_CHANNEL_STATE_CLOSING: closing
+ * @GST_WEBRTC_DATA_CHANNEL_STATE_CLOSED: closed
  *
  * See <http://w3c.github.io/webrtc-pc/#dom-rtcdatachannelstate>
  *
@@ -339,10 +372,10 @@ typedef enum /*< underscore_name=gst_webrtc_data_channel_state >*/
 
 /**
  * GstWebRTCBundlePolicy:
- * GST_WEBRTC_BUNDLE_POLICY_NONE: none
- * GST_WEBRTC_BUNDLE_POLICY_BALANCED: balanced
- * GST_WEBRTC_BUNDLE_POLICY_MAX_COMPAT: max-compat
- * GST_WEBRTC_BUNDLE_POLICY_MAX_BUNDLE: max-bundle
+ * @GST_WEBRTC_BUNDLE_POLICY_NONE: none
+ * @GST_WEBRTC_BUNDLE_POLICY_BALANCED: balanced
+ * @GST_WEBRTC_BUNDLE_POLICY_MAX_COMPAT: max-compat
+ * @GST_WEBRTC_BUNDLE_POLICY_MAX_BUNDLE: max-bundle
  *
  * See https://tools.ietf.org/html/draft-ietf-rtcweb-jsep-24#section-4.1.1
  * for more information.
@@ -359,8 +392,8 @@ typedef enum /*<underscore_name=gst_webrtc_bundle_policy>*/
 
 /**
  * GstWebRTCICETransportPolicy:
- * GST_WEBRTC_ICE_TRANSPORT_POLICY_ALL: all
- * GST_WEBRTC_ICE_TRANSPORT_POLICY_RELAY: relay
+ * @GST_WEBRTC_ICE_TRANSPORT_POLICY_ALL: all
+ * @GST_WEBRTC_ICE_TRANSPORT_POLICY_RELAY: relay
  *
  * See https://tools.ietf.org/html/draft-ietf-rtcweb-jsep-24#section-4.1.1
  * for more information.
@@ -372,5 +405,22 @@ typedef enum /*<underscore_name=gst_webrtc_ice_transport_policy>*/
   GST_WEBRTC_ICE_TRANSPORT_POLICY_ALL,
   GST_WEBRTC_ICE_TRANSPORT_POLICY_RELAY,
 } GstWebRTCICETransportPolicy;
+
+/**
+ * GstWebRTCKind:
+ * @GST_WEBRTC_KIND_UNKNOWN: Kind has not yet been set
+ * @GST_WEBRTC_KIND_AUDIO: Kind is audio
+ * @GST_WEBRTC_KIND_VIDEO: Kind is audio
+ *
+ * https://w3c.github.io/mediacapture-main/#dom-mediastreamtrack-kind
+ *
+ * Since: 1.20
+ */
+typedef enum /*<underscore_name=gst_webrtc_kind>*/
+{
+  GST_WEBRTC_KIND_UNKNOWN,
+  GST_WEBRTC_KIND_AUDIO,
+  GST_WEBRTC_KIND_VIDEO,
+} GstWebRTCKind;
 
 #endif /* __GST_WEBRTC_FWD_H__ */

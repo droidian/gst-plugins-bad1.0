@@ -27,8 +27,8 @@
 
 #include <gst/gst.h>
 #include <gst/codecs/codecs-prelude.h>
-
 #include <gst/codecparsers/gsth265parser.h>
+#include <gst/video/video.h>
 
 G_BEGIN_DECLS
 
@@ -50,15 +50,9 @@ struct _GstH265Slice
   GstH265NalUnit nalu;
 };
 
-typedef enum
-{
-  GST_H265_PICTURE_FIELD_FRAME,
-  GST_H265_PICTURE_FILED_TOP_FIELD,
-  GST_H265_PICTURE_FIELD_BOTTOM_FIELD,
-} GstH265PictureField;
-
 struct _GstH265Picture
 {
+  /*< private >*/
   GstMiniObject parent;
 
   GstH265SliceType type;
@@ -81,9 +75,14 @@ struct _GstH265Picture
 
   gboolean ref;
   gboolean long_term;
-  gboolean outputted;
+  gboolean needed_for_output;
 
-  GstH265PictureField field;
+  /* from picture timing SEI */
+  GstH265SEIPicStructType pic_struct;
+  guint8 source_scan_type;
+  guint8 duplicate_flag;
+
+  GstVideoBufferFlags buffer_flags;
 
   gpointer user_data;
   GDestroyNotify notify;
@@ -161,10 +160,6 @@ GST_CODECS_API
 void  gst_h265_dpb_delete_unused    (GstH265Dpb * dpb);
 
 GST_CODECS_API
-void  gst_h265_dpb_delete_by_poc    (GstH265Dpb * dpb,
-                                     gint poc);
-
-GST_CODECS_API
 gint  gst_h265_dpb_num_ref_pictures (GstH265Dpb * dpb);
 
 GST_CODECS_API
@@ -187,17 +182,24 @@ GstH265Picture * gst_h265_dpb_get_long_ref_by_poc  (GstH265Dpb * dpb,
                                                     gint poc);
 
 GST_CODECS_API
-void  gst_h265_dpb_get_pictures_not_outputted  (GstH265Dpb * dpb,
-                                                GList ** out);
+GArray * gst_h265_dpb_get_pictures_all         (GstH265Dpb * dpb);
 
 GST_CODECS_API
-GArray * gst_h265_dpb_get_pictures_all         (GstH265Dpb * dpb);
+GstH265Picture * gst_h265_dpb_get_picture      (GstH265Dpb * dpb,
+                                                guint32 system_frame_number);
 
 GST_CODECS_API
 gint  gst_h265_dpb_get_size   (GstH265Dpb * dpb);
 
 GST_CODECS_API
-gboolean gst_h265_dpb_is_full (GstH265Dpb * dpb);
+gboolean gst_h265_dpb_needs_bump (GstH265Dpb * dpb,
+                                  guint max_num_reorder_pics,
+                                  guint max_latency_increase,
+                                  guint max_dec_pic_buffering);
+
+GST_CODECS_API
+GstH265Picture * gst_h265_dpb_bump (GstH265Dpb * dpb,
+                                    gboolean drain);
 
 G_DEFINE_AUTOPTR_CLEANUP_FUNC(GstH265Picture, gst_h265_picture_unref)
 

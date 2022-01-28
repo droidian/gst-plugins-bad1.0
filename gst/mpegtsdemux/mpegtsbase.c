@@ -108,6 +108,9 @@ _extra_init (void)
   QUARK_PCR_PID = g_quark_from_string ("pcr-pid");
   QUARK_STREAMS = g_quark_from_string ("streams");
   QUARK_STREAM_TYPE = g_quark_from_string ("stream-type");
+  GST_DEBUG_CATEGORY_INIT (mpegts_base_debug, "mpegtsbase", 0,
+      "MPEG transport stream base class");
+  gst_mpegts_initialize ();
 }
 
 #define mpegts_base_parent_class parent_class
@@ -159,6 +162,7 @@ mpegts_base_class_init (MpegTSBaseClass * klass)
           G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
 
   klass->sink_query = GST_DEBUG_FUNCPTR (mpegts_base_default_sink_query);
+  klass->handle_psi = NULL;
 
   gst_type_mark_as_plugin_api (GST_TYPE_MPEGTS_BASE, 0);
 }
@@ -245,6 +249,8 @@ mpegts_base_reset (MpegTSBase * base)
       GST_BIN_FLAG_STREAMS_AWARE);
   GST_DEBUG_OBJECT (base, "Streams aware : %d", base->streams_aware);
 
+  gst_event_replace (&base->seek_event, NULL);
+
   if (klass->reset)
     klass->reset (base);
 }
@@ -306,6 +312,8 @@ mpegts_base_finalize (GObject * object)
   }
   g_hash_table_destroy (base->programs);
 
+  gst_event_replace (&base->seek_event, NULL);
+
   if (G_OBJECT_CLASS (parent_class)->finalize)
     G_OBJECT_CLASS (parent_class)->finalize (object);
 }
@@ -323,6 +331,20 @@ mpegts_get_descriptor_from_stream (MpegTSBaseStream * stream, guint8 tag)
       tag, stream->pid, stream->stream_type);
 
   return gst_mpegts_find_descriptor (pmt->descriptors, tag);
+}
+
+const GstMpegtsDescriptor *
+mpegts_get_descriptor_from_stream_with_extension (MpegTSBaseStream * stream,
+    guint8 tag, guint8 tag_extension)
+{
+  GstMpegtsPMTStream *pmt = stream->stream;
+
+  GST_DEBUG ("Searching for tag 0x%02x tag_extension 0x%02x "
+      "in stream 0x%04x (stream_type 0x%02x)",
+      tag, tag_extension, stream->pid, stream->stream_type);
+
+  return gst_mpegts_find_descriptor_with_extension (pmt->descriptors, tag,
+      tag_extension);
 }
 
 typedef struct
@@ -553,6 +575,28 @@ get_registration_from_descriptors (GPtrArray * descriptors)
   return 0;
 }
 
+static gboolean
+find_registration_in_descriptors (GPtrArray * descriptors,
+    guint32 registration_id)
+{
+
+  guint i, nb_desc;
+
+  if (!descriptors)
+    return FALSE;
+
+  nb_desc = descriptors->len;
+  for (i = 0; i < nb_desc; i++) {
+    GstMpegtsDescriptor *desc = g_ptr_array_index (descriptors, i);
+    if (desc->tag == GST_MTS_DESC_REGISTRATION) {
+      guint32 reg_desc = GST_READ_UINT32_BE (desc->data + 2);
+      if (reg_desc == registration_id)
+        return TRUE;
+    }
+  }
+  return FALSE;
+}
+
 static MpegTSBaseStream *
 mpegts_base_program_add_stream (MpegTSBase * base,
     MpegTSBaseProgram * program, guint16 pid, guint8 stream_type,
@@ -593,9 +637,11 @@ mpegts_base_program_add_stream (MpegTSBase * base,
   program->stream_list = g_list_append (program->stream_list, bstream);
 
   if (klass->stream_added)
-    if (klass->stream_added (base, bstream, program))
+    if (klass->stream_added (base, bstream, program)) {
       gst_stream_collection_add_stream (program->collection,
           (GstStream *) gst_object_ref (bstream->stream_object));
+      bstream->in_collection = TRUE;
+    }
 
 
   return bstream;
@@ -678,7 +724,7 @@ mpegts_base_update_program (MpegTSBase * base, MpegTSBaseProgram * program,
   /* Copy over gststream that still exist into the collection */
   for (tmp = program->stream_list; tmp; tmp = tmp->next) {
     MpegTSBaseStream *stream = (MpegTSBaseStream *) tmp->data;
-    if (_stream_in_pmt (pmt, stream)) {
+    if (_stream_in_pmt (pmt, stream) && stream->in_collection) {
       gst_stream_collection_add_stream (program->collection,
           gst_object_ref (stream->stream_object));
     }
@@ -739,10 +785,8 @@ _stream_is_private_section (const GstMpegtsPMT * pmt,
       return TRUE;
     case GST_MPEGTS_STREAM_TYPE_SCTE_SIT:
     {
-      guint32 registration_id =
-          get_registration_from_descriptors (pmt->descriptors);
       /* Not a private section stream */
-      if (registration_id != DRF_ID_CUEI)
+      if (!find_registration_in_descriptors (pmt->descriptors, DRF_ID_CUEI))
         return FALSE;
       return TRUE;
     }
@@ -1218,6 +1262,10 @@ mpegts_base_handle_psi (MpegTSBase * base, GstMpegtsSection * section)
     default:
       break;
   }
+
+  /* Give the subclass a chance to look at the section */
+  if (GST_MPEGTS_BASE_GET_CLASS (base)->handle_psi)
+    GST_MPEGTS_BASE_GET_CLASS (base)->handle_psi (base, section);
 
   /* Finally post message (if it wasn't corrupted) */
   if (post_message)

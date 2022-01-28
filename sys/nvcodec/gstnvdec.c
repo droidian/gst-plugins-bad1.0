@@ -31,11 +31,20 @@
 
 #include "gstnvdec.h"
 #include "gstcudautils.h"
+#include "gstcudabufferpool.h"
 
 #include <string.h>
 
 GST_DEBUG_CATEGORY_EXTERN (gst_nvdec_debug);
 #define GST_CAT_DEFAULT gst_nvdec_debug
+
+#define DEFAULT_MAX_DISPLAY_DELAY -1
+
+enum
+{
+  PROP_0,
+  PROP_MAX_DISPLAY_DELAY,
+};
 
 #ifdef HAVE_NVCODEC_GST_GL
 #define SUPPORTED_GL_APIS (GST_GL_API_OPENGL | GST_GL_API_OPENGL3 | GST_GL_API_GLES2)
@@ -46,7 +55,7 @@ gst_nvdec_copy_device_to_gl (GstNvDec * nvdec,
 #endif
 
 static gboolean
-gst_nvdec_copy_device_to_system (GstNvDec * nvdec,
+gst_nvdec_copy_device_to_memory (GstNvDec * nvdec,
     CUVIDPARSERDISPINFO * dispinfo, GstBuffer * output_buffer);
 
 #ifdef HAVE_NVCODEC_GST_GL
@@ -166,10 +175,46 @@ static gboolean gst_nvdec_ensure_gl_context (GstNvDec * nvdec);
 G_DEFINE_ABSTRACT_TYPE (GstNvDec, gst_nvdec, GST_TYPE_VIDEO_DECODER);
 
 static void
+gst_nv_dec_set_property (GObject * object, guint prop_id, const GValue * value,
+    GParamSpec * pspec)
+{
+  GstNvDec *nvdec = GST_NVDEC (object);
+
+  switch (prop_id) {
+    case PROP_MAX_DISPLAY_DELAY:
+      nvdec->max_display_delay = g_value_get_int (value);
+      break;
+    default:
+      G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
+      break;
+  }
+}
+
+static void
+gst_nv_dec_get_property (GObject * object, guint prop_id, GValue * value,
+    GParamSpec * pspec)
+{
+  GstNvDec *nvdec = GST_NVDEC (object);
+
+  switch (prop_id) {
+    case PROP_MAX_DISPLAY_DELAY:
+      g_value_set_int (value, nvdec->max_display_delay);
+      break;
+    default:
+      G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
+      break;
+  }
+}
+
+static void
 gst_nvdec_class_init (GstNvDecClass * klass)
 {
+  GObjectClass *gobject_class = G_OBJECT_CLASS (klass);
   GstVideoDecoderClass *video_decoder_class = GST_VIDEO_DECODER_CLASS (klass);
   GstElementClass *element_class = GST_ELEMENT_CLASS (klass);
+
+  gobject_class->set_property = gst_nv_dec_set_property;
+  gobject_class->get_property = gst_nv_dec_get_property;
 
   video_decoder_class->open = GST_DEBUG_FUNCPTR (gst_nvdec_open);
   video_decoder_class->start = GST_DEBUG_FUNCPTR (gst_nvdec_start);
@@ -188,11 +233,24 @@ gst_nvdec_class_init (GstNvDecClass * klass)
 
   element_class->set_context = GST_DEBUG_FUNCPTR (gst_nvdec_set_context);
   gst_type_mark_as_plugin_api (GST_TYPE_NVDEC, 0);
+
+  /**
+   * GstNvDec:max-display-delay:
+   *
+   * Since: 1.20
+   */
+  g_object_class_install_property (gobject_class, PROP_MAX_DISPLAY_DELAY,
+      g_param_spec_int ("max-display-delay", "Max Display Delay",
+          "Improves pipelining of decode with display, 0 means no delay "
+          "(auto = -1)",
+          -1, G_MAXINT, DEFAULT_MAX_DISPLAY_DELAY,
+          G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
 }
 
 static void
 gst_nvdec_init (GstNvDec * nvdec)
 {
+  nvdec->max_display_delay = DEFAULT_MAX_DISPLAY_DELAY;
   gst_video_decoder_set_packetized (GST_VIDEO_DECODER (nvdec), TRUE);
   gst_video_decoder_set_needs_format (GST_VIDEO_DECODER (nvdec), TRUE);
 }
@@ -260,6 +318,33 @@ calculate_num_decode_surface (cudaVideoCodec codec, guint width, guint height)
   return 8;
 }
 
+static guint
+gst_nvdec_get_max_display_delay (GstNvDec * nvdec)
+{
+  return nvdec->max_display_delay >= 0 ? nvdec->max_display_delay :
+      (nvdec->is_live ? 0 : 4);
+}
+
+static gint64
+gst_nvdec_get_latency (GstNvDec * nvdec)
+{
+  gint fps_n, fps_d;
+
+  if (!nvdec->input_state)
+    return 0;
+  fps_n = GST_VIDEO_INFO_FPS_N (&nvdec->input_state->info);
+  fps_d = GST_VIDEO_INFO_FPS_D (&nvdec->input_state->info);
+
+  /* We assume 25 fps if the input framerate is invalid */
+  if (fps_n < 1 || fps_d < 1) {
+    fps_n = 25;
+    fps_d = 1;
+  }
+
+  return gst_util_uint64_scale_int ((nvdec->num_decode_surface +
+          gst_nvdec_get_max_display_delay (nvdec)) * GST_SECOND, fps_d, fps_n);
+}
+
 /* 0: fail, 1: succeeded, > 1: override dpb size of parser
  * (set by CUVIDPARSERPARAMS::ulMaxNumDecodeSurfaces while creating parser) */
 static gint CUDAAPI
@@ -274,9 +359,10 @@ parser_sequence_callback (GstNvDec * nvdec, CUVIDEOFORMAT * format)
   GstCudaContext *ctx = nvdec->cuda_ctx;
   GstStructure *in_s = NULL;
   gboolean updata = FALSE;
-  gint num_decode_surface = 0;
   guint major_api_ver = 0;
+  guint64 curr_latency, old_latency;
 
+  old_latency = gst_nvdec_get_latency (nvdec);
   width = format->display_area.right - format->display_area.left;
   height = format->display_area.bottom - format->display_area.top;
 
@@ -405,16 +491,23 @@ parser_sequence_callback (GstNvDec * nvdec, CUVIDEOFORMAT * format)
 
   if (gst_cuvid_get_api_version (&major_api_ver, NULL) && major_api_ver >= 9) {
     /* min_num_decode_surfaces was introduced in nvcodec sdk 9.0 header */
-    num_decode_surface = format->min_num_decode_surfaces;
+    nvdec->num_decode_surface = format->min_num_decode_surfaces;
 
-    GST_DEBUG_OBJECT (nvdec, "Num decode surface: %d", num_decode_surface);
+    GST_DEBUG_OBJECT (nvdec,
+        "Num decode surface: %d", nvdec->num_decode_surface);
   } else {
-    num_decode_surface =
+    nvdec->num_decode_surface =
         calculate_num_decode_surface (format->codec, width, height);
 
     GST_DEBUG_OBJECT (nvdec,
-        "Calculated num decode surface: %d", num_decode_surface);
+        "Calculated num decode surface: %d", nvdec->num_decode_surface);
   }
+
+  /* Update the latency if it has changed */
+  curr_latency = gst_nvdec_get_latency (nvdec);
+  if (old_latency != curr_latency)
+    gst_video_decoder_set_latency (GST_VIDEO_DECODER (nvdec), curr_latency,
+        curr_latency);
 
   if (!nvdec->decoder || !gst_video_info_is_equal (out_info, &prev_out_info)) {
     updata = TRUE;
@@ -436,7 +529,7 @@ parser_sequence_callback (GstNvDec * nvdec, CUVIDEOFORMAT * format)
     GST_DEBUG_OBJECT (nvdec, "creating decoder");
     create_info.ulWidth = width;
     create_info.ulHeight = height;
-    create_info.ulNumDecodeSurfaces = num_decode_surface;
+    create_info.ulNumDecodeSurfaces = nvdec->num_decode_surface;
     create_info.CodecType = format->codec;
     create_info.ChromaFormat = format->chroma_format;
     create_info.ulCreationFlags = cudaVideoCreate_Default;
@@ -475,7 +568,7 @@ parser_sequence_callback (GstNvDec * nvdec, CUVIDEOFORMAT * format)
     }
   }
 
-  return num_decode_surface;
+  return nvdec->num_decode_surface;
 
 error:
   nvdec->last_ret = GST_FLOW_ERROR;
@@ -506,7 +599,6 @@ gst_nvdec_negotiate (GstVideoDecoder * decoder)
   state->caps = gst_video_info_to_caps (&state->info);
   nvdec->mem_type = GST_NVDEC_MEM_TYPE_SYSTEM;
 
-#ifdef HAVE_NVCODEC_GST_GL
   {
     GstCaps *caps;
     caps = gst_pad_get_allowed_caps (GST_VIDEO_DECODER_SRC_PAD (nvdec));
@@ -515,40 +607,67 @@ gst_nvdec_negotiate (GstVideoDecoder * decoder)
     if (!caps || gst_caps_is_any (caps)) {
       GST_DEBUG_OBJECT (nvdec,
           "cannot determine output format, use system memory");
-    } else if (nvdec->gl_display) {
+    } else {
       GstCapsFeatures *features;
       guint size = gst_caps_get_size (caps);
       guint i;
+      gboolean have_cuda = FALSE;
+      gboolean have_gl = FALSE;
 
       for (i = 0; i < size; i++) {
         features = gst_caps_get_features (caps, i);
         if (features && gst_caps_features_contains (features,
-                GST_CAPS_FEATURE_MEMORY_GL_MEMORY)) {
-          GST_DEBUG_OBJECT (nvdec, "found GL memory feature, use gl");
-          nvdec->mem_type = GST_NVDEC_MEM_TYPE_GL;
+                GST_CAPS_FEATURE_MEMORY_CUDA_MEMORY)) {
+          GST_DEBUG_OBJECT (nvdec, "found CUDA memory feature");
+          have_cuda = TRUE;
           break;
         }
+#ifdef HAVE_NVCODEC_GST_GL
+        if (nvdec->gl_display &&
+            features && gst_caps_features_contains (features,
+                GST_CAPS_FEATURE_MEMORY_GL_MEMORY)) {
+          GST_DEBUG_OBJECT (nvdec, "found GL memory feature");
+          have_gl = TRUE;
+        }
+#endif
       }
+
+      if (have_cuda)
+        nvdec->mem_type = GST_NVDEC_MEM_TYPE_CUDA;
+      else if (have_gl)
+        nvdec->mem_type = GST_NVDEC_MEM_TYPE_GL;
     }
     gst_clear_caps (&caps);
   }
 
+#ifdef HAVE_NVCODEC_GST_GL
   if (nvdec->mem_type == GST_NVDEC_MEM_TYPE_GL &&
       !gst_nvdec_ensure_gl_context (nvdec)) {
     GST_WARNING_OBJECT (nvdec,
         "OpenGL context is not CUDA-compatible, fallback to system memory");
     nvdec->mem_type = GST_NVDEC_MEM_TYPE_SYSTEM;
   }
-
-  if (nvdec->mem_type == GST_NVDEC_MEM_TYPE_GL) {
-    gst_caps_set_features (state->caps, 0,
-        gst_caps_features_new (GST_CAPS_FEATURE_MEMORY_GL_MEMORY, NULL));
-    gst_caps_set_simple (state->caps, "texture-target", G_TYPE_STRING,
-        "2D", NULL);
-  } else {
-    GST_DEBUG_OBJECT (nvdec, "use system memory");
-  }
 #endif
+
+  switch (nvdec->mem_type) {
+    case GST_NVDEC_MEM_TYPE_CUDA:
+      GST_DEBUG_OBJECT (nvdec, "use cuda memory");
+      gst_caps_set_features (state->caps, 0,
+          gst_caps_features_new (GST_CAPS_FEATURE_MEMORY_CUDA_MEMORY, NULL));
+      break;
+#ifdef HAVE_NVCODEC_GST_GL
+    case GST_NVDEC_MEM_TYPE_GL:
+      GST_DEBUG_OBJECT (nvdec, "use gl memory");
+      gst_caps_set_features (state->caps, 0,
+          gst_caps_features_new (GST_CAPS_FEATURE_MEMORY_GL_MEMORY, NULL));
+      gst_caps_set_simple (state->caps, "texture-target", G_TYPE_STRING,
+          "2D", NULL);
+      break;
+#endif
+    default:
+      GST_DEBUG_OBJECT (nvdec, "use system memory");
+      break;
+  }
 
   if (nvdec->output_state)
     gst_video_codec_state_unref (nvdec->output_state);
@@ -711,7 +830,7 @@ parser_display_callback (GstNvDec * nvdec, CUVIDPARSERDISPINFO * dispinfo)
   if (!copy_ret)
 #endif
   {
-    copy_ret = gst_nvdec_copy_device_to_system (nvdec, dispinfo, output_buffer);
+    copy_ret = gst_nvdec_copy_device_to_memory (nvdec, dispinfo, output_buffer);
   }
 
   if (!copy_ret) {
@@ -904,6 +1023,7 @@ gst_nvdec_set_format (GstVideoDecoder * decoder, GstVideoCodecState * state)
   GstNvDec *nvdec = GST_NVDEC (decoder);
   GstNvDecClass *klass = GST_NVDEC_GET_CLASS (decoder);
   CUVIDPARSERPARAMS parser_params = { 0, };
+  GstQuery *query;
   gboolean ret = TRUE;
 
   GST_DEBUG_OBJECT (nvdec, "set format");
@@ -916,12 +1036,19 @@ gst_nvdec_set_format (GstVideoDecoder * decoder, GstVideoCodecState * state)
   if (!maybe_destroy_decoder_and_parser (nvdec))
     return FALSE;
 
+  /* Check if pipeline is live */
+  nvdec->is_live = FALSE;
+  query = gst_query_new_latency ();
+  if (gst_pad_peer_query (GST_VIDEO_DECODER_SINK_PAD (decoder), query))
+    gst_query_parse_latency (query, &nvdec->is_live, NULL, NULL);
+  gst_query_unref (query);
+
   parser_params.CodecType = klass->codec_type;
   /* ulMaxNumDecodeSurfaces will be updated by the return value of
    * SequenceCallback */
   parser_params.ulMaxNumDecodeSurfaces = 1;
   parser_params.ulErrorThreshold = 100;
-  parser_params.ulMaxDisplayDelay = 0;
+  parser_params.ulMaxDisplayDelay = gst_nvdec_get_max_display_delay (nvdec);
   parser_params.ulClockRate = GST_SECOND;
   parser_params.pUserData = nvdec;
   parser_params.pfnSequenceCallback =
@@ -953,7 +1080,7 @@ gst_nvdec_set_format (GstVideoDecoder * decoder, GstVideoCodecState * state)
       gst_buffer_replace (&nvdec->codec_data, codec_data);
     }
 
-    /* For all CODEC we get completre picture ... */
+    /* For all CODEC we get complete picture ... */
     nvdec->recv_complete_picture = TRUE;
 
     /* Except for JPEG, for which it depends on the caps */
@@ -1103,7 +1230,7 @@ gst_nvdec_copy_device_to_gl (GstNvDec * nvdec,
 #endif
 
 static gboolean
-gst_nvdec_copy_device_to_system (GstNvDec * nvdec,
+gst_nvdec_copy_device_to_memory (GstNvDec * nvdec,
     CUVIDPARSERDISPINFO * dispinfo, GstBuffer * output_buffer)
 {
   CUVIDPROCPARAMS params = { 0, };
@@ -1113,16 +1240,35 @@ gst_nvdec_copy_device_to_system (GstNvDec * nvdec,
   GstVideoFrame video_frame;
   GstVideoInfo *info = &nvdec->output_state->info;
   gint i;
+  GstMemory *mem;
+  GstCudaMemory *cuda_mem = NULL;
 
   if (!gst_cuda_context_push (nvdec->cuda_ctx)) {
     GST_WARNING_OBJECT (nvdec, "failed to lock CUDA context");
     return FALSE;
   }
 
-  if (!gst_video_frame_map (&video_frame, info, output_buffer, GST_MAP_WRITE)) {
-    GST_ERROR_OBJECT (nvdec, "frame map failure");
-    gst_cuda_context_pop (NULL);
-    return FALSE;
+  if (nvdec->mem_type == GST_NVDEC_MEM_TYPE_CUDA &&
+      (mem = gst_buffer_peek_memory (output_buffer, 0)) &&
+      gst_is_cuda_memory (mem)) {
+    GstCudaMemory *cmem = GST_CUDA_MEMORY_CAST (mem);
+
+    if (cmem->context == nvdec->cuda_ctx ||
+        gst_cuda_context_get_handle (cmem->context) ==
+        gst_cuda_context_get_handle (nvdec->cuda_ctx) ||
+        (gst_cuda_context_can_access_peer (cmem->context, nvdec->cuda_ctx) &&
+            gst_cuda_context_can_access_peer (nvdec->cuda_ctx,
+                cmem->context))) {
+      cuda_mem = cmem;
+    }
+  }
+
+  if (!cuda_mem) {
+    if (!gst_video_frame_map (&video_frame, info, output_buffer, GST_MAP_WRITE)) {
+      GST_ERROR_OBJECT (nvdec, "frame map failure");
+      gst_cuda_context_pop (NULL);
+      return FALSE;
+    }
   }
 
   params.progressive_frame = dispinfo->progressive_frame;
@@ -1139,20 +1285,27 @@ gst_nvdec_copy_device_to_system (GstNvDec * nvdec,
 
   copy_params.srcMemoryType = CU_MEMORYTYPE_DEVICE;
   copy_params.srcPitch = pitch;
-  copy_params.dstMemoryType = CU_MEMORYTYPE_HOST;
-  copy_params.WidthInBytes = GST_VIDEO_INFO_COMP_WIDTH (info, 0)
-      * GST_VIDEO_INFO_COMP_PSTRIDE (info, 0);
+  copy_params.dstMemoryType =
+      cuda_mem ? CU_MEMORYTYPE_DEVICE : CU_MEMORYTYPE_HOST;
 
-  for (i = 0; i < GST_VIDEO_FRAME_N_PLANES (&video_frame); i++) {
+  for (i = 0; i < GST_VIDEO_INFO_N_PLANES (info); i++) {
     copy_params.srcDevice = dptr + (i * pitch * GST_VIDEO_INFO_HEIGHT (info));
-    copy_params.dstHost = GST_VIDEO_FRAME_PLANE_DATA (&video_frame, i);
-    copy_params.dstPitch = GST_VIDEO_FRAME_PLANE_STRIDE (&video_frame, i);
-    copy_params.Height = GST_VIDEO_FRAME_COMP_HEIGHT (&video_frame, i);
+    if (cuda_mem) {
+      copy_params.dstDevice = cuda_mem->data + cuda_mem->offset[i];
+      copy_params.dstPitch = cuda_mem->stride;
+    } else {
+      copy_params.dstHost = GST_VIDEO_FRAME_PLANE_DATA (&video_frame, i);
+      copy_params.dstPitch = GST_VIDEO_FRAME_PLANE_STRIDE (&video_frame, i);
+    }
+    copy_params.WidthInBytes = GST_VIDEO_INFO_COMP_WIDTH (info, i)
+        * GST_VIDEO_INFO_COMP_PSTRIDE (info, i);
+    copy_params.Height = GST_VIDEO_INFO_COMP_HEIGHT (info, i);
 
     if (!gst_cuda_result (CuMemcpy2DAsync (&copy_params, nvdec->cuda_stream))) {
       GST_ERROR_OBJECT (nvdec, "failed to copy %dth plane", i);
       CuvidUnmapVideoFrame (nvdec->decoder, dptr);
-      gst_video_frame_unmap (&video_frame);
+      if (!cuda_mem)
+        gst_video_frame_unmap (&video_frame);
       gst_cuda_context_pop (NULL);
       return FALSE;
     }
@@ -1160,7 +1313,8 @@ gst_nvdec_copy_device_to_system (GstNvDec * nvdec,
 
   gst_cuda_result (CuStreamSynchronize (nvdec->cuda_stream));
 
-  gst_video_frame_unmap (&video_frame);
+  if (!cuda_mem)
+    gst_video_frame_unmap (&video_frame);
 
   if (!gst_cuda_result (CuvidUnmapVideoFrame (nvdec->decoder, dptr)))
     GST_WARNING_OBJECT (nvdec, "failed to unmap video frame");
@@ -1346,13 +1500,9 @@ gst_nvdec_ensure_gl_context (GstNvDec * nvdec)
   return TRUE;
 }
 
-#endif
-
 static gboolean
-gst_nvdec_decide_allocation (GstVideoDecoder * decoder, GstQuery * query)
+gst_nvdec_ensure_gl_pool (GstNvDec * nvdec, GstQuery * query)
 {
-#ifdef HAVE_NVCODEC_GST_GL
-  GstNvDec *nvdec = GST_NVDEC (decoder);
   GstCaps *outcaps;
   GstBufferPool *pool = NULL;
   guint n, size, min, max;
@@ -1360,10 +1510,6 @@ gst_nvdec_decide_allocation (GstVideoDecoder * decoder, GstQuery * query)
   GstStructure *config;
 
   GST_DEBUG_OBJECT (nvdec, "decide allocation");
-
-  if (nvdec->mem_type == GST_NVDEC_MEM_TYPE_SYSTEM)
-    return GST_VIDEO_DECODER_CLASS (gst_nvdec_parent_class)->decide_allocation
-        (decoder, query);
 
   gst_query_parse_allocation (query, &outcaps, NULL);
   n = gst_query_get_n_allocation_pools (query);
@@ -1376,6 +1522,7 @@ gst_nvdec_decide_allocation (GstVideoDecoder * decoder, GstQuery * query)
   }
 
   if (!pool) {
+    GST_DEBUG_OBJECT (nvdec, "no downstream pool, create our pool");
     pool = gst_gl_buffer_pool_new (nvdec->gl_context);
 
     if (outcaps)
@@ -1393,8 +1540,74 @@ gst_nvdec_decide_allocation (GstVideoDecoder * decoder, GstQuery * query)
   else
     gst_query_add_allocation_pool (query, pool, size, min, max);
   gst_object_unref (pool);
+
+  return TRUE;
+}
 #endif
 
+static gboolean
+gst_nvdec_ensure_cuda_pool (GstNvDec * nvdec, GstQuery * query)
+{
+  GstCaps *outcaps;
+  GstBufferPool *pool = NULL;
+  guint n, size, min, max;
+  GstVideoInfo vinfo = { 0, };
+  GstStructure *config;
+
+  gst_query_parse_allocation (query, &outcaps, NULL);
+  n = gst_query_get_n_allocation_pools (query);
+  if (n > 0) {
+    gst_query_parse_nth_allocation_pool (query, 0, &pool, &size, &min, &max);
+    if (pool && !GST_IS_CUDA_BUFFER_POOL (pool)) {
+      gst_object_unref (pool);
+      pool = NULL;
+    }
+  }
+
+  if (!pool) {
+    GST_DEBUG_OBJECT (nvdec, "no downstream pool, create our pool");
+    pool = gst_cuda_buffer_pool_new (nvdec->cuda_ctx);
+
+    if (outcaps)
+      gst_video_info_from_caps (&vinfo, outcaps);
+    size = (guint) vinfo.size;
+    min = max = 0;
+  }
+
+  config = gst_buffer_pool_get_config (pool);
+  gst_buffer_pool_config_set_params (config, outcaps, size, min, max);
+  gst_buffer_pool_config_add_option (config, GST_BUFFER_POOL_OPTION_VIDEO_META);
+  gst_buffer_pool_set_config (pool, config);
+  if (n > 0)
+    gst_query_set_nth_allocation_pool (query, 0, pool, size, min, max);
+  else
+    gst_query_add_allocation_pool (query, pool, size, min, max);
+  gst_object_unref (pool);
+
+  return TRUE;
+}
+
+static gboolean
+gst_nvdec_decide_allocation (GstVideoDecoder * decoder, GstQuery * query)
+{
+  GstNvDec *nvdec = GST_NVDEC (decoder);
+
+  GST_DEBUG_OBJECT (nvdec, "decide allocation");
+
+  if (nvdec->mem_type == GST_NVDEC_MEM_TYPE_SYSTEM)
+    goto done;
+
+#ifdef HAVE_NVCODEC_GST_GL
+  if (nvdec->mem_type == GST_NVDEC_MEM_TYPE_GL) {
+    if (!gst_nvdec_ensure_gl_pool (nvdec, query))
+      return FALSE;
+  } else
+#endif
+  if (!gst_nvdec_ensure_cuda_pool (nvdec, query)) {
+    return FALSE;
+  }
+
+done:
   return GST_VIDEO_DECODER_CLASS (gst_nvdec_parent_class)->decide_allocation
       (decoder, query);
 }

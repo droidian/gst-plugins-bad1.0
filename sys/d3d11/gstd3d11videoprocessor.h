@@ -22,14 +22,11 @@
 
 #include <gst/gst.h>
 #include <gst/video/video.h>
-#include "gstd3d11_fwd.h"
+#include <gst/d3d11/gstd3d11.h>
 
 G_BEGIN_DECLS
 
 typedef struct _GstD3D11VideoProcessor GstD3D11VideoProcessor;
-
-GQuark gst_d3d11_video_processor_input_view_quark (void);
-GQuark gst_d3d11_video_processor_output_view_quark (void);
 
 GstD3D11VideoProcessor * gst_d3d11_video_processor_new  (GstD3D11Device * device,
                                                          guint in_width,
@@ -54,7 +51,13 @@ gboolean  gst_d3d11_video_processor_set_input_color_space  (GstD3D11VideoProcess
 gboolean  gst_d3d11_video_processor_set_output_color_space (GstD3D11VideoProcessor * processor,
                                                             GstVideoColorimetry * color);
 
-#if (DXGI_HEADER_VERSION >= 4)
+#if (GST_D3D11_DXGI_HEADER_VERSION >= 4)
+gboolean  gst_d3d11_video_processor_check_format_conversion (GstD3D11VideoProcessor * processor,
+                                                             DXGI_FORMAT in_format,
+                                                             DXGI_COLOR_SPACE_TYPE in_color_space,
+                                                             DXGI_FORMAT out_format,
+                                                             DXGI_COLOR_SPACE_TYPE out_color_space);
+
 gboolean  gst_d3d11_video_processor_set_input_dxgi_color_space (GstD3D11VideoProcessor * processor,
                                                                 DXGI_COLOR_SPACE_TYPE color_space);
 
@@ -62,7 +65,7 @@ gboolean  gst_d3d11_video_processor_set_output_dxgi_color_space (GstD3D11VideoPr
                                                                 DXGI_COLOR_SPACE_TYPE color_space);
 #endif
 
-#if (DXGI_HEADER_VERSION >= 5)
+#if (GST_D3D11_DXGI_HEADER_VERSION >= 5)
 gboolean  gst_d3d11_video_processor_set_input_hdr10_metadata (GstD3D11VideoProcessor * processor,
                                                               DXGI_HDR_METADATA_HDR10 * hdr10_meta);
 
@@ -75,14 +78,16 @@ gboolean  gst_d3d11_video_processor_create_input_view  (GstD3D11VideoProcessor *
                                                         ID3D11Resource *resource,
                                                         ID3D11VideoProcessorInputView ** view);
 
+ID3D11VideoProcessorInputView * gst_d3d11_video_processor_get_input_view (GstD3D11VideoProcessor * processor,
+                                                                          GstD3D11Memory *mem);
+
 gboolean  gst_d3d11_video_processor_create_output_view (GstD3D11VideoProcessor * processor,
                                                         D3D11_VIDEO_PROCESSOR_OUTPUT_VIEW_DESC * desc,
                                                         ID3D11Resource *resource,
                                                         ID3D11VideoProcessorOutputView ** view);
 
-void      gst_d3d11_video_processor_input_view_release  (ID3D11VideoProcessorInputView * view);
-
-void      gst_d3d11_video_processor_output_view_release (ID3D11VideoProcessorOutputView * view);
+ID3D11VideoProcessorOutputView * gst_d3d11_video_processor_get_output_view (GstD3D11VideoProcessor * processor,
+                                                                            GstD3D11Memory *mem);
 
 gboolean  gst_d3d11_video_processor_render             (GstD3D11VideoProcessor * processor,
                                                         RECT *in_rect,
