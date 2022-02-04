@@ -17,6 +17,49 @@
  * Free Software Foundation, Inc., 51 Franklin St, Fifth Floor,
  * Boston, MA 02110-1301, USA.
  */
+
+/**
+ * SECTION:element-vtenc_h264
+ * @title: vtenc_h264
+ *
+ * Apple VideoToolbox H264 encoder, which can either use HW or a SW
+ * implementation depending on the device.
+ *
+ * ## Example pipeline
+ * |[
+ * gst-launch-1.0 -v videotestsrc ! vtenc_h264 ! qtmux ! filesink location=out.mov
+ * ]| Encode a test video pattern and save it as an MOV file
+ *
+ */
+
+/**
+ * SECTION:element-vtenc_h264_hw
+ * @title: vtenc_h264_hw
+ *
+ * Apple VideoToolbox H264 HW-only encoder (only available on macOS at
+ * present).
+ *
+ * ## Example pipeline
+ * |[
+ * gst-launch-1.0 -v videotestsrc ! vtenc_h264_hw ! qtmux ! filesink location=out.mov
+ * ]| Encode a test video pattern and save it as an MOV file
+ *
+ */
+
+/**
+ * SECTION:element-vtenc_prores
+ * @title: vtenc_prores
+ *
+ * Apple VideoToolbox ProRes encoder
+ *
+ * ## Example pipeline
+ * |[
+ * gst-launch-1.0 -v videotestsrc ! vtenc_prores ! qtmux ! filesink location=out.mov
+ * ]| Encode a test video pattern and save it as an MOV file
+ *
+ * Since: 1.20
+ */
+
 #ifdef HAVE_CONFIG_H
 #include "config.h"
 #endif
@@ -160,8 +203,9 @@ GST_STATIC_CAPS (GST_VIDEO_CAPS_MAKE ("{ NV12, I420 }"));
 #else
 static GstStaticCaps sink_caps =
 GST_STATIC_CAPS (GST_VIDEO_CAPS_MAKE
-    ("{ AYUV64, UYVY, NV12, I420, RGBA64_LE, ARGB64_BE }"));
+    ("{ AYUV64, UYVY, NV12, I420, ARGB64_BE }"));
 #endif
+
 
 static void
 gst_vtenc_base_init (GstVTEncClass * klass)
@@ -173,7 +217,6 @@ gst_vtenc_base_init (GstVTEncClass * klass)
   const int min_height = 1, max_height = G_MAXINT;
   const int min_fps_n = 0, max_fps_n = G_MAXINT;
   const int min_fps_d = 1, max_fps_d = 1;
-  GstPadTemplate *sink_template, *src_template;
   GstCaps *src_caps;
   gchar *longname, *description;
 
@@ -187,9 +230,15 @@ gst_vtenc_base_init (GstVTEncClass * klass)
   g_free (longname);
   g_free (description);
 
-  sink_template = gst_pad_template_new ("sink",
-      GST_PAD_SINK, GST_PAD_ALWAYS, gst_static_caps_get (&sink_caps));
-  gst_element_class_add_pad_template (element_class, sink_template);
+  {
+    GstCaps *caps = gst_static_caps_get (&sink_caps);
+    /* RGBA64_LE is kCVPixelFormatType_64RGBALE, only available on macOS 11.3+ */
+    if (GST_VTUTIL_HAVE_64ARGBALE)
+      caps = gst_vtutil_caps_append_video_format (caps, "RGBA64_LE");
+    gst_element_class_add_pad_template (element_class,
+        gst_pad_template_new ("sink", GST_PAD_SINK, GST_PAD_ALWAYS, caps));
+  }
+
 
   src_caps = gst_caps_new_simple (codec_details->mimetype,
       "width", GST_TYPE_INT_RANGE, min_width, max_width,
@@ -249,9 +298,9 @@ gst_vtenc_base_init (GstVTEncClass * klass)
     default:
       g_assert_not_reached ();
   }
-  src_template = gst_pad_template_new ("src", GST_PAD_SRC, GST_PAD_ALWAYS,
-      src_caps);
-  gst_element_class_add_pad_template (element_class, src_template);
+
+  gst_element_class_add_pad_template (element_class,
+      gst_pad_template_new ("src", GST_PAD_SRC, GST_PAD_ALWAYS, src_caps));
   gst_caps_unref (src_caps);
 }
 
@@ -315,11 +364,24 @@ gst_vtenc_class_init (GstVTEncClass * klass)
           G_MAXUINT64, VTENC_DEFAULT_MAX_KEYFRAME_INTERVAL_DURATION,
           G_PARAM_READWRITE | G_PARAM_CONSTRUCT | G_PARAM_STATIC_STRINGS));
 
-  g_object_class_install_property (gobject_class, PROP_PRESERVE_ALPHA,
-      g_param_spec_boolean ("preserve-alpha", "Preserve Video Alpha Values",
-          "Video alpha values (non opaque) need to be perserved.",
-          VTENC_DEFAULT_PRESERVE_ALPHA,
-          G_PARAM_READWRITE | G_PARAM_CONSTRUCT | G_PARAM_STATIC_STRINGS));
+  /*
+   * H264 doesn't support alpha components, so only add the property for prores
+   */
+  if (g_strcmp0 (G_OBJECT_CLASS_NAME (klass), "vtenc_prores") == 0) {
+    /**
+     * vtenc_prores:preserve-alpha
+     *
+     * Preserve non-opaque video alpha values from the input video when
+     * compressing, else treat all alpha component as opaque.
+     *
+     * Since: 1.20
+     */
+    g_object_class_install_property (gobject_class, PROP_PRESERVE_ALPHA,
+        g_param_spec_boolean ("preserve-alpha", "Preserve Video Alpha Values",
+            "Video alpha values (non opaque) need to be preserved",
+            VTENC_DEFAULT_PRESERVE_ALPHA,
+            G_PARAM_READWRITE | G_PARAM_CONSTRUCT | G_PARAM_STATIC_STRINGS));
+  }
 }
 
 static void
@@ -1585,7 +1647,11 @@ gst_vtenc_encode_frame (GstVTEnc * self, GstVideoCodecFrame * frame)
           pixel_format_type = kCVPixelFormatType_4444AYpCbCr16;
           break;
         case GST_VIDEO_FORMAT_RGBA64_LE:
-          pixel_format_type = kCVPixelFormatType_64RGBALE;
+          if (GST_VTUTIL_HAVE_64ARGBALE)
+            pixel_format_type = kCVPixelFormatType_64RGBALE;
+          else
+            /* Codepath will never be hit on macOS older than Big Sur (11.3) */
+            g_assert_not_reached ();
           break;
         case GST_VIDEO_FORMAT_I420:
           pixel_format_type = kCVPixelFormatType_420YpCbCr8Planar;
