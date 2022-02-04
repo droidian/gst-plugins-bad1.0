@@ -1,5 +1,5 @@
-/* Copyright (C) <2018, 2019> Philippe Normand <philn@igalia.com>
- * Copyright (C) <2018, 2019> Žan Doberšek <zdobersek@igalia.com>
+/* GStreamer
+ * Copyright (C) 2017 Matthew Waters <matthew@centricular.com>
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -17,8 +17,19 @@
  * Boston, MA 02110-1301, USA.
  */
 
-#pragma once
+#ifdef HAVE_CONFIG_H
+#include "config.h"
+#endif
 
-#include <gst/gst.h>
+#include <gst/webrtc/webrtc_fwd.h>
 
-const gchar *gst_wpe_get_uninstalled_extension_path (void);
+/**
+ * gst_webrtc_error_quark:
+ *
+ * Since: 1.20
+ */
+GQuark
+gst_webrtc_error_quark (void)
+{
+  return g_quark_from_static_string ("gst-webrtc-error-quark");
+}
