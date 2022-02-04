@@ -137,7 +137,8 @@ Multi-Arch: same
 Pre-Depends: ${misc:Pre-Depends}
 Depends: ${misc:Depends},
          ${shlibs:Depends},
-         gstreamer1.0-plugins-base,
+         gstreamer1.0-plugins-base (>= 1.20.0),
+         gstreamer1.0-plugins-good (>= 1.20.0),
          libgstreamer-plugins-bad1.0-0 (= ${binary:Version}),
 Provides: gstreamer1.0-plugins-bad-videoparsers,
           gstreamer1.0-plugins-bad-faad,

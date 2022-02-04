@@ -1,3 +1,11 @@
+gst-plugins-bad1.0 (1.20.0-2) unstable; urgency=medium
+
+  * debian/control:
+    + Let gstreamer1.0-plugins-bad depend on gstreamer1.0-plugins-good as some
+      plugins in the former require plugins from the latter.
+
+ -- Sebastian Dröge <slomo@debian.org>  Fri, 04 Feb 2022 10:27:30 +0200
+
 gst-plugins-bad1.0 (1.20.0-1) unstable; urgency=medium
 
   * New upstream release.
