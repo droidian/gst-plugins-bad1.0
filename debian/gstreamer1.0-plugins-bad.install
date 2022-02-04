@@ -53,7 +53,6 @@ debian/tmp/usr/lib/*/gstreamer-1.0/libgstkate.so
 debian/tmp/usr/lib/*/gstreamer-1.0/libgstjpegformat.so
 debian/tmp/usr/lib/*/gstreamer-1.0/libgstjp2kdecimator.so
 debian/tmp/usr/lib/*/gstreamer-1.0/libgstladspa.so
-debian/tmp/usr/lib/*/gstreamer-1.0/libgstldac.so
 debian/tmp/usr/lib/*/gstreamer-1.0/libgstlegacyrawparse.so
 debian/tmp/usr/lib/*/gstreamer-1.0/libgstde265.so
 debian/tmp/usr/lib/*/gstreamer-1.0/libgstlv2.so
