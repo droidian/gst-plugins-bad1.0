@@ -3,7 +3,7 @@ gst-plugins-bad1.0 (1.20.0-4) unstable; urgency=medium
   [ Laurent Bigonville ]
   * debian/control,
     debian/patches/03-openaptx-Support-libfreeaptx.patch:
-    + Use libopenaptx instead of libfreeaptx.
+    + Use libfreeaptx instead of libopenaptx.
 
  -- Sebastian Dröge <slomo@debian.org>  Wed, 16 Feb 2022 09:13:55 +0200
 
