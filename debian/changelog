@@ -1,10 +1,11 @@
-gst-plugins-bad1.0 (1.20.0-5) UNRELEASED; urgency=medium
+gst-plugins-bad1.0 (1.20.1-1) unstable; urgency=medium
 
   * debian/control,
     debian/gstreamer1.0-plugins-bad.install:
     + Ship openh264 plugin (Closes: #1005226).
+  * New upstream bugfix release.
 
- -- Sebastian Dröge <slomo@debian.org>  Mon, 28 Feb 2022 11:52:37 +0200
+ -- Sebastian Dröge <slomo@debian.org>  Mon, 14 Mar 2022 17:03:33 +0200
 
 gst-plugins-bad1.0 (1.20.0-4) unstable; urgency=medium
 
