@@ -1,5 +1,5 @@
 project('gst-plugins-bad', 'c', 'cpp',
-  version : '1.20.0',
+  version : '1.20.1',
   meson_version : '>= 0.59',
   default_options : [ 'warning_level=1',
                       'buildtype=debugoptimized' ])
@@ -375,6 +375,20 @@ gio_dep = dependency('gio-2.0', fallback: ['glib', 'libgio_dep'])
 x11_dep = dependency('x11', required : get_option('x11'))
 if x11_dep.found()
   cdata.set('HAVE_X11', 1)
+endif
+
+#
+# Solaris and Illumos distros split a lot of networking-related code
+# into '-lsocket -lnsl'.  Anything that calls socketpair(), getifaddr(),
+# etc. probably needs to include network_deps
+#
+if host_machine.system() == 'sunos'
+  network_deps = [
+    cc.find_library('socket', required: false),
+    cc.find_library('nsl',    required: false)
+  ]
+else
+  network_deps = []
 endif
 
 if host_machine.system() == 'windows'
