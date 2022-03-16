@@ -24,6 +24,7 @@
 #include "fwd.h"
 #include "gstwebrtcice.h"
 #include "transportstream.h"
+#include "webrtcsctptransport.h"
 
 G_BEGIN_DECLS
 
@@ -42,10 +43,10 @@ struct _GstWebRTCBinPad
 {
   GstGhostPad           parent;
 
-  guint                 mlineindex;
-
   GstWebRTCRTPTransceiver *trans;
   gulong                block_id;
+
+  guint32               last_ssrc;
 
   GstCaps              *received_caps;
 };
@@ -97,16 +98,18 @@ struct _GstWebRTCBinPrivate
 
   gboolean bundle;
   GPtrArray *transceivers;
-  GArray *session_mid_map;
   GPtrArray *transports;
   GPtrArray *data_channels;
   /* list of data channels we've received a sctp stream for but no data
    * channel protocol for */
   GPtrArray *pending_data_channels;
+  /* dc_lock protects data_channels and pending_data_channels */
+  /* lock ordering is pc_lock first, then dc_lock */
+  GMutex dc_lock;
 
   guint jb_latency;
 
-  GstWebRTCSCTPTransport *sctp_transport;
+  WebRTCSCTPTransport *sctp_transport;
   TransportStream *data_channel_transport;
 
   GstWebRTCICE *ice;
@@ -140,10 +143,10 @@ struct _GstWebRTCBinPrivate
   GstWebRTCSessionDescription *last_generated_offer;
   GstWebRTCSessionDescription *last_generated_answer;
 
-  GstStructure *stats;
+  gboolean tos_attached;
 };
 
-typedef void (*GstWebRTCBinFunc) (GstWebRTCBin * webrtc, gpointer data);
+typedef GstStructure *(*GstWebRTCBinFunc) (GstWebRTCBin * webrtc, gpointer data);
 
 typedef struct
 {

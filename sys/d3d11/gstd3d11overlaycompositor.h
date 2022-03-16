@@ -22,7 +22,7 @@
 
 #include <gst/gst.h>
 #include <gst/video/video.h>
-#include "gstd3d11_fwd.h"
+#include <gst/d3d11/gstd3d11.h>
 
 G_BEGIN_DECLS
 
@@ -38,8 +38,8 @@ gboolean                    gst_d3d11_overlay_compositor_upload (GstD3D11Overlay
 
 void                        gst_d3d11_overlay_compositor_free_overlays (GstD3D11OverlayCompositor * compositor);
 
-gboolean                    gst_d3d11_overlay_compositor_update_rect (GstD3D11OverlayCompositor * compositor,
-                                                                      RECT *rect);
+gboolean                    gst_d3d11_overlay_compositor_update_viewport (GstD3D11OverlayCompositor * compositor,
+                                                                          D3D11_VIEWPORT * viewport);
 
 gboolean                    gst_d3d11_overlay_compositor_draw (GstD3D11OverlayCompositor * compositor,
                                                                ID3D11RenderTargetView *rtv[GST_VIDEO_MAX_PLANES]);

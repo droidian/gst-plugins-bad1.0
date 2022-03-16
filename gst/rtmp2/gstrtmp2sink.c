@@ -38,6 +38,7 @@
 #include "config.h"
 #endif
 
+#include "gstrtmp2elements.h"
 #include "gstrtmp2sink.h"
 
 #include "gstrtmp2locationhandler.h"
@@ -149,9 +150,7 @@ enum
   PROP_PEAK_KBPS,
   PROP_CHUNK_SIZE,
   PROP_STATS,
-#if 0
   PROP_STOP_COMMANDS,
-#endif
 };
 
 /* pad templates */
@@ -169,6 +168,8 @@ G_DEFINE_TYPE_WITH_CODE (GstRtmp2Sink, gst_rtmp2_sink, GST_TYPE_BASE_SINK,
     G_IMPLEMENT_INTERFACE (GST_TYPE_URI_HANDLER,
         gst_rtmp2_sink_uri_handler_init);
     G_IMPLEMENT_INTERFACE (GST_TYPE_RTMP_LOCATION_HANDLER, NULL));
+GST_ELEMENT_REGISTER_DEFINE_WITH_CODE (rtmp2sink, "rtmp2sink",
+    GST_RANK_PRIMARY + 1, GST_TYPE_RTMP2_SINK, rtmp2_element_init (plugin));
 
 static void
 gst_rtmp2_sink_class_init (GstRtmp2SinkClass * klass)
@@ -233,20 +234,18 @@ gst_rtmp2_sink_class_init (GstRtmp2SinkClass * klass)
       g_param_spec_boxed ("stats", "Stats", "Retrieve a statistics structure",
           GST_TYPE_STRUCTURE, G_PARAM_READABLE | G_PARAM_STATIC_STRINGS));
 
-#if 0
-  /*
+  /**
    * GstRtmp2Sink:stop-commands:
    *
    * Which commands (if any) to send on EOS event before closing connection
    *
-   * Since: 1.18
+   * Since: 1.20
    */
   g_object_class_install_property (gobject_class, PROP_STOP_COMMANDS,
       g_param_spec_flags ("stop-commands", "Stop commands",
           "RTMP commands to send on EOS event before closing connection",
           GST_TYPE_RTMP_STOP_COMMANDS, GST_RTMP_DEFAULT_STOP_COMMANDS,
           (GParamFlags) (G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS)));
-#endif
 
   gst_type_mark_as_plugin_api (GST_TYPE_RTMP_LOCATION_HANDLER, 0);
   GST_DEBUG_CATEGORY_INIT (gst_rtmp2_sink_debug_category, "rtmp2sink", 0,
@@ -382,13 +381,11 @@ gst_rtmp2_sink_set_property (GObject * object, guint property_id,
       set_chunk_size (self);
       g_mutex_unlock (&self->lock);
       break;
-#if 0
     case PROP_STOP_COMMANDS:
       GST_OBJECT_LOCK (self);
       self->stop_commands = g_value_get_flags (value);
       GST_OBJECT_UNLOCK (self);
       break;
-#endif
     default:
       G_OBJECT_WARN_INVALID_PROPERTY_ID (object, property_id, pspec);
       break;
@@ -486,13 +483,11 @@ gst_rtmp2_sink_get_property (GObject * object, guint property_id,
     case PROP_STATS:
       g_value_take_boxed (value, gst_rtmp2_sink_get_stats (self));
       break;
-#if 0
     case PROP_STOP_COMMANDS:
       GST_OBJECT_LOCK (self);
       g_value_set_flags (value, self->stop_commands);
       GST_OBJECT_UNLOCK (self);
       break;
-#endif
     default:
       G_OBJECT_WARN_INVALID_PROPERTY_ID (object, property_id, pspec);
       break;

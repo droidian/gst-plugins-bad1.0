@@ -27,7 +27,6 @@
 
 #include <gst/gst.h>
 #include "m3u8.h"
-#include "gsthls.h"
 #include <gst/adaptivedemux/gstadaptivedemux.h>
 #if defined(HAVE_OPENSSL)
 #include <openssl/evp.h>
@@ -147,6 +146,10 @@ struct _GstHLSDemux
   GstHLSMasterPlaylist *master;
 
   GstHLSVariantStream  *current_variant;
+  /* The previous variant, used to transition streams over */
+  GstHLSVariantStream  *previous_variant;
+
+  gboolean streams_aware;
 };
 
 struct _GstHLSDemuxClass

@@ -65,6 +65,7 @@ struct _MpegTSBaseStream
 
   GstMpegtsPMTStream *stream;
   GstStream          *stream_object;
+  gboolean            in_collection;
   gchar              *stream_id;
 };
 
@@ -169,6 +170,9 @@ struct _MpegTSBase {
   /* Do not use the PCR stream for timestamp calculation. Useful for
    * streams with broken/invalid PCR streams. */
   gboolean ignore_pcr;
+
+  /* Used for delayed seek events */
+  GstEvent *seek_event;
 };
 
 struct _MpegTSBaseClass {
@@ -180,6 +184,7 @@ struct _MpegTSBaseClass {
   void (*inspect_packet) (MpegTSBase *base, MpegTSPacketizerPacket *packet);
   /* takes ownership of @event */
   gboolean (*push_event) (MpegTSBase *base, GstEvent * event);
+  void (*handle_psi) (MpegTSBase *base, GstMpegtsSection * section);
 
   /* program_started gets called when program's pmt arrives for first time */
   void (*program_started) (MpegTSBase *base, MpegTSBaseProgram *program);
@@ -234,6 +239,8 @@ G_GNUC_INTERNAL MpegTSBaseProgram *mpegts_base_get_program (MpegTSBase * base, g
 G_GNUC_INTERNAL MpegTSBaseProgram *mpegts_base_add_program (MpegTSBase * base, gint program_number, guint16 pmt_pid);
 
 G_GNUC_INTERNAL const GstMpegtsDescriptor *mpegts_get_descriptor_from_stream (MpegTSBaseStream * stream, guint8 tag);
+G_GNUC_INTERNAL const GstMpegtsDescriptor *mpegts_get_descriptor_from_stream_with_extension (MpegTSBaseStream * stream,
+    guint8 tag, guint8 tag_extension);
 G_GNUC_INTERNAL const GstMpegtsDescriptor *mpegts_get_descriptor_from_program (MpegTSBaseProgram * program, guint8 tag);
 
 G_GNUC_INTERNAL gboolean

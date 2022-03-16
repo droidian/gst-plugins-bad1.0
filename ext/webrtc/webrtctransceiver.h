@@ -22,6 +22,7 @@
 
 #include "fwd.h"
 #include <gst/webrtc/rtptransceiver.h>
+#include "gst/webrtc/webrtc-priv.h"
 #include "transportstream.h"
 
 G_BEGIN_DECLS
@@ -39,6 +40,8 @@ struct _WebRTCTransceiver
 
   TransportStream          *stream;
   GstStructure             *local_rtx_ssrc_map;
+  guint                     current_ssrc;
+  GstEvent                 *ssrc_event;
 
   /* Properties */
   GstWebRTCFECType         fec_type;
@@ -46,6 +49,8 @@ struct _WebRTCTransceiver
   gboolean                 do_nack;
 
   GstCaps                  *last_configured_caps;
+
+  gboolean                 mline_locked;
 };
 
 struct _WebRTCTransceiverClass
@@ -61,7 +66,6 @@ void                      webrtc_transceiver_set_transport  (WebRTCTransceiver *
                                                              TransportStream * stream);
 
 GstWebRTCDTLSTransport *  webrtc_transceiver_get_dtls_transport (GstWebRTCRTPTransceiver * trans);
-GstWebRTCDTLSTransport *  webrtc_transceiver_get_rtcp_dtls_transport (GstWebRTCRTPTransceiver * trans);
 
 G_END_DECLS
 
