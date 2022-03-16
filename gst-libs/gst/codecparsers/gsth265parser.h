@@ -1777,7 +1777,7 @@ void    gst_h265_quant_matrix_8x8_get_raster_from_uprightdiagonal (guint8 out_qu
         gst_h265_quant_matrix_8x8_get_raster_from_uprightdiagonal
 
 GST_CODEC_PARSERS_API
-GstH265Profile gst_h265_profile_tier_level_get_profile (GstH265ProfileTierLevel * ptl);
+GstH265Profile gst_h265_profile_tier_level_get_profile (const GstH265ProfileTierLevel * ptl);
 
 GST_CODEC_PARSERS_API
 const gchar * gst_h265_profile_to_string (GstH265Profile profile);
@@ -1807,6 +1807,9 @@ GstBuffer * gst_h265_parser_insert_sei_hevc (GstH265Parser * parser,
                                              guint8 nal_length_size,
                                              GstBuffer * au,
                                              GstMemory * sei);
+
+GST_CODEC_PARSERS_API
+GstH265Profile gst_h265_get_profile_from_sps (GstH265SPS * sps);
 
 G_END_DECLS
 #endif

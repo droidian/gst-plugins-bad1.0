@@ -195,6 +195,88 @@ av1_helper_inverse_recenter (gint r, gint v)
     return r + (v >> 1);
 }
 
+/* Shift down with rounding for use when n >= 0, value >= 0 */
+static guint64
+av1_helper_round_power_of_two (guint64 value, guint16 n)
+{
+  return (value + (((guint64) (1) << n) >> 1)) >> n;
+}
+
+ /* Shift down with rounding for signed integers, for use when n >= 0 */
+static gint64
+av1_helper_round_power_of_two_signed (gint64 value, guint16 n)
+{
+  return (value < 0) ? -((gint64) (av1_helper_round_power_of_two (-value, n)))
+      : (gint64) av1_helper_round_power_of_two (value, n);
+}
+
+static gint
+av1_helper_msb (guint n)
+{
+  int log = 0;
+  guint value = n;
+  int i;
+
+  g_assert (n != 0);
+
+  for (i = 4; i >= 0; --i) {
+    const gint shift = (1 << i);
+    const guint x = value >> shift;
+    if (x != 0) {
+      value = x;
+      log += shift;
+    }
+  }
+  return log;
+}
+
+static const guint16 div_lut[GST_AV1_DIV_LUT_NUM + 1] = {
+  16384, 16320, 16257, 16194, 16132, 16070, 16009, 15948, 15888, 15828, 15768,
+  15709, 15650, 15592, 15534, 15477, 15420, 15364, 15308, 15252, 15197, 15142,
+  15087, 15033, 14980, 14926, 14873, 14821, 14769, 14717, 14665, 14614, 14564,
+  14513, 14463, 14413, 14364, 14315, 14266, 14218, 14170, 14122, 14075, 14028,
+  13981, 13935, 13888, 13843, 13797, 13752, 13707, 13662, 13618, 13574, 13530,
+  13487, 13443, 13400, 13358, 13315, 13273, 13231, 13190, 13148, 13107, 13066,
+  13026, 12985, 12945, 12906, 12866, 12827, 12788, 12749, 12710, 12672, 12633,
+  12596, 12558, 12520, 12483, 12446, 12409, 12373, 12336, 12300, 12264, 12228,
+  12193, 12157, 12122, 12087, 12053, 12018, 11984, 11950, 11916, 11882, 11848,
+  11815, 11782, 11749, 11716, 11683, 11651, 11619, 11586, 11555, 11523, 11491,
+  11460, 11429, 11398, 11367, 11336, 11305, 11275, 11245, 11215, 11185, 11155,
+  11125, 11096, 11067, 11038, 11009, 10980, 10951, 10923, 10894, 10866, 10838,
+  10810, 10782, 10755, 10727, 10700, 10673, 10645, 10618, 10592, 10565, 10538,
+  10512, 10486, 10460, 10434, 10408, 10382, 10356, 10331, 10305, 10280, 10255,
+  10230, 10205, 10180, 10156, 10131, 10107, 10082, 10058, 10034, 10010, 9986,
+  9963, 9939, 9916, 9892, 9869, 9846, 9823, 9800, 9777, 9754, 9732,
+  9709, 9687, 9664, 9642, 9620, 9598, 9576, 9554, 9533, 9511, 9489,
+  9468, 9447, 9425, 9404, 9383, 9362, 9341, 9321, 9300, 9279, 9259,
+  9239, 9218, 9198, 9178, 9158, 9138, 9118, 9098, 9079, 9059, 9039,
+  9020, 9001, 8981, 8962, 8943, 8924, 8905, 8886, 8867, 8849, 8830,
+  8812, 8793, 8775, 8756, 8738, 8720, 8702, 8684, 8666, 8648, 8630,
+  8613, 8595, 8577, 8560, 8542, 8525, 8508, 8490, 8473, 8456, 8439,
+  8422, 8405, 8389, 8372, 8355, 8339, 8322, 8306, 8289, 8273, 8257,
+  8240, 8224, 8208, 8192,
+};
+
+static gint16
+av1_helper_resolve_divisor_32 (guint32 D, gint16 * shift)
+{
+  gint32 f;
+  gint32 e;
+
+  *shift = av1_helper_msb (D);
+  // e is obtained from D after resetting the most significant 1 bit.
+  e = D - ((guint32) 1 << *shift);
+  // Get the most significant DIV_LUT_BITS (8) bits of e into f
+  if (*shift > GST_AV1_DIV_LUT_BITS)
+    f = av1_helper_round_power_of_two (e, *shift - GST_AV1_DIV_LUT_BITS);
+  else
+    f = e << (GST_AV1_DIV_LUT_BITS - *shift);
+  g_assert (f <= GST_AV1_DIV_LUT_NUM);
+  *shift += GST_AV1_DIV_LUT_PREC_BITS;
+  // Use f as lookup into the precomputed table of multipliers
+  return div_lut[f];
+}
+
 /*************************************
  *                                   *
  * Bitstream Functions               *
@@ -293,8 +375,8 @@ av1_bitstreamfn_su (GstBitReader * br, guint8 n, GstAV1ParserResult * retval)
 /* 4.10.7
  *
  * Unsigned encoded integer with maximum number of values n */
-static guint8
-av1_bitstreamfn_ns (GstBitReader * br, guint8 n, GstAV1ParserResult * retval)
+static guint32
+av1_bitstreamfn_ns (GstBitReader * br, guint32 n, GstAV1ParserResult * retval)
 {
   gint w, m, v;
   gint extra_bit;
@@ -438,7 +520,6 @@ av1_parser_init_sequence_header (GstAV1SequenceHeaderOBU * seq_header)
 static void
 gst_av1_parse_reset_state (GstAV1Parser * parser, gboolean free_sps)
 {
-  parser->state.seen_frame_header = 0;
   parser->state.begin_first_frame = FALSE;
 
   parser->state.prev_frame_id = 0;
@@ -487,29 +568,44 @@ gst_av1_parser_reset (GstAV1Parser * parser, gboolean annex_b)
 {
   g_return_if_fail (parser != NULL);
 
-  if (parser->annex_b) {
-    g_assert (parser->temporal_unit_consumed <= parser->temporal_unit_size);
-    if (parser->temporal_unit_consumed < parser->temporal_unit_size)
-      GST_DEBUG ("temporal_unit_consumed: %d, temporal_unit_size:%d, "
-          "discard the left %d bytes for a temporal_unit.",
-          parser->temporal_unit_consumed, parser->temporal_unit_size,
-          parser->temporal_unit_size - parser->temporal_unit_consumed);
+  parser->annex_b = annex_b;
+  if (parser->annex_b)
+    gst_av1_parser_reset_annex_b (parser);
 
-    g_assert (parser->frame_unit_consumed <= parser->frame_unit_size);
-    if (parser->frame_unit_consumed < parser->frame_unit_size)
-      GST_DEBUG (" frame_unit_consumed %d, frame_unit_size: %d "
-          "discard the left %d bytes for a frame_unit.",
-          parser->frame_unit_consumed, parser->frame_unit_size,
-          parser->frame_unit_size - parser->frame_unit_consumed);
-  }
+  gst_av1_parse_reset_state (parser, TRUE);
+}
+
+/**
+ * gst_av1_parser_reset_annex_b:
+ * @parser: the #GstAV1Parser
+ *
+ * Only reset the current #GstAV1Parser's annex b context.
+ * The other part of the state is kept.
+ *
+ * Since: 1.20
+ */
+void
+gst_av1_parser_reset_annex_b (GstAV1Parser * parser)
+{
+  g_return_if_fail (parser != NULL);
+  g_return_if_fail (parser->annex_b);
+
+  if (parser->temporal_unit_consumed < parser->temporal_unit_size)
+    GST_DEBUG ("temporal_unit_consumed: %d, temporal_unit_size:%d, "
+        "discard the left %d bytes for a temporal_unit.",
+        parser->temporal_unit_consumed, parser->temporal_unit_size,
+        parser->temporal_unit_size - parser->temporal_unit_consumed);
+
+  if (parser->frame_unit_consumed < parser->frame_unit_size)
+    GST_DEBUG (" frame_unit_consumed %d, frame_unit_size: %d "
+        "discard the left %d bytes for a frame_unit.",
+        parser->frame_unit_consumed, parser->frame_unit_size,
+        parser->frame_unit_size - parser->frame_unit_consumed);
 
   parser->temporal_unit_consumed = 0;
   parser->temporal_unit_size = 0;
   parser->frame_unit_consumed = 0;
   parser->frame_unit_size = 0;
-  parser->annex_b = annex_b;
-
-  gst_av1_parse_reset_state (parser, TRUE);
 }
 
 /* 5.3.2 */
@@ -615,14 +711,17 @@ gst_av1_parser_identify_one_obu (GstAV1Parser * parser, const guint8 * data,
   annex_b_again:
     last_pos = 0;
 
-    g_assert (*consumed <= size);
+    if (*consumed > size)
+      goto error;
     if (*consumed == size) {
       ret = GST_AV1_PARSER_NO_MORE_DATA;
       goto error;
     }
     gst_bit_reader_init (&br, data + *consumed, size - *consumed);
 
-    g_assert (parser->temporal_unit_consumed <= parser->temporal_unit_size);
+    if (parser->temporal_unit_consumed > parser->temporal_unit_size)
+      goto error;
+
     if (parser->temporal_unit_consumed &&
         parser->temporal_unit_consumed == parser->temporal_unit_size) {
       GST_LOG ("Complete a temporal unit of size %d",
@@ -647,7 +746,9 @@ gst_av1_parser_identify_one_obu (GstAV1Parser * parser, const guint8 * data,
       }
     }
 
-    g_assert (parser->frame_unit_consumed <= parser->frame_unit_size);
+    if (parser->frame_unit_consumed > parser->frame_unit_size)
+      goto error;
+
     if (parser->frame_unit_consumed &&
         parser->frame_unit_consumed == parser->frame_unit_size) {
       GST_LOG ("Complete a frame unit of size %d", parser->frame_unit_size);
@@ -707,7 +808,8 @@ gst_av1_parser_identify_one_obu (GstAV1Parser * parser, const guint8 * data,
     }
   }
 
-  g_assert (*consumed <= size);
+  if (*consumed > size)
+    goto error;
   if (*consumed == size) {
     ret = GST_AV1_PARSER_NO_MORE_DATA;
     goto error;
@@ -722,12 +824,16 @@ gst_av1_parser_identify_one_obu (GstAV1Parser * parser, const guint8 * data,
   GST_LOG ("identify obu type is %d", obu->obu_type);
 
   if (obu->header.obu_has_size_field) {
+    guint size_sz = gst_bit_reader_get_pos (&br) / 8;
+
     obu->obu_size = av1_bitstreamfn_leb128 (&br, &ret);
     if (ret != GST_AV1_PARSER_OK)
       goto error;
 
+    size_sz = gst_bit_reader_get_pos (&br) / 8 - size_sz;
     if (obu_length
-        && obu_length - 1 - obu->header.obu_extention_flag != obu->obu_size) {
+        && obu_length - 1 - obu->header.obu_extention_flag - size_sz !=
+        obu->obu_size) {
       /* If obu_size and obu_length are both present, but inconsistent,
          then the packed bitstream is deemed invalid. */
       ret = GST_AV1_PARSER_BITSTREAM_ERROR;
@@ -1138,7 +1244,7 @@ gst_av1_parser_parse_sequence_header_obu (GstAV1Parser * parser,
         retval = GST_AV1_PARSER_BITSTREAM_ERROR;
         goto error;
       }
-      if (seq_header->operating_points[i].seq_level_idx > GST_AV1_SEQ_LEVEL_4_0) {
+      if (seq_header->operating_points[i].seq_level_idx > GST_AV1_SEQ_LEVEL_3_3) {
         seq_header->operating_points[i].seq_tier = AV1_READ_BIT (br);
       } else {
         seq_header->operating_points[i].seq_tier = 0;
@@ -1187,7 +1293,8 @@ gst_av1_parser_parse_sequence_header_obu (GstAV1Parser * parser,
     }
   }
 
-  /* Let user decide the operatingPoint, move it later
+  /* Let user decide the operatingPoint,
+     implemented by calling gst_av1_parser_set_operating_point()
      operatingPoint = choose_operating_point( )
      operating_point_idc = operating_point_idc[ operatingPoint ] */
 
@@ -1349,7 +1456,7 @@ gst_av1_parser_parse_sequence_header_obu (GstAV1Parser * parser,
   if (parser->state.operating_point < 0 ||
       parser->state.operating_point >
       seq_header->operating_points_cnt_minus_1) {
-    GST_INFO ("Invalid operating_point %d set by user, just use 0",
+    GST_WARNING ("Invalid operating_point %d set by user, just use 0",
         parser->state.operating_point);
     parser->state.operating_point_idc = seq_header->operating_points[0].idc;
   } else {
@@ -1414,7 +1521,7 @@ gst_av1_parse_metadata_itut_t35 (GstAV1Parser * parser, GstBitReader * br,
   if (ret != GST_AV1_PARSER_OK)
     return ret;
 
-  if (itut_t35->itu_t_t35_country_code) {
+  if (itut_t35->itu_t_t35_country_code == 0xFF) {
     itut_t35->itu_t_t35_country_code_extention_byte =
         AV1_READ_BITS_CHECKED (br, 8, &ret);
     if (ret != GST_AV1_PARSER_OK)
@@ -1512,7 +1619,7 @@ gst_av1_parse_metadata_scalability (GstAV1Parser * parser,
 
   if (scalability->spatial_layer_description_present_flag) {
     for (i = 0; i <= scalability->spatial_layers_cnt_minus_1; i++) {
-      scalability->spatial_layer_ref_id[i] = AV1_READ_BIT_CHECKED (br, &ret);
+      scalability->spatial_layer_ref_id[i] = AV1_READ_UINT8_CHECKED (br, &ret);
       if (ret != GST_AV1_PARSER_OK)
         goto error;
     }
@@ -1689,6 +1796,12 @@ gst_av1_parser_parse_metadata_obu (GstAV1Parser * parser, GstAV1OBU * obu,
     goto error;
 
   retval = av1_skip_trailing_bits (parser, &bit_reader, obu);
+  if (retval != GST_AV1_PARSER_OK) {
+    GST_WARNING ("Metadata type %d may have wrong trailings.",
+        metadata->metadata_type);
+    retval = GST_AV1_PARSER_OK;
+  }
+
   return retval;
 
 error:
@@ -2005,7 +2118,8 @@ gst_av1_parse_segmentation_params (GstAV1Parser * parser, GstBitReader * br,
             gint bits_to_read = segmentation_feature_bits[j];
             gint limit = segmentation_feature_max[j];
             if (segmentation_feature_signed[j]) {
-              feature_value = av1_bitstreamfn_su (br, bits_to_read, &retval);
+              feature_value =
+                  av1_bitstreamfn_su (br, 1 + bits_to_read, &retval);
               if (retval != GST_AV1_PARSER_OK)
                 goto error;
 
@@ -2096,7 +2210,6 @@ gst_av1_parse_tile_info (GstAV1Parser * parser, GstBitReader * br,
   gint max_width /* maxWidth */ , max_height /* maxHeight */ ;
   gint size_sb /* sizeSb */ ;
   gint widest_tile_sb /* widestTileSb */ ;
-  gint min_inner_tile_width = G_MAXINT /* min width of non-rightmost tile */ ;
 
   g_assert (parser->seq_header);
   seq_header = parser->seq_header;
@@ -2143,8 +2256,13 @@ gst_av1_parse_tile_info (GstAV1Parser * parser, GstBitReader * br,
     }
     parser->state.mi_col_starts[i] = parser->state.mi_cols;
     parser->state.tile_cols = i;
-    if (parser->state.tile_cols > 1)
-      min_inner_tile_width = tile_width_sb << sb_size;
+
+    while (i >= 1) {
+      tile_info->width_in_sbs_minus_1[i - 1] =
+          ((parser->state.mi_col_starts[i] - parser->state.mi_col_starts[i - 1]
+              + ((1 << sb_shift) - 1)) >> sb_shift) - 1;
+      i--;
+    }
 
     min_log2_tile_rows = MAX (min_log2_tiles - parser->state.tile_cols_log2, 0);
     parser->state.tile_rows_log2 = min_log2_tile_rows;
@@ -2167,6 +2285,12 @@ gst_av1_parse_tile_info (GstAV1Parser * parser, GstBitReader * br,
     }
     parser->state.mi_row_starts[i] = parser->state.mi_rows;
     parser->state.tile_rows = i;
+    while (i >= 1) {
+      tile_info->height_in_sbs_minus_1[i - 1] =
+          ((parser->state.mi_row_starts[i] - parser->state.mi_row_starts[i - 1]
+              + ((1 << sb_shift) - 1)) >> sb_shift) - 1;
+      i--;
+    }
   } else {
     widest_tile_sb = 0;
     start_sb = 0;
@@ -2181,8 +2305,6 @@ gst_av1_parse_tile_info (GstAV1Parser * parser, GstBitReader * br,
       size_sb = tile_info->width_in_sbs_minus_1[i] + 1;
       widest_tile_sb = MAX (size_sb, widest_tile_sb);
       start_sb += size_sb;
-      if (i > 0 && ((size_sb << sb_size) < min_inner_tile_width))
-        min_inner_tile_width = size_sb << sb_size;
     }
     parser->state.mi_col_starts[i] = parser->state.mi_cols;
     parser->state.tile_cols = i;
@@ -2222,20 +2344,13 @@ gst_av1_parse_tile_info (GstAV1Parser * parser, GstBitReader * br,
     if (retval != GST_AV1_PARSER_OK)
       goto error;
 
-    tile_info->tile_size_bytes_minus_1 = AV1_READ_BIT_CHECKED (br, &retval);
+    tile_info->tile_size_bytes_minus_1 = AV1_READ_BITS_CHECKED (br, 2, &retval);
     if (retval != GST_AV1_PARSER_OK)
       goto error;
 
     parser->state.tile_size_bytes = tile_info->tile_size_bytes_minus_1 + 1;
   } else {
     tile_info->context_update_tile_id = 0;
-  }
-
-  if (min_inner_tile_width < (64 << (parser->state.upscaled_width !=
-              parser->state.frame_width))) {
-    GST_INFO ("Minimum tile width requirement not satisfied");
-    retval = GST_AV1_PARSER_BITSTREAM_ERROR;
-    goto error;
   }
 
   memcpy (tile_info->mi_col_starts, parser->state.mi_col_starts,
@@ -2270,13 +2385,8 @@ gst_av1_parse_loop_filter_params (GstAV1Parser * parser,
   lf_params = &frame_header->loop_filter_params;
 
   if (frame_header->coded_lossless || frame_header->allow_intrabc) {
-    lf_params->loop_filter_delta_enabled = 0;
-    lf_params->loop_filter_delta_update = 0;
-    lf_params->loop_filter_sharpness = 0;
     lf_params->loop_filter_level[0] = 0;
     lf_params->loop_filter_level[1] = 0;
-    lf_params->loop_filter_level[2] = 0;
-    lf_params->loop_filter_level[3] = 0;
     lf_params->loop_filter_ref_deltas[GST_AV1_REF_INTRA_FRAME] = 1;
     lf_params->loop_filter_ref_deltas[GST_AV1_REF_LAST_FRAME] = 0;
     lf_params->loop_filter_ref_deltas[GST_AV1_REF_LAST2_FRAME] = 0;
@@ -2289,58 +2399,6 @@ gst_av1_parse_loop_filter_params (GstAV1Parser * parser,
       lf_params->loop_filter_mode_deltas[i] = 0;
 
     goto success;
-  }
-
-  lf_params->loop_filter_delta_enabled = 0;
-  lf_params->loop_filter_delta_update = 0;
-  lf_params->loop_filter_sharpness = 0;
-  lf_params->loop_filter_level[0] = 0;
-  lf_params->loop_filter_level[1] = 0;
-  lf_params->loop_filter_level[2] = 0;
-  lf_params->loop_filter_level[3] = 0;
-  if (frame_header->primary_ref_frame != GST_AV1_PRIMARY_REF_NONE) {
-    /* Copy it from prime_ref */
-    GstAV1LoopFilterParams *ref_lf_params =
-        &parser->state.ref_info.entry[frame_header->
-        ref_frame_idx[frame_header->primary_ref_frame]].ref_lf_params;
-
-    g_assert (parser->state.ref_info.
-        entry[frame_header->ref_frame_idx[frame_header->primary_ref_frame]].
-        ref_valid);
-    lf_params->loop_filter_ref_deltas[GST_AV1_REF_INTRA_FRAME] =
-        ref_lf_params->loop_filter_ref_deltas[GST_AV1_REF_INTRA_FRAME];
-    lf_params->loop_filter_ref_deltas[GST_AV1_REF_LAST_FRAME] =
-        ref_lf_params->loop_filter_ref_deltas[GST_AV1_REF_LAST_FRAME];
-    lf_params->loop_filter_ref_deltas[GST_AV1_REF_LAST2_FRAME] =
-        ref_lf_params->loop_filter_ref_deltas[GST_AV1_REF_LAST2_FRAME];
-    lf_params->loop_filter_ref_deltas[GST_AV1_REF_LAST3_FRAME] =
-        ref_lf_params->loop_filter_ref_deltas[GST_AV1_REF_LAST3_FRAME];
-    lf_params->loop_filter_ref_deltas[GST_AV1_REF_BWDREF_FRAME] =
-        ref_lf_params->loop_filter_ref_deltas[GST_AV1_REF_BWDREF_FRAME];
-    lf_params->loop_filter_ref_deltas[GST_AV1_REF_GOLDEN_FRAME] =
-        ref_lf_params->loop_filter_ref_deltas[GST_AV1_REF_GOLDEN_FRAME];
-    lf_params->loop_filter_ref_deltas[GST_AV1_REF_ALTREF2_FRAME] =
-        ref_lf_params->loop_filter_ref_deltas[GST_AV1_REF_ALTREF2_FRAME];
-    lf_params->loop_filter_ref_deltas[GST_AV1_REF_ALTREF_FRAME] =
-        ref_lf_params->loop_filter_ref_deltas[GST_AV1_REF_ALTREF_FRAME];
-    for (i = 0; i < 2; i++)
-      lf_params->loop_filter_mode_deltas[i] =
-          ref_lf_params->loop_filter_mode_deltas[i];
-  } else {
-    /* Set default value */
-    lf_params->loop_filter_ref_deltas[GST_AV1_REF_INTRA_FRAME] = 1;
-    lf_params->loop_filter_ref_deltas[GST_AV1_REF_LAST_FRAME] = 0;
-    lf_params->loop_filter_ref_deltas[GST_AV1_REF_LAST2_FRAME] =
-        lf_params->loop_filter_ref_deltas[GST_AV1_REF_LAST_FRAME];
-    lf_params->loop_filter_ref_deltas[GST_AV1_REF_LAST3_FRAME] =
-        lf_params->loop_filter_ref_deltas[GST_AV1_REF_LAST_FRAME];
-    lf_params->loop_filter_ref_deltas[GST_AV1_REF_BWDREF_FRAME] =
-        lf_params->loop_filter_ref_deltas[GST_AV1_REF_LAST_FRAME];
-    lf_params->loop_filter_ref_deltas[GST_AV1_REF_GOLDEN_FRAME] = -1;
-    lf_params->loop_filter_ref_deltas[GST_AV1_REF_ALTREF2_FRAME] = -1;
-    lf_params->loop_filter_ref_deltas[GST_AV1_REF_ALTREF_FRAME] = -1;
-    for (i = 0; i < 2; i++)
-      lf_params->loop_filter_mode_deltas[i] = 0;
   }
 
   if (AV1_REMAINING_BITS (br) < 6 + 6) {
@@ -2386,8 +2444,7 @@ gst_av1_parse_loop_filter_params (GstAV1Parser * parser,
               av1_bitstreamfn_su (br, 7, &retval);
           if (retval != GST_AV1_PARSER_OK)
             goto error;
-        } else
-          lf_params->loop_filter_ref_deltas[i] = 0;
+        }
       }
       for (i = 0; i < 2; i++) {
         update_mode_deltas = AV1_READ_BIT_CHECKED (br, &retval);
@@ -2399,8 +2456,7 @@ gst_av1_parse_loop_filter_params (GstAV1Parser * parser,
               av1_bitstreamfn_su (br, 7, &retval);
           if (retval != GST_AV1_PARSER_OK)
             goto error;
-        } else
-          lf_params->loop_filter_mode_deltas[i] = 0;
+        }
       }
     }
   }
@@ -2546,9 +2602,9 @@ gst_av1_parse_loop_restoration_params (GstAV1Parser * parser,
 
   if (frame_header->all_lossless || frame_header->allow_intrabc
       || !seq_header->enable_restoration) {
-    lr_params->frame_restoration_type[0] = GST_AV1_FRAME_RESTORE_NONE;
-    lr_params->frame_restoration_type[0] = GST_AV1_FRAME_RESTORE_NONE;
-    lr_params->frame_restoration_type[0] = GST_AV1_FRAME_RESTORE_NONE;
+    for (i = 0; i < GST_AV1_MAX_NUM_PLANES; i++)
+      lr_params->frame_restoration_type[i] = GST_AV1_FRAME_RESTORE_NONE;
+
     lr_params->uses_lr = 0;
     goto success;
   }
@@ -2851,6 +2907,66 @@ gst_av1_parse_global_param (GstAV1Parser * parser,
   return GST_AV1_PARSER_OK;
 }
 
+static gboolean
+gst_av1_parser_is_shear_params_valid (gint32 gm_params[6])
+{
+  const gint32 *mat = gm_params;
+  gint16 alpha, beta, gamma, delta;
+  gint16 shift;
+  gint16 y;
+  gint16 v;
+  guint i;
+  gboolean default_warp_params;
+
+  if (!(mat[2] > 0))
+    return FALSE;
+
+  default_warp_params = TRUE;
+  for (i = 0; i < 6; i++) {
+    if (gm_params[i] != ((i % 3 == 2) ? 1 << GST_AV1_WARPEDMODEL_PREC_BITS : 0)) {
+      default_warp_params = FALSE;
+      break;
+    }
+  }
+  if (default_warp_params)
+    return TRUE;
+
+  alpha = CLAMP (mat[2] - (1 << GST_AV1_WARPEDMODEL_PREC_BITS),
+      G_MININT16, G_MAXINT16);
+  beta = CLAMP (mat[3], G_MININT16, G_MAXINT16);
+  y = av1_helper_resolve_divisor_32 (ABS (mat[2]), &shift)
+      * (mat[2] < 0 ? -1 : 1);
+  v = ((gint64) mat[4] * (1 << GST_AV1_WARPEDMODEL_PREC_BITS)) * y;
+  gamma =
+      CLAMP ((gint) av1_helper_round_power_of_two_signed (v, shift), G_MININT16,
+      G_MAXINT16);
+  v = ((gint64) mat[3] * mat[4]) * y;
+  delta =
+      CLAMP (mat[5] - (gint) av1_helper_round_power_of_two_signed (v,
+          shift) - (1 << GST_AV1_WARPEDMODEL_PREC_BITS), G_MININT16,
+      G_MAXINT16);
+
+  alpha =
+      av1_helper_round_power_of_two_signed (alpha,
+      GST_AV1_WARP_PARAM_REDUCE_BITS) * (1 << GST_AV1_WARP_PARAM_REDUCE_BITS);
+  beta =
+      av1_helper_round_power_of_two_signed (beta,
+      GST_AV1_WARP_PARAM_REDUCE_BITS) * (1 << GST_AV1_WARP_PARAM_REDUCE_BITS);
+  gamma =
+      av1_helper_round_power_of_two_signed (gamma,
+      GST_AV1_WARP_PARAM_REDUCE_BITS) * (1 << GST_AV1_WARP_PARAM_REDUCE_BITS);
+  delta =
+      av1_helper_round_power_of_two_signed (delta,
+      GST_AV1_WARP_PARAM_REDUCE_BITS) * (1 << GST_AV1_WARP_PARAM_REDUCE_BITS);
+
+  if ((4 * ABS (alpha) + 7 * ABS (beta) >= (1 << GST_AV1_WARPEDMODEL_PREC_BITS))
+      || (4 * ABS (gamma) + 4 * ABS (delta) >=
+          (1 << GST_AV1_WARPEDMODEL_PREC_BITS)))
+    return FALSE;
+
+  return TRUE;
+}
+
 /* 5.9.24 */
 static GstAV1ParserResult
 gst_av1_parse_global_motion_params (GstAV1Parser * parser,
@@ -2865,6 +2981,7 @@ gst_av1_parse_global_motion_params (GstAV1Parser * parser,
   /* init value */
   gm_params->gm_type[GST_AV1_REF_INTRA_FRAME] = GST_AV1_WARP_MODEL_IDENTITY;
   for (ref = GST_AV1_REF_LAST_FRAME; ref <= GST_AV1_REF_ALTREF_FRAME; ref++) {
+    gm_params->invalid[ref] = 0;
     gm_params->gm_type[ref] = GST_AV1_WARP_MODEL_IDENTITY;
     for (i = 0; i < 6; i++) {
       gm_params->gm_params[ref][i] =
@@ -2956,6 +3073,10 @@ gst_av1_parse_global_motion_params (GstAV1Parser * parser,
       if (retval != GST_AV1_PARSER_OK)
         goto error;
     }
+
+    if (type <= GST_AV1_WARP_MODEL_AFFINE)
+      gm_params->invalid[ref] =
+          !gst_av1_parser_is_shear_params_valid (gm_params->gm_params[ref]);
   }
 
 success:
@@ -3875,13 +3996,61 @@ gst_av1_parse_uncompressed_frame_header (GstAV1Parser * parser, GstAV1OBU * obu,
     goto error;
   }
 
+  if (frame_header->primary_ref_frame == GST_AV1_PRIMARY_REF_NONE) {
+    /* do something in setup_past_independence() of parser level */
+    gint8 *loop_filter_ref_deltas =
+        frame_header->loop_filter_params.loop_filter_ref_deltas;
+
+    frame_header->loop_filter_params.loop_filter_delta_enabled = 1;
+    loop_filter_ref_deltas[GST_AV1_REF_INTRA_FRAME] = 1;
+    loop_filter_ref_deltas[GST_AV1_REF_LAST_FRAME] = 0;
+    loop_filter_ref_deltas[GST_AV1_REF_LAST2_FRAME] = 0;
+    loop_filter_ref_deltas[GST_AV1_REF_LAST3_FRAME] = 0;
+    loop_filter_ref_deltas[GST_AV1_REF_BWDREF_FRAME] = 0;
+    loop_filter_ref_deltas[GST_AV1_REF_GOLDEN_FRAME] = -1;
+    loop_filter_ref_deltas[GST_AV1_REF_ALTREF_FRAME] = -1;
+    loop_filter_ref_deltas[GST_AV1_REF_ALTREF2_FRAME] = -1;
+    frame_header->loop_filter_params.loop_filter_mode_deltas[0] = 0;
+    frame_header->loop_filter_params.loop_filter_mode_deltas[1] = 0;
+  } else {
+    /* do something in load_previous() of parser level */
+    /*   load_loop_filter_params() */
+    GstAV1LoopFilterParams *ref_lf_params =
+        &parser->state.ref_info.entry[frame_header->
+        ref_frame_idx[frame_header->primary_ref_frame]].ref_lf_params;
+    gint8 *loop_filter_ref_deltas =
+        frame_header->loop_filter_params.loop_filter_ref_deltas;
+
+    /* Copy all from prime_ref */
+    g_assert (parser->state.ref_info.
+        entry[frame_header->ref_frame_idx[frame_header->primary_ref_frame]].
+        ref_valid);
+    loop_filter_ref_deltas[GST_AV1_REF_INTRA_FRAME] =
+        ref_lf_params->loop_filter_ref_deltas[GST_AV1_REF_INTRA_FRAME];
+    loop_filter_ref_deltas[GST_AV1_REF_LAST_FRAME] =
+        ref_lf_params->loop_filter_ref_deltas[GST_AV1_REF_LAST_FRAME];
+    loop_filter_ref_deltas[GST_AV1_REF_LAST2_FRAME] =
+        ref_lf_params->loop_filter_ref_deltas[GST_AV1_REF_LAST2_FRAME];
+    loop_filter_ref_deltas[GST_AV1_REF_LAST3_FRAME] =
+        ref_lf_params->loop_filter_ref_deltas[GST_AV1_REF_LAST3_FRAME];
+    loop_filter_ref_deltas[GST_AV1_REF_BWDREF_FRAME] =
+        ref_lf_params->loop_filter_ref_deltas[GST_AV1_REF_BWDREF_FRAME];
+    loop_filter_ref_deltas[GST_AV1_REF_GOLDEN_FRAME] =
+        ref_lf_params->loop_filter_ref_deltas[GST_AV1_REF_GOLDEN_FRAME];
+    loop_filter_ref_deltas[GST_AV1_REF_ALTREF2_FRAME] =
+        ref_lf_params->loop_filter_ref_deltas[GST_AV1_REF_ALTREF2_FRAME];
+    loop_filter_ref_deltas[GST_AV1_REF_ALTREF_FRAME] =
+        ref_lf_params->loop_filter_ref_deltas[GST_AV1_REF_ALTREF_FRAME];
+    for (i = 0; i < 2; i++)
+      frame_header->loop_filter_params.loop_filter_mode_deltas[i] =
+          ref_lf_params->loop_filter_mode_deltas[i];
+  }
+
   /* @TODO:
      if ( primary_ref_frame == PRIMARY_REF_NONE ) {
      init_non_coeff_cdfs( )
-     setup_past_independence( )
      } else {
      load_cdfs( ref_frame_idx[primary_ref_frame] )
-     load_previous( )
      }
    */
   /* @TODO:
@@ -4253,6 +4422,11 @@ gst_av1_parse_tile_group (GstAV1Parser * parser, GstBitReader * br,
       goto error;
   }
 
+  if (tile_group->tg_end < tile_group->tg_start) {
+    retval = GST_AV1_PARSER_NO_MORE_DATA;
+    goto error;
+  }
+
   if (!gst_bit_reader_skip_to_byte (br)) {
     retval = GST_AV1_PARSER_NO_MORE_DATA;
     goto error;
@@ -4261,6 +4435,7 @@ gst_av1_parse_tile_group (GstAV1Parser * parser, GstBitReader * br,
   end_bit_pos = gst_bit_reader_get_pos (br);
   header_bytes = (end_bit_pos - start_bitpos) / 8;
   sz -= header_bytes;
+
   for (tile_num = tile_group->tg_start; tile_num <= tile_group->tg_end;
       tile_num++) {
     tile_row = tile_num / parser->state.tile_cols;
@@ -4274,8 +4449,13 @@ gst_av1_parse_tile_group (GstAV1Parser * parser, GstBitReader * br,
       if (retval != GST_AV1_PARSER_OK)
         goto error;
       tile_size = tile_size_minus_1 + 1;
-      sz -= tile_size - parser->state.tile_size_bytes;
+      sz -= (tile_size + parser->state.tile_size_bytes);
     }
+
+    tile_group->entry[tile_num].tile_size = tile_size;
+    tile_group->entry[tile_num].tile_offset = gst_bit_reader_get_pos (br) / 8;
+    tile_group->entry[tile_num].tile_row = tile_row;
+    tile_group->entry[tile_num].tile_col = tile_col;
 
     tile_group->entry[tile_num].mi_row_start =
         parser->state.mi_row_starts[tile_row];
@@ -4292,20 +4472,22 @@ gst_av1_parse_tile_group (GstAV1Parser * parser, GstBitReader * br,
      */
 
     /* Skip the real data to the next one */
-    if (!gst_bit_reader_skip (br, tile_size)) {
+    if (tile_num < tile_group->tg_end &&
+        !gst_bit_reader_skip (br, tile_size * 8)) {
       retval = GST_AV1_PARSER_NO_MORE_DATA;
       goto error;
     }
   }
 
-  /* Not implement here, the real decoder process
-     if (tile_group->tg_end == tile_group->num_tiles - 1) {
-     if ( !disable_frame_end_update_cdf ) {
-     frame_end_update_cdf( )
-     }
-     decode_frame_wrapup( )
-     }
-   */
+  if (tile_group->tg_end == tile_group->num_tiles - 1) {
+    /* Not implement here, the real decoder process
+       if ( !disable_frame_end_update_cdf ) {
+       frame_end_update_cdf( )
+       }
+       decode_frame_wrapup( )
+     */
+    parser->state.seen_frame_header = 0;
+  }
 
   return GST_AV1_PARSER_OK;
 
@@ -4355,9 +4537,14 @@ gst_av1_parse_frame_header (GstAV1Parser * parser, GstAV1OBU * obu,
     GstBitReader * bit_reader, GstAV1FrameHeaderOBU * frame_header)
 {
   GstAV1ParserResult ret;
+  guint i;
 
   memset (frame_header, 0, sizeof (*frame_header));
   frame_header->frame_is_intra = 1;
+  frame_header->last_frame_idx = -1;
+  frame_header->gold_frame_idx = -1;
+  for (i = 0; i < GST_AV1_REFS_PER_FRAME; i++)
+    frame_header->ref_frame_idx[i] = -1;
 
   ret = gst_av1_parse_uncompressed_frame_header (parser, obu, bit_reader,
       frame_header);
@@ -4462,8 +4649,34 @@ gst_av1_parser_parse_frame_obu (GstAV1Parser * parser, GstAV1OBU * obu,
     return GST_AV1_PARSER_NO_MORE_DATA;
 
   retval = gst_av1_parse_tile_group (parser, &bit_reader, &(frame->tile_group));
-  parser->state.seen_frame_header = 0;
   return retval;
+}
+
+/**
+ * gst_av1_parser_set_operating_point:
+ * @parser: the #GstAV1Parser
+ * @operating_point: the operating point to set
+ *
+ * Set the operating point to filter OBUs.
+ *
+ * Returns: The #GstAV1ParserResult.
+ *
+ * Since: 1.20
+ */
+GstAV1ParserResult
+gst_av1_parser_set_operating_point (GstAV1Parser * parser,
+    gint32 operating_point)
+{
+  g_return_val_if_fail (parser != NULL, GST_AV1_PARSER_INVALID_OPERATION);
+  g_return_val_if_fail (operating_point >= 0, GST_AV1_PARSER_INVALID_OPERATION);
+
+  if (parser->seq_header &&
+      operating_point > parser->seq_header->operating_points_cnt_minus_1)
+    return GST_AV1_PARSER_INVALID_OPERATION;
+
+  /* Decide whether it is valid when sequence comes. */
+  parser->state.operating_point = operating_point;
+  return GST_AV1_PARSER_OK;
 }
 
 /**

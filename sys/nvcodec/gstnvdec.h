@@ -61,7 +61,8 @@ typedef enum
 {
   GST_NVDEC_MEM_TYPE_SYSTEM = 0,
   GST_NVDEC_MEM_TYPE_GL,
-  /* FIXME: add support CUDA, D3D11 memory */
+  GST_NVDEC_MEM_TYPE_CUDA,
+  /* FIXME: add support D3D11 memory */
 } GstNvDecMemType;
 
 struct _GstNvDec
@@ -73,6 +74,10 @@ struct _GstNvDec
   GstGLContext *gl_context;
   GstGLContext *other_gl_context;
 #endif
+
+  guint num_decode_surface;
+  gint max_display_delay;
+  gboolean is_live;
 
   CUvideoparser parser;
   CUvideodecoder decoder;

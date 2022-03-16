@@ -60,17 +60,18 @@ struct _GstCudaContextClass
 
 GType            gst_cuda_context_get_type    (void);
 
-G_GNUC_INTERNAL
 GstCudaContext * gst_cuda_context_new         (gint device_id);
 
-G_GNUC_INTERNAL
 gboolean         gst_cuda_context_push        (GstCudaContext * ctx);
 
-G_GNUC_INTERNAL
 gboolean         gst_cuda_context_pop         (CUcontext * cuda_ctx);
 
-G_GNUC_INTERNAL
 gpointer         gst_cuda_context_get_handle  (GstCudaContext * ctx);
+
+gint             gst_cuda_context_get_texture_alignment (GstCudaContext * ctx);
+
+gboolean         gst_cuda_context_can_access_peer (GstCudaContext * ctx,
+                                                   GstCudaContext * peer);
 
 G_END_DECLS
 

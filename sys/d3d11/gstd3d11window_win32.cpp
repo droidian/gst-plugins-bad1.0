@@ -24,15 +24,15 @@
 #include "config.h"
 #endif
 
-#include "gstd3d11device.h"
-#include "gstd3d11memory.h"
-#include "gstd3d11utils.h"
 #include "gstd3d11window_win32.h"
+#include <wrl.h>
 
-extern "C" {
+/* *INDENT-OFF* */
+using namespace Microsoft::WRL;
+/* *INDENT-ON* */
+
 GST_DEBUG_CATEGORY_EXTERN (gst_d3d11_window_debug);
 #define GST_CAT_DEFAULT gst_d3d11_window_debug
-}
 
 G_LOCK_DEFINE_STATIC (create_lock);
 
@@ -41,6 +41,8 @@ G_LOCK_DEFINE_STATIC (create_lock);
 
 #define WM_GST_D3D11_FULLSCREEN (WM_USER + 1)
 #define WM_GST_D3D11_CONSTRUCT_INTERNAL_WINDOW (WM_USER + 2)
+#define WM_GST_D3D11_DESTROY_INTERNAL_WINDOW (WM_USER + 3)
+#define WM_GST_D3D11_MOVE_WINDOW (WM_USER + 4)
 
 static LRESULT CALLBACK window_proc (HWND hWnd, UINT uMsg, WPARAM wParam,
     LPARAM lParam);
@@ -71,6 +73,8 @@ struct _GstD3D11WindowWin32
 
   GThread *thread;
 
+  GThread *internal_hwnd_thread;
+
   HWND internal_hwnd;
   HWND external_hwnd;
   GstD3D11WindowWin32OverlayState overlay_state;
@@ -81,10 +85,14 @@ struct _GstD3D11WindowWin32
 
   /* atomic */
   gint pending_fullscreen_count;
+  gint pending_move_window;
 
   /* fullscreen related */
   RECT restore_rect;
   LONG restore_style;
+
+  /* Handle set_render_rectangle */
+  GstVideoRectangle render_rect;
 };
 
 #define gst_d3d11_window_win32_parent_class parent_class
@@ -109,10 +117,8 @@ static GstFlowReturn gst_d3d11_window_win32_present (GstD3D11Window * window,
 static gpointer gst_d3d11_window_win32_thread_func (gpointer data);
 static gboolean
 gst_d3d11_window_win32_create_internal_window (GstD3D11WindowWin32 * self);
-static void gst_d3d11_window_win32_close_internal_window (GstD3D11WindowWin32 *
-    self);
-static void gst_d3d11_window_win32_release_external_handle (GstD3D11WindowWin32
-    * self);
+static void gst_d3d11_window_win32_destroy_internal_window (HWND hwnd);
+static void gst_d3d11_window_win32_release_external_handle (HWND hwnd);
 static void
 gst_d3d11_window_win32_set_window_handle (GstD3D11WindowWin32 * self,
     guintptr handle);
@@ -120,6 +126,11 @@ static void
 gst_d3d11_window_win32_on_resize (GstD3D11Window * window,
     guint width, guint height);
 static void gst_d3d11_window_win32_unprepare (GstD3D11Window * window);
+static void
+gst_d3d11_window_win32_set_render_rectangle (GstD3D11Window * window,
+    const GstVideoRectangle * rect);
+static void gst_d3d11_window_win32_set_title (GstD3D11Window * window,
+    const gchar * title);
 
 static void
 gst_d3d11_window_win32_class_init (GstD3D11WindowWin32Class * klass)
@@ -143,6 +154,10 @@ gst_d3d11_window_win32_class_init (GstD3D11WindowWin32Class * klass)
       GST_DEBUG_FUNCPTR (gst_d3d11_window_win32_on_resize);
   window_class->unprepare =
       GST_DEBUG_FUNCPTR (gst_d3d11_window_win32_unprepare);
+  window_class->set_render_rectangle =
+      GST_DEBUG_FUNCPTR (gst_d3d11_window_win32_set_render_rectangle);
+  window_class->set_title =
+      GST_DEBUG_FUNCPTR (gst_d3d11_window_win32_set_title);
 }
 
 static void
@@ -167,7 +182,7 @@ gst_d3d11_window_win32_constructed (GObject * object)
 
   g_mutex_lock (&self->lock);
   self->loop = g_main_loop_new (self->main_context, FALSE);
-  self->thread = g_thread_new ("GstD3D11WindowWin32Win32",
+  self->thread = g_thread_new ("GstD3D11WindowWin32",
       (GThreadFunc) gst_d3d11_window_win32_thread_func, self);
   while (!g_main_loop_is_running (self->loop))
     g_cond_wait (&self->cond, &self->lock);
@@ -190,7 +205,32 @@ gst_d3d11_window_win32_unprepare (GstD3D11Window * window)
 {
   GstD3D11WindowWin32 *self = GST_D3D11_WINDOW_WIN32 (window);
 
-  gst_d3d11_window_win32_release_external_handle (self);
+  if (self->external_hwnd) {
+    gst_d3d11_window_win32_release_external_handle (self->external_hwnd);
+    RemoveProp (self->internal_hwnd, D3D11_WINDOW_PROP_NAME);
+
+    if (self->internal_hwnd_thread == g_thread_self ()) {
+      /* State changing thread is identical to internal window thread.
+       * window can be closed here */
+
+      GST_INFO_OBJECT (self, "Closing internal window immediately");
+      gst_d3d11_window_win32_destroy_internal_window (self->internal_hwnd);
+    } else {
+      /* We cannot destroy internal window from non-window thread.
+       * and we cannot use synchronously SendMessage() method at this point
+       * since window thread might be wait for current thread and SendMessage()
+       * will be blocked until it's called from window thread.
+       * Instead, posts message so that it can be closed from window thread
+       * asynchronously */
+      GST_INFO_OBJECT (self, "Posting custom destory message");
+      PostMessage (self->internal_hwnd, WM_GST_D3D11_DESTROY_INTERNAL_WINDOW,
+          0, 0);
+    }
+
+    self->external_hwnd = NULL;
+    self->internal_hwnd = NULL;
+    self->internal_hwnd_thread = NULL;
+  }
 
   if (self->loop) {
     g_main_loop_quit (self->loop);
@@ -210,8 +250,53 @@ gst_d3d11_window_win32_unprepare (GstD3D11Window * window)
     g_main_context_unref (self->main_context);
     self->main_context = NULL;
   }
+}
 
-  gst_d3d11_window_win32_close_internal_window (self);
+static void
+gst_d3d11_window_win32_set_render_rectangle (GstD3D11Window * window,
+    const GstVideoRectangle * rect)
+{
+  GstD3D11WindowWin32 *self = GST_D3D11_WINDOW_WIN32 (window);
+
+  if (self->external_hwnd && self->internal_hwnd) {
+    g_atomic_int_add (&self->pending_move_window, 1);
+    self->render_rect = *rect;
+
+    if (self->internal_hwnd_thread == g_thread_self ()) {
+      /* We are on message pumping thread already, handle this synchroniously */
+      SendMessage (self->internal_hwnd, WM_GST_D3D11_MOVE_WINDOW, 0, 0);
+    } else {
+      /* Post message to message pumping thread. Handling HWND specific message
+       * on message pumping thread is not a worst idea in generall */
+      PostMessage (self->internal_hwnd, WM_GST_D3D11_MOVE_WINDOW, 0, 0);
+    }
+  } else {
+    /* XXX: Not sure what's expected behavior if we are drawing on internal
+     * HWND but user wants to specify rectangle.
+     *
+     * - Should we move window to corresponding desktop coordinates ?
+     * - Or should crop correspondingly by modifying viewport of
+     *   render target view of swapchian's backbuffer or so ?
+     * - Or should we ignore set_render_rectangle if we are drawing on
+     *   internal HWND without external HWND ?
+     */
+  }
+}
+
+static void
+gst_d3d11_window_win32_set_title (GstD3D11Window * window, const gchar * title)
+{
+  GstD3D11WindowWin32 *self = GST_D3D11_WINDOW_WIN32 (window);
+
+  /* Do this only when we are rendring on our own HWND */
+  if (!self->external_hwnd && self->internal_hwnd) {
+    gunichar2 *str = g_utf8_to_utf16 (title, -1, nullptr, nullptr, nullptr);
+
+    if (str) {
+      SetWindowTextW (self->internal_hwnd, (LPCWSTR) str);
+      g_free (str);
+    }
+  }
 }
 
 static void
@@ -278,27 +363,10 @@ gst_d3d11_window_win32_thread_func (gpointer data)
 
   g_main_loop_run (self->loop);
 
-  gst_d3d11_window_win32_close_internal_window (self);
-
-  g_main_context_pop_thread_default (self->main_context);
-
-  GST_DEBUG_OBJECT (self, "Exit loop");
-
-  return NULL;
-}
-
-static void
-gst_d3d11_window_win32_close_internal_window (GstD3D11WindowWin32 * self)
-{
-  if (self->internal_hwnd) {
-    RemoveProp (self->internal_hwnd, D3D11_WINDOW_PROP_NAME);
-    ShowWindow (self->internal_hwnd, SW_HIDE);
-    SetParent (self->internal_hwnd, NULL);
-    if (!DestroyWindow (self->internal_hwnd))
-      GST_WARNING ("failed to destroy window %" G_GUINTPTR_FORMAT
-          ", 0x%x", (guintptr) self->internal_hwnd, (guint) GetLastError ());
-    self->internal_hwnd = NULL;
-  }
+  RemoveProp (self->internal_hwnd, D3D11_WINDOW_PROP_NAME);
+  gst_d3d11_window_win32_destroy_internal_window (self->internal_hwnd);
+  self->internal_hwnd = NULL;
+  self->internal_hwnd_thread = NULL;
 
   if (self->msg_source) {
     g_source_destroy (self->msg_source);
@@ -310,6 +378,27 @@ gst_d3d11_window_win32_close_internal_window (GstD3D11WindowWin32 * self)
     g_io_channel_unref (self->msg_io_channel);
     self->msg_io_channel = NULL;
   }
+
+  g_main_context_pop_thread_default (self->main_context);
+
+  GST_DEBUG_OBJECT (self, "Exit loop");
+
+  return NULL;
+}
+
+static void
+gst_d3d11_window_win32_destroy_internal_window (HWND hwnd)
+{
+  if (!hwnd)
+    return;
+
+  SetParent (hwnd, NULL);
+
+  GST_INFO ("Destroying internal window %" G_GUINTPTR_FORMAT, (guintptr) hwnd);
+
+  if (!DestroyWindow (hwnd))
+    GST_WARNING ("failed to destroy window %" G_GUINTPTR_FORMAT
+        ", 0x%x", (guintptr) hwnd, (guint) GetLastError ());
 }
 
 static void
@@ -336,30 +425,27 @@ gst_d3d11_window_win32_set_external_handle (GstD3D11WindowWin32 * self)
 }
 
 static void
-gst_d3d11_window_win32_release_external_handle (GstD3D11WindowWin32 * self)
+gst_d3d11_window_win32_release_external_handle (HWND hwnd)
 {
   WNDPROC external_proc;
 
-  if (!self->external_hwnd)
+  if (!hwnd)
     return;
 
-  external_proc =
-      (WNDPROC) GetProp (self->external_hwnd, EXTERNAL_PROC_PROP_NAME);
-  if (!external_proc)
+  external_proc = (WNDPROC) GetProp (hwnd, EXTERNAL_PROC_PROP_NAME);
+  if (!external_proc) {
+    GST_WARNING ("Failed to get original window procedure");
     return;
-
-  GST_DEBUG_OBJECT (self, "release external window %" G_GUINTPTR_FORMAT
-      ", original window procedure %p", (guintptr) self->external_hwnd,
-      external_proc);
-
-  if (!SetWindowLongPtr (self->external_hwnd,
-      GWLP_WNDPROC, (LONG_PTR) external_proc)) {
-    GST_WARNING_OBJECT (self, "Couldn't restore original window procedure");
   }
 
-  RemoveProp (self->external_hwnd, EXTERNAL_PROC_PROP_NAME);
-  RemoveProp (self->external_hwnd, D3D11_WINDOW_PROP_NAME);
-  self->external_hwnd = NULL;
+  GST_DEBUG ("release external window %" G_GUINTPTR_FORMAT
+      ", original window procedure %p", (guintptr) hwnd, external_proc);
+
+  RemoveProp (hwnd, EXTERNAL_PROC_PROP_NAME);
+  RemoveProp (hwnd, D3D11_WINDOW_PROP_NAME);
+
+  if (!SetWindowLongPtr (hwnd, GWLP_WNDPROC, (LONG_PTR) external_proc))
+    GST_WARNING ("Couldn't restore original window procedure");
 }
 
 static gboolean
@@ -428,6 +514,8 @@ gst_d3d11_window_win32_create_internal_window (GstD3D11WindowWin32 * self)
   GST_LOG_OBJECT (self,
       "Created a internal d3d11 window %p", self->internal_hwnd);
 
+  self->internal_hwnd_thread = g_thread_self ();
+
   return TRUE;
 }
 
@@ -463,7 +551,7 @@ gst_d3d11_window_win32_change_fullscreen_mode_internal (GstD3D11WindowWin32 *
 
     ShowWindow (hwnd, SW_NORMAL);
   } else {
-    IDXGIOutput *output;
+    ComPtr < IDXGIOutput > output;
     DXGI_OUTPUT_DESC output_desc;
     IDXGISwapChain *swap_chain = window->swap_chain;
 
@@ -483,7 +571,6 @@ gst_d3d11_window_win32_change_fullscreen_mode_internal (GstD3D11WindowWin32 *
 
     swap_chain->GetContainingOutput (&output);
     output->GetDesc (&output_desc);
-    output->Release ();
 
     SetWindowPos (hwnd, HWND_TOPMOST,
         output_desc.DesktopCoordinates.left,
@@ -585,8 +672,11 @@ gst_d3d11_window_win32_handle_window_proc (GstD3D11WindowWin32 * self,
       break;
     case WM_CLOSE:
       if (self->internal_hwnd) {
+        RemoveProp (self->internal_hwnd, D3D11_WINDOW_PROP_NAME);
         ShowWindow (self->internal_hwnd, SW_HIDE);
-        gst_d3d11_window_win32_close_internal_window (self);
+        gst_d3d11_window_win32_destroy_internal_window (self->internal_hwnd);
+        self->internal_hwnd = NULL;
+        self->internal_hwnd_thread = NULL;
       }
       break;
     case WM_KEYDOWN:
@@ -602,7 +692,8 @@ gst_d3d11_window_win32_handle_window_proc (GstD3D11WindowWin32 * self,
     case WM_MOUSEMOVE:
       /* To handle mouse event only once, do this only for internal window */
       if (self->internal_hwnd && self->internal_hwnd == hWnd)
-        gst_d3d11_window_win32_on_mouse_event (self, hWnd, uMsg, wParam, lParam);
+        gst_d3d11_window_win32_on_mouse_event (self, hWnd, uMsg, wParam,
+            lParam);
 
       /* DefWindowProc will not chain up mouse event to parent window */
       if (self->external_hwnd && self->external_hwnd != hWnd)
@@ -628,6 +719,27 @@ gst_d3d11_window_win32_handle_window_proc (GstD3D11WindowWin32 * self,
                 GST_D3D11_WINDOW_FULLSCREEN_TOGGLE_MODE_PROPERTY)
             == GST_D3D11_WINDOW_FULLSCREEN_TOGGLE_MODE_PROPERTY)
           gst_d3d11_window_win32_change_fullscreen_mode_internal (self);
+      }
+      break;
+    case WM_GST_D3D11_MOVE_WINDOW:
+      if (g_atomic_int_get (&self->pending_move_window)) {
+        g_atomic_int_set (&self->pending_move_window, 0);
+
+        if (self->internal_hwnd && self->external_hwnd) {
+          if (self->render_rect.w < 0 || self->render_rect.h < 0) {
+            RECT rect;
+
+            /* Reset render rect and back to full-size window */
+            if (GetClientRect (self->external_hwnd, &rect)) {
+              MoveWindow (self->internal_hwnd, 0, 0,
+                  rect.right - rect.left, rect.bottom - rect.top, FALSE);
+            }
+          } else {
+            MoveWindow (self->internal_hwnd, self->render_rect.x,
+                self->render_rect.y, self->render_rect.w, self->render_rect.h,
+                FALSE);
+          }
+        }
       }
       break;
     default:
@@ -668,6 +780,11 @@ window_proc (HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 
     gst_d3d11_window_win32_handle_window_proc (self, hWnd, uMsg, wParam,
         lParam);
+  } else if (uMsg == WM_GST_D3D11_DESTROY_INTERNAL_WINDOW) {
+    GST_INFO ("Handle destroy window message");
+    gst_d3d11_window_win32_destroy_internal_window (hWnd);
+
+    return 0;
   }
 
   if (uMsg == WM_SIZE)
@@ -708,19 +825,28 @@ sub_class_proc (HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
     /* don't need to be chained up to parent window procedure,
      * as this is our custom message */
     return 0;
-  } else if (uMsg == WM_SIZE) {
-    MoveWindow (self->internal_hwnd, 0, 0, LOWORD (lParam), HIWORD (lParam),
-        FALSE);
-  } else if (uMsg == WM_CLOSE || uMsg == WM_DESTROY) {
-    g_mutex_lock (&self->lock);
-    GST_WARNING_OBJECT (self, "external window is closing");
-    gst_d3d11_window_win32_release_external_handle (self);
-    self->external_hwnd = NULL;
-    self->overlay_state = GST_D3D11_WINDOW_WIN32_OVERLAY_STATE_CLOSED;
-    g_mutex_unlock (&self->lock);
-  } else {
-    gst_d3d11_window_win32_handle_window_proc (self, hWnd, uMsg, wParam,
-        lParam);
+  } else if (self) {
+    if (uMsg == WM_SIZE) {
+      MoveWindow (self->internal_hwnd, 0, 0, LOWORD (lParam), HIWORD (lParam),
+          FALSE);
+    } else if (uMsg == WM_CLOSE || uMsg == WM_DESTROY) {
+      g_mutex_lock (&self->lock);
+      GST_WARNING_OBJECT (self, "external window is closing");
+      gst_d3d11_window_win32_release_external_handle (self->external_hwnd);
+      self->external_hwnd = NULL;
+
+      RemoveProp (self->internal_hwnd, D3D11_WINDOW_PROP_NAME);
+      ShowWindow (self->internal_hwnd, SW_HIDE);
+      gst_d3d11_window_win32_destroy_internal_window (self->internal_hwnd);
+      self->internal_hwnd = NULL;
+      self->internal_hwnd_thread = NULL;
+
+      self->overlay_state = GST_D3D11_WINDOW_WIN32_OVERLAY_STATE_CLOSED;
+      g_mutex_unlock (&self->lock);
+    } else {
+      gst_d3d11_window_win32_handle_window_proc (self, hWnd, uMsg, wParam,
+          lParam);
+    }
   }
 
   return CallWindowProc (external_window_proc, hWnd, uMsg, wParam, lParam);
@@ -730,10 +856,10 @@ static void
 gst_d3d11_window_win32_disable_alt_enter (GstD3D11WindowWin32 * self,
     GstD3D11Device * device, IDXGISwapChain * swap_chain, HWND hwnd)
 {
-  IDXGIFactory1 *factory = NULL;
+  ComPtr < IDXGIFactory1 > factory;
   HRESULT hr;
 
-  hr = swap_chain->GetParent (IID_IDXGIFactory1, (void **) &factory);
+  hr = swap_chain->GetParent (IID_PPV_ARGS (&factory));
   if (!gst_d3d11_result (hr, device) || !factory) {
     GST_WARNING_OBJECT (self,
         "Cannot get parent dxgi factory for swapchain %p, hr: 0x%x",
@@ -746,9 +872,62 @@ gst_d3d11_window_win32_disable_alt_enter (GstD3D11WindowWin32 * self,
     GST_WARNING_OBJECT (self,
         "MakeWindowAssociation failure, hr: 0x%x", (guint) hr);
   }
-
-  factory->Release ();
 }
+
+static IDXGISwapChain *
+create_swap_chain (GstD3D11WindowWin32 * self, GstD3D11Device * device,
+    DXGI_SWAP_CHAIN_DESC * desc)
+{
+  HRESULT hr;
+  IDXGISwapChain *swap_chain = NULL;
+  ID3D11Device *device_handle = gst_d3d11_device_get_device_handle (device);
+  IDXGIFactory1 *factory = gst_d3d11_device_get_dxgi_factory_handle (device);
+
+  gst_d3d11_device_lock (device);
+  hr = factory->CreateSwapChain (device_handle, desc, &swap_chain);
+  gst_d3d11_device_unlock (device);
+
+  if (!gst_d3d11_result (hr, device)) {
+    GST_WARNING_OBJECT (self, "Cannot create SwapChain Object: 0x%x",
+        (guint) hr);
+    swap_chain = NULL;
+  }
+
+  return swap_chain;
+}
+
+#if (GST_D3D11_DXGI_HEADER_VERSION >= 2)
+static IDXGISwapChain1 *
+create_swap_chain_for_hwnd (GstD3D11WindowWin32 * self, GstD3D11Device * device,
+    HWND hwnd, DXGI_SWAP_CHAIN_DESC1 * desc,
+    DXGI_SWAP_CHAIN_FULLSCREEN_DESC * fullscreen_desc, IDXGIOutput * output)
+{
+  HRESULT hr;
+  IDXGISwapChain1 *swap_chain = NULL;
+  ID3D11Device *device_handle = gst_d3d11_device_get_device_handle (device);
+  IDXGIFactory1 *factory = gst_d3d11_device_get_dxgi_factory_handle (device);
+  ComPtr < IDXGIFactory2 > factory2;
+
+  hr = factory->QueryInterface (IID_PPV_ARGS (&factory2));
+  if (!gst_d3d11_result (hr, device)) {
+    GST_WARNING_OBJECT (self, "IDXGIFactory2 interface is unavailable");
+    return NULL;
+  }
+
+  gst_d3d11_device_lock (device);
+  hr = factory2->CreateSwapChainForHwnd (device_handle, hwnd, desc,
+      fullscreen_desc, output, &swap_chain);
+  gst_d3d11_device_unlock (device);
+
+  if (!gst_d3d11_result (hr, device)) {
+    GST_WARNING_OBJECT (self, "Cannot create SwapChain Object: 0x%x",
+        (guint) hr);
+    swap_chain = NULL;
+  }
+
+  return swap_chain;
+}
+#endif
 
 static gboolean
 gst_d3d11_window_win32_create_swap_chain (GstD3D11Window * window,
@@ -762,7 +941,7 @@ gst_d3d11_window_win32_create_swap_chain (GstD3D11Window * window,
 
   self->have_swapchain1 = FALSE;
 
-#if (DXGI_HEADER_VERSION >= 2)
+#if (GST_D3D11_DXGI_HEADER_VERSION >= 2)
   {
     DXGI_SWAP_CHAIN_DESC1 desc1 = { 0, };
     desc1.Width = 0;
@@ -784,8 +963,7 @@ gst_d3d11_window_win32_create_swap_chain (GstD3D11Window * window,
     desc1.AlphaMode = DXGI_ALPHA_MODE_UNSPECIFIED;
     desc1.Flags = swapchain_flags;
 
-    new_swapchain = (IDXGISwapChain *)
-        gst_d3d11_device_create_swap_chain_for_hwnd (device,
+    new_swapchain = create_swap_chain_for_hwnd (self, device,
         self->internal_hwnd, &desc1, NULL, NULL);
 
     if (!new_swapchain) {
@@ -820,7 +998,7 @@ gst_d3d11_window_win32_create_swap_chain (GstD3D11Window * window,
     desc.Windowed = TRUE;
     desc.Flags = swapchain_flags;
 
-    new_swapchain = gst_d3d11_device_create_swap_chain (device, &desc);
+    new_swapchain = create_swap_chain (self, device, &desc);
   }
 
   if (!new_swapchain) {
@@ -892,8 +1070,7 @@ gst_d3d11_window_win32_present (GstD3D11Window * window, guint present_flags)
 
     return GST_D3D11_WINDOW_FLOW_CLOSED;
   }
-
-#if (DXGI_HEADER_VERSION >= 2)
+#if (GST_D3D11_DXGI_HEADER_VERSION >= 2)
   if (self->have_swapchain1) {
     IDXGISwapChain1 *swap_chain1 = (IDXGISwapChain1 *) window->swap_chain;
     DXGI_PRESENT_PARAMETERS present_params = { 0, };

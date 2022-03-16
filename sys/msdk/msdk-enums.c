@@ -195,6 +195,46 @@ gst_msdkenc_tune_mode_get_type (void)
   return type;
 }
 
+GType
+gst_msdkenc_transform_skip_get_type (void)
+{
+  static GType type = 0;
+
+  static const GEnumValue values[] = {
+    {MFX_CODINGOPTION_UNKNOWN, "SDK desides what to do", "auto"},
+    {MFX_CODINGOPTION_OFF,
+        "transform_skip_enabled_flag will be set to 0 in PPS ", "off"},
+    {MFX_CODINGOPTION_ON,
+        "transform_skip_enabled_flag will be set to 1 in PPS ", "on"},
+    {0, NULL, NULL}
+  };
+
+  if (!type) {
+    type = g_enum_register_static ("GstMsdkEncTransformSkip", values);
+  }
+  return type;
+}
+
+GType
+gst_msdkenc_intra_refresh_type_get_type (void)
+{
+  static GType type = 0;
+
+  static const GEnumValue values[] = {
+    {MFX_REFRESH_NO, "No (default)", "no"},
+    {MFX_REFRESH_VERTICAL, "Vertical", "vertical"},
+    {MFX_REFRESH_HORIZONTAL, "Horizontal ", "horizontal"},
+    {MFX_REFRESH_SLICE, "Slice ", "slice"},
+    {0, NULL, NULL}
+  };
+
+  if (!type) {
+    type = g_enum_register_static ("GstMsdkEncIntraRefreshType", values);
+  }
+
+  return type;
+}
+
 /*========= MSDK VPP Enums =========================*/
 
 #ifndef GST_REMOVE_DEPRECATED

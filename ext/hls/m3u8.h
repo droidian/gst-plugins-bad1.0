@@ -24,7 +24,7 @@
 #ifndef __M3U8_H__
 #define __M3U8_H__
 
-#include <glib.h>
+#include <gst/gst.h>
 
 G_BEGIN_DECLS
 
@@ -175,6 +175,8 @@ struct _GstHLSMedia {
 GstHLSMedia * gst_hls_media_ref   (GstHLSMedia * media);
 
 void          gst_hls_media_unref (GstHLSMedia * media);
+
+const gchar * gst_hls_media_type_get_name (GstHLSMediaType mtype);
 
 
 struct _GstHLSVariantStream {

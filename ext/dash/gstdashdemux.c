@@ -443,6 +443,8 @@ G_DEFINE_TYPE_WITH_CODE (GstDashDemux, gst_dash_demux, GST_TYPE_ADAPTIVE_DEMUX,
     GST_DEBUG_CATEGORY_INIT (gst_dash_demux_debug, "dashdemux", 0,
         "dashdemux element")
     );
+GST_ELEMENT_REGISTER_DEFINE (dashdemux, "dashdemux", GST_RANK_PRIMARY,
+    GST_TYPE_DASH_DEMUX);
 
 static void
 gst_dash_demux_dispose (GObject * obj)
@@ -896,7 +898,7 @@ gst_dash_demux_send_content_protection_event (gpointer data, gpointer userdata)
   schemeIdUri = g_ascii_strdown (cp->schemeIdUri, -1);
   if (g_str_has_prefix (schemeIdUri, "urn:uuid:")) {
     pssi_len = strlen (cp->value);
-    pssi = gst_buffer_new_wrapped (g_memdup (cp->value, pssi_len), pssi_len);
+    pssi = gst_buffer_new_memdup (cp->value, pssi_len);
     /* RFC 4122 states that the hex part of a UUID is in lower case,
      * but some streams seem to ignore this and use upper case for the
      * protection system ID */

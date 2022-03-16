@@ -1,43 +1,49 @@
 va_sources = [
   'plugin.c',
   'gstvaallocator.c',
+  'gstvabasedec.c',
+  'gstvabasetransform.c',
   'gstvacaps.c',
   'gstvadecoder.c',
-  'gstvadisplay.c',
-  'gstvadisplay_drm.c',
-  'gstvadisplay_wrapped.c',
+  'gstvadeinterlace.c',
   'gstvadevice.c',
+  'gstvadisplay_priv.c',
+  'gstvafilter.c',
   'gstvah264dec.c',
+  'gstvah265dec.c',
   'gstvapool.c',
   'gstvaprofile.c',
+  'gstvasurfacecopy.c',
   'gstvautils.c',
   'gstvavideoformat.c',
+  'gstvavp8dec.c',
+  'gstvavp9dec.c',
+  'gstvampeg2dec.c',
+  'gstvavpp.c',
+  'vasurfaceimage.c',
 ]
 
 va_option = get_option('va')
-if va_option.disabled()
+if va_option.disabled() or host_system != 'linux'
   subdir_done()
 endif
 
-libva_req = ['>= 1.6']
+libgudev_dep = dependency('gudev-1.0', required: false)
 
-libva_dep = dependency('libva', version: libva_req, required: va_option)
-libva_drm_dep = dependency('libva-drm', version: libva_req, required: va_option)
-libgudev_dep = dependency('gudev-1.0', required: va_option)
-libdrm_dep = dependency('libdrm', required: false,
-			fallback: ['libdrm', 'ext_libdrm'])
-
-have_va = libva_dep.found() and libva_drm_dep.found()
-if not (have_va and libgudev_dep.found())
+if not gstva_dep.found() or not libgudev_dep.found()
   if va_option.enabled()
     error('The va plugin was enabled explicity, but required dependencies were not found.')
   endif
   subdir_done()
 endif
 
-cdata.set10('HAVE_LIBDRM', libdrm_dep.found())
+if libva_dep.version().version_compare('>= 1.8')
+  va_sources += 'gstvaav1dec.c'
+endif
 
-driverdir = libva_dep.get_pkgconfig_variable('driverdir')
+cdata.set10('HAVE_GUDEV', libgudev_dep.found())
+
+driverdir = libva_dep.get_variable('driverdir', default_value: '')
 if driverdir == ''
   driverdir = join_paths(get_option('prefix'), get_option('libdir'), 'dri')
 endif
@@ -47,7 +53,7 @@ gstva = library('gstva',
   va_sources,
   c_args : gst_plugins_bad_args + extra_c_args + gstva_cargs + ['-std=c99'],
   include_directories : [configinc],
-  dependencies : [gstbase_dep, gstvideo_dep, gstcodecs_dep, libva_dep, gstallocators_dep, libva_drm_dep, libgudev_dep, libdrm_dep] + extra_dep,
+  dependencies : [gstvideo_dep, gstcodecs_dep, gstallocators_dep, gstva_dep, libgudev_dep] + extra_dep,
   install : true,
   install_dir : plugins_install_dir,
 )

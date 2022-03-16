@@ -22,9 +22,9 @@
 #include "config.h"
 #endif
 
-#include "gstvadisplay_drm.h"
-#include "gstvadisplay_wrapped.h"
 #include "gstvautils.h"
+#include <gst/va/gstvadisplay_drm.h>
+#include <gst/va/gstvadisplay_wrapped.h>
 
 GST_DEBUG_CATEGORY_STATIC (GST_CAT_CONTEXT);
 
@@ -158,13 +158,13 @@ gst_va_element_propagate_display_context (GstElement * element,
   GstMessage *msg;
 
   if (!display) {
-    GST_ERROR_OBJECT (element, "Could not get GL display connection");
+    GST_ERROR_OBJECT (element, "Could not get VA display connection");
     return;
   }
 
   _init_context_debug ();
 
-  ctxt = gst_context_new ("gst.va.display.handle", TRUE);
+  ctxt = gst_context_new (GST_VA_DISPLAY_HANDLE_CONTEXT_TYPE_STR, TRUE);
   gst_context_set_va_display (ctxt, display);
 
   GST_CAT_INFO_OBJECT (GST_CAT_CONTEXT, element,
@@ -186,24 +186,26 @@ gst_va_ensure_element_data (gpointer element, const gchar * render_device_path,
   /*  1) Check if the element already has a context of the specific
    *     type.
    */
-  if (gst_va_display_found (element, *display_ptr))
+  if (gst_va_display_found (element, g_atomic_pointer_get (display_ptr)))
     goto done;
 
-  _gst_context_query (element, "gst.va.display.handle");
+  _gst_context_query (element, GST_VA_DISPLAY_HANDLE_CONTEXT_TYPE_STR);
 
   /* Neighbour found and it updated the display */
-  if (gst_va_display_found (element, *display_ptr))
+  if (gst_va_display_found (element, g_atomic_pointer_get (display_ptr)))
     goto done;
 
   /* If no neighbor, or application not interested, use drm */
   display = gst_va_display_drm_new_from_path (render_device_path);
 
-  *display_ptr = display;
+  gst_object_replace ((GstObject **) display_ptr, (GstObject *) display);
 
   gst_va_element_propagate_display_context (element, display);
 
+  gst_clear_object (&display);
+
 done:
-  return *display_ptr != NULL;
+  return g_atomic_pointer_get (display_ptr) != NULL;
 }
 
 gboolean
@@ -220,7 +222,7 @@ gst_va_handle_set_context (GstElement * element, GstContext * context,
 
   context_type = gst_context_get_context_type (context);
 
-  if (g_strcmp0 (context_type, "gst.va.display.handle") == 0) {
+  if (g_strcmp0 (context_type, GST_VA_DISPLAY_HANDLE_CONTEXT_TYPE_STR) == 0) {
     type_name = G_OBJECT_TYPE_NAME (element);
     if (!gst_context_get_va_display (context, type_name, render_device_path,
             &display_replacement)) {
@@ -231,11 +233,9 @@ gst_va_handle_set_context (GstElement * element, GstContext * context,
   }
 
   if (display_replacement) {
-    GstVaDisplay *old = *display_ptr;
-    *display_ptr = display_replacement;
-
-    if (old)
-      gst_object_unref (old);
+    gst_object_replace ((GstObject **) display_ptr,
+        (GstObject *) display_replacement);
+    gst_object_unref (display_replacement);
   }
 
   return TRUE;
@@ -258,7 +258,8 @@ gst_va_handle_context_query (GstElement * element, GstQuery * query,
       "handle context query %" GST_PTR_FORMAT, query);
   gst_query_parse_context_type (query, &context_type);
 
-  if (!display || g_strcmp0 (context_type, "gst.va.display.handle") != 0)
+  if (!display
+      || g_strcmp0 (context_type, GST_VA_DISPLAY_HANDLE_CONTEXT_TYPE_STR) != 0)
     return FALSE;
 
   gst_query_parse_context (query, &old_ctxt);
@@ -266,7 +267,7 @@ gst_va_handle_context_query (GstElement * element, GstQuery * query,
   if (old_ctxt)
     ctxt = gst_context_copy (old_ctxt);
   else
-    ctxt = gst_context_new ("gst.va.display.handle", TRUE);
+    ctxt = gst_context_new (GST_VA_DISPLAY_HANDLE_CONTEXT_TYPE_STR, TRUE);
 
   gst_context_set_va_display (ctxt, display);
   gst_query_set_context (query, ctxt);
@@ -292,7 +293,7 @@ gst_context_get_va_display (GstContext * context, const gchar * type_name,
   is_devnode = (g_strstr_len (type_name, -1, "renderD") != NULL);
 
   s = gst_context_get_structure (context);
-  if (gst_structure_get (s, "gst-display", GST_TYPE_VA_DISPLAY, &display, NULL)) {
+  if (gst_structure_get (s, "gst-display", GST_TYPE_OBJECT, &display, NULL)) {
     gchar *device_path = NULL;
     gboolean ret;
 
@@ -302,7 +303,7 @@ gst_context_get_va_display (GstContext * context, const gchar * type_name,
       g_free (device_path);
       if (ret)
         goto accept;
-    } else if (!is_devnode) {
+    } else if (GST_IS_VA_DISPLAY (display) && !is_devnode) {
       goto accept;
     }
 
@@ -314,7 +315,7 @@ gst_context_get_va_display (GstContext * context, const gchar * type_name,
    * VADisplay from users */
   if (!is_devnode
       && gst_structure_get (s, "va-display", G_TYPE_POINTER, &dpy, NULL)) {
-    if ((display = gst_va_display_wrapped_new ((guintptr) dpy)))
+    if ((display = gst_va_display_wrapped_new (dpy)))
       goto accept;
   }
 
@@ -339,11 +340,12 @@ gst_context_set_va_display (GstContext * context, GstVaDisplay * display)
 
   g_return_if_fail (context != NULL);
 
-  if (display)
+  if (display) {
     GST_CAT_LOG (GST_CAT_CONTEXT,
         "setting GstVaDisplay (%" GST_PTR_FORMAT ") on context (%"
         GST_PTR_FORMAT ")", display, context);
+  }
 
   s = gst_context_writable_structure (context);
-  gst_structure_set (s, "gst-display", GST_TYPE_VA_DISPLAY, display, NULL);
+  gst_structure_set (s, "gst-display", GST_TYPE_OBJECT, display, NULL);
 }

@@ -122,6 +122,8 @@ G_DEFINE_TYPE_WITH_CODE (GstWaylandSink, gst_wayland_sink, GST_TYPE_VIDEO_SINK,
         gst_wayland_sink_videooverlay_init)
     G_IMPLEMENT_INTERFACE (GST_TYPE_WAYLAND_VIDEO,
         gst_wayland_sink_waylandvideo_init));
+GST_ELEMENT_REGISTER_DEFINE (waylandsink, "waylandsink", GST_RANK_MARGINAL,
+    GST_TYPE_WAYLAND_SINK);
 
 /* A tiny GstVideoBufferPool subclass that modify the options to remove
  * VideoAlignment. To support VideoAlignment we would need to pass the padded
@@ -404,6 +406,14 @@ gst_wayland_sink_change_state (GstElement * element, GstStateChange transition)
           gst_wl_window_render (sink->window, NULL, NULL);
         }
       }
+
+      g_mutex_lock (&sink->render_lock);
+      if (sink->callback) {
+        wl_callback_destroy (sink->callback);
+        sink->callback = NULL;
+      }
+      sink->redraw_pending = FALSE;
+      g_mutex_unlock (&sink->render_lock);
       break;
     case GST_STATE_CHANGE_READY_TO_NULL:
       g_mutex_lock (&sink->display_lock);
@@ -417,12 +427,9 @@ gst_wayland_sink_change_state (GstElement * element, GstStateChange transition)
        * to avoid requesting them again from the application if/when we are
        * restarted (GstVideoOverlay behaves like that in other sinks)
        */
-      if (sink->display && !sink->window) {     /* -> the window was toplevel */
+      if (sink->display && !sink->window)       /* -> the window was toplevel */
         g_clear_object (&sink->display);
-        g_mutex_lock (&sink->render_lock);
-        sink->redraw_pending = FALSE;
-        g_mutex_unlock (&sink->render_lock);
-      }
+
       g_mutex_unlock (&sink->display_lock);
       g_clear_object (&sink->pool);
       break;
@@ -637,9 +644,12 @@ frame_redraw_callback (void *data, struct wl_callback *callback, uint32_t time)
 
   g_mutex_lock (&sink->render_lock);
   sink->redraw_pending = FALSE;
-  g_mutex_unlock (&sink->render_lock);
 
-  wl_callback_destroy (callback);
+  if (sink->callback) {
+    wl_callback_destroy (callback);
+    sink->callback = NULL;
+  }
+  g_mutex_unlock (&sink->render_lock);
 }
 
 static const struct wl_callback_listener frame_callback_listener = {
@@ -660,6 +670,7 @@ render_last_buffer (GstWaylandSink * sink, gboolean redraw)
 
   sink->redraw_pending = TRUE;
   callback = wl_surface_frame (surface);
+  sink->callback = callback;
   wl_callback_add_listener (callback, &frame_callback_listener, sink);
 
   if (G_UNLIKELY (sink->video_info_changed && !redraw)) {
@@ -818,7 +829,7 @@ gst_wayland_sink_show_frame (GstVideoSink * vsink, GstBuffer * buffer)
         if (G_UNLIKELY (!wbuf))
           goto no_wl_buffer_shm;
 
-        gst_buffer_add_wl_buffer (to_render, wbuf, sink->display);
+        wlbuffer = gst_buffer_add_wl_buffer (to_render, wbuf, sink->display);
       }
 
       if (!gst_video_frame_map (&dst, &sink->video_info, to_render,
@@ -842,12 +853,13 @@ gst_wayland_sink_show_frame (GstVideoSink * vsink, GstBuffer * buffer)
   if (!wbuf)
     goto no_wl_buffer;
 
-  gst_buffer_add_wl_buffer (buffer, wbuf, sink->display);
+  wlbuffer = gst_buffer_add_wl_buffer (buffer, wbuf, sink->display);
   to_render = buffer;
 
 render:
   /* drop double rendering */
-  if (G_UNLIKELY (to_render == sink->last_buffer)) {
+  if (G_UNLIKELY (wlbuffer ==
+          gst_buffer_get_wl_buffer (sink->display, sink->last_buffer))) {
     GST_LOG_OBJECT (sink, "Buffer already being rendered");
     goto done;
   }
@@ -1052,8 +1064,7 @@ plugin_init (GstPlugin * plugin)
 
   gst_wl_shm_allocator_register ();
 
-  return gst_element_register (plugin, "waylandsink", GST_RANK_MARGINAL,
-      GST_TYPE_WAYLAND_SINK);
+  return GST_ELEMENT_REGISTER (waylandsink, plugin);
 }
 
 GST_PLUGIN_DEFINE (GST_VERSION_MAJOR,

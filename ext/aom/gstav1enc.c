@@ -198,6 +198,8 @@ static void gst_av1_enc_destroy_encoder (GstAV1Enc * av1enc);
 
 #define gst_av1_enc_parent_class parent_class
 G_DEFINE_TYPE (GstAV1Enc, gst_av1_enc, GST_TYPE_VIDEO_ENCODER);
+GST_ELEMENT_REGISTER_DEFINE (av1enc, "av1enc", GST_RANK_PRIMARY,
+    GST_TYPE_AV1_ENC);
 
 /* *INDENT-OFF* */
 static GstStaticPadTemplate gst_av1_enc_sink_pad_template =
@@ -426,6 +428,13 @@ gst_av1_enc_init (GstAV1Enc * av1enc)
   av1enc->tile_columns = DEFAULT_TILE_COLUMNS;
   av1enc->tile_rows = DEFAULT_TILE_ROWS;
 
+#ifdef FIXED_QP_OFFSET_COUNT
+  av1enc->aom_cfg.fixed_qp_offsets[0] = -1;
+  av1enc->aom_cfg.fixed_qp_offsets[1] = -1;
+  av1enc->aom_cfg.fixed_qp_offsets[2] = -1;
+  av1enc->aom_cfg.fixed_qp_offsets[3] = -1;
+  av1enc->aom_cfg.fixed_qp_offsets[4] = -1;
+#endif
   av1enc->aom_cfg.rc_dropframe_thresh = DEFAULT_DROP_FRAME;
   av1enc->aom_cfg.rc_resize_mode = DEFAULT_RESIZE_MODE;
   av1enc->aom_cfg.rc_resize_denominator = DEFAULT_RESIZE_DENOMINATOR;
@@ -580,10 +589,24 @@ gst_av1_enc_get_downstream_profile (GstAV1Enc * av1enc)
       if (profile_str) {
         gchar *endptr = NULL;
 
-        profile = g_ascii_strtoull (profile_str, &endptr, 10);
-        if (*endptr != '\0' || profile < 0 || profile > 3) {
-          GST_ERROR_OBJECT (av1enc, "Invalid profile '%s'", profile_str);
-          profile = DEFAULT_PROFILE;
+        if (g_strcmp0 (profile_str, "main") == 0) {
+          GST_DEBUG_OBJECT (av1enc, "Downstream profile is \"main\"");
+          profile = 0;
+        } else if (g_strcmp0 (profile_str, "high") == 0) {
+          profile = 1;
+          GST_DEBUG_OBJECT (av1enc, "Downstream profile is \"high\"");
+        } else if (g_strcmp0 (profile_str, "professional") == 0) {
+          profile = 2;
+          GST_DEBUG_OBJECT (av1enc, "Downstream profile is \"professional\"");
+        } else {
+          profile = g_ascii_strtoull (profile_str, &endptr, 10);
+          if (*endptr != '\0' || profile < 0 || profile > 3) {
+            GST_ERROR_OBJECT (av1enc, "Invalid profile '%s'", profile_str);
+            profile = DEFAULT_PROFILE;
+          } else {
+            GST_DEBUG_OBJECT (av1enc,
+                "Downstream profile is \"%s\"", profile_str);
+          }
         }
       }
     }
@@ -752,8 +775,7 @@ gst_av1_enc_process (GstAV1Enc * encoder)
       }
 
       frame->output_buffer =
-          gst_buffer_new_wrapped (g_memdup (pkt->data.frame.buf,
-              pkt->data.frame.sz), pkt->data.frame.sz);
+          gst_buffer_new_memdup (pkt->data.frame.buf, pkt->data.frame.sz);
 
       if ((pkt->data.frame.flags & AOM_FRAME_IS_DROPPABLE) != 0)
         GST_BUFFER_FLAG_SET (frame->output_buffer, GST_BUFFER_FLAG_DROPPABLE);

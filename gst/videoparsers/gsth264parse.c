@@ -29,6 +29,7 @@
 #include <gst/base/base.h>
 #include <gst/pbutils/pbutils.h>
 #include <gst/video/video.h>
+#include "gstvideoparserselements.h"
 #include "gsth264parse.h"
 
 #include <string.h>
@@ -98,6 +99,9 @@ static GstStaticPadTemplate srctemplate = GST_STATIC_PAD_TEMPLATE ("src",
 
 #define parent_class gst_h264_parse_parent_class
 G_DEFINE_TYPE (GstH264Parse, gst_h264_parse, GST_TYPE_BASE_PARSE);
+GST_ELEMENT_REGISTER_DEFINE_WITH_CODE (h264parse, "h264parse",
+    GST_RANK_PRIMARY + 1, GST_TYPE_H264_PARSE,
+    videoparsers_element_init (plugin));
 
 static void gst_h264_parse_finalize (GObject * object);
 
@@ -167,7 +171,7 @@ gst_h264_parse_class_init (GstH264ParseClass * klass)
           "is attached to incoming buffer and also Picture Timing SEI exists "
           "in the bitstream. To make this property work, SPS must contain "
           "VUI and pic_struct_present_flag of VUI must be non-zero",
-          DEFAULT_CONFIG_INTERVAL, G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
+          DEFAULT_UPDATE_TIMECODE, G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
 
   /* Override BaseParse vfuncs */
   parse_class->start = GST_DEBUG_FUNCPTR (gst_h264_parse_start);
@@ -200,7 +204,7 @@ gst_h264_parse_init (GstH264Parse * h264parse)
 
   h264parse->aud_needed = TRUE;
   h264parse->aud_insert = TRUE;
-  h264parse->update_timecode = FALSE;
+  h264parse->update_timecode = DEFAULT_UPDATE_TIMECODE;
 }
 
 static void
@@ -233,6 +237,7 @@ gst_h264_parse_reset_frame (GstH264Parse * h264parse)
   h264parse->frame_start = FALSE;
   h264parse->have_sps_in_frame = FALSE;
   h264parse->have_pps_in_frame = FALSE;
+  h264parse->have_aud_in_frame = FALSE;
   gst_adapter_clear (h264parse->frame_out);
 }
 
@@ -1126,6 +1131,7 @@ gst_h264_parse_process_nal (GstH264Parse * h264parse, GstH264NalUnit * nalu)
       if (pres != GST_H264_PARSER_OK)
         return FALSE;
       h264parse->aud_needed = FALSE;
+      h264parse->have_aud_in_frame = TRUE;
       break;
     default:
       /* drop anything before the initial SPS */
@@ -1227,8 +1233,9 @@ gst_h264_parse_handle_frame_packetized (GstBaseParse * parse,
   parse_res = gst_h264_parser_identify_nalu_avc (h264parse->nalparser,
       map.data, 0, map.size, nl, &nalu);
 
-  /* there is no AUD in AVC, always enable insertion, the pre_push function
-   * will only add it once, and will only add it for byte-stream output. */
+  /* Always enable AUD insertion per frame here. The pre_push function
+   * will only add it once, and will only add it for byte-stream output
+   * if AUD doesn't exist in the current frame */
   h264parse->aud_insert = TRUE;
 
   while (parse_res == GST_H264_PARSER_OK) {
@@ -2213,8 +2220,6 @@ gst_h264_parse_update_src_caps (GstH264Parse * h264parse, GstCaps * caps)
         s2 = gst_caps_get_structure (caps, 0);
         gst_structure_get_fraction (s2, "framerate", &h264parse->parsed_fps_n,
             &h264parse->parsed_fps_d);
-        gst_base_parse_set_frame_rate (GST_BASE_PARSE (h264parse), fps_num,
-            fps_den, 0, 0);
 
         /* If we know the frame duration, and if we are not in one of the zero
          * latency pattern, add one frame of latency */
@@ -2401,6 +2406,96 @@ gst_h264_parse_update_src_caps (GstH264Parse * h264parse, GstCaps * caps)
     gst_buffer_unref (buf);
 }
 
+static GstClockTime
+gst_h264_parse_get_duration (GstH264Parse * h264parse, gboolean frame)
+{
+  GstClockTime ret = GST_CLOCK_TIME_NONE;
+  GstH264SPS *sps = h264parse->nalparser->last_sps;
+  gint duration = 1;
+
+  if (!frame) {
+    GST_LOG_OBJECT (h264parse, "no frame data -> 0 duration");
+    ret = 0;
+    goto done;
+  }
+
+  if (!sps) {
+    GST_DEBUG_OBJECT (h264parse, "referred SPS invalid");
+    goto fps_duration;
+  } else if (!sps->vui_parameters_present_flag) {
+    GST_DEBUG_OBJECT (h264parse, "unable to compute duration: VUI not present");
+    goto fps_duration;
+  } else if (!sps->vui_parameters.timing_info_present_flag) {
+    GST_DEBUG_OBJECT (h264parse,
+        "unable to compute duration: timing info not present");
+    goto fps_duration;
+  } else if (sps->vui_parameters.time_scale == 0) {
+    GST_DEBUG_OBJECT (h264parse,
+        "unable to compute duration: time_scale = 0 "
+        "(this is forbidden in spec; bitstream probably contains error)");
+    goto fps_duration;
+  }
+
+  if (h264parse->sei_pic_struct_pres_flag &&
+      h264parse->sei_pic_struct != (guint8) - 1) {
+    /* Note that when h264parse->sei_pic_struct == -1 (unspecified), there
+     * are ways to infer its value. This is related to computing the
+     * TopFieldOrderCnt and BottomFieldOrderCnt, which looks
+     * complicated and thus not implemented for the time being. Yet
+     * the value we have here is correct for many applications
+     */
+    switch (h264parse->sei_pic_struct) {
+      case GST_H264_SEI_PIC_STRUCT_TOP_FIELD:
+      case GST_H264_SEI_PIC_STRUCT_BOTTOM_FIELD:
+        duration = 1;
+        break;
+      case GST_H264_SEI_PIC_STRUCT_FRAME:
+      case GST_H264_SEI_PIC_STRUCT_TOP_BOTTOM:
+      case GST_H264_SEI_PIC_STRUCT_BOTTOM_TOP:
+        duration = 2;
+        break;
+      case GST_H264_SEI_PIC_STRUCT_TOP_BOTTOM_TOP:
+      case GST_H264_SEI_PIC_STRUCT_BOTTOM_TOP_BOTTOM:
+        duration = 3;
+        break;
+      case GST_H264_SEI_PIC_STRUCT_FRAME_DOUBLING:
+        duration = 4;
+        break;
+      case GST_H264_SEI_PIC_STRUCT_FRAME_TRIPLING:
+        duration = 6;
+        break;
+      default:
+        GST_DEBUG_OBJECT (h264parse,
+            "h264parse->sei_pic_struct of unknown value %d. Not parsed",
+            h264parse->sei_pic_struct);
+        break;
+    }
+  } else {
+    duration = h264parse->field_pic_flag ? 1 : 2;
+  }
+
+  GST_LOG_OBJECT (h264parse, "frame tick duration %d", duration);
+
+  ret = gst_util_uint64_scale (duration * GST_SECOND,
+      sps->vui_parameters.num_units_in_tick, sps->vui_parameters.time_scale);
+  /* sanity check */
+  if (ret < GST_MSECOND) {
+    GST_DEBUG_OBJECT (h264parse, "discarding dur %" GST_TIME_FORMAT,
+        GST_TIME_ARGS (ret));
+    goto fps_duration;
+  }
+
+done:
+  return ret;
+
+fps_duration:
+  if (h264parse->parsed_fps_d > 0 && h264parse->parsed_fps_n > 0)
+    ret =
+        gst_util_uint64_scale (GST_SECOND, h264parse->parsed_fps_d,
+        h264parse->parsed_fps_n);
+  goto done;
+}
+
 static void
 gst_h264_parse_get_timestamp (GstH264Parse * h264parse,
     GstClockTime * out_ts, GstClockTime * out_dur, gboolean frame)
@@ -2547,10 +2642,19 @@ gst_h264_parse_parse_frame (GstBaseParse * parse, GstBaseParseFrame * frame)
 
   /* don't mess with timestamps if provided by upstream,
    * particularly since our ts not that good they handle seeking etc */
-  if (h264parse->do_ts)
+  if (h264parse->do_ts) {
     gst_h264_parse_get_timestamp (h264parse,
         &GST_BUFFER_DTS (buffer), &GST_BUFFER_DURATION (buffer),
         h264parse->frame_start);
+  }
+
+  /* We don't want to let baseparse select a duration itself based
+   * solely on the framerate, as we have more per-frame information
+   * available */
+  if (!GST_CLOCK_TIME_IS_VALID (GST_BUFFER_DURATION (buffer))) {
+    GST_BUFFER_DURATION (buffer) =
+        gst_h264_parse_get_duration (h264parse, h264parse->frame_start);
+  }
 
   if (h264parse->keyframe)
     GST_BUFFER_FLAG_UNSET (buffer, GST_BUFFER_FLAG_DELTA_UNIT);
@@ -2841,16 +2945,16 @@ gst_h264_parse_create_pic_timing_sei (GstH264Parse * h264parse,
 
   num_clock_ts = num_clock_ts_table[h264parse->sei_pic_struct];
 
-  if (num_meta != num_clock_ts) {
+  if (num_meta > num_clock_ts) {
     GST_LOG_OBJECT (h264parse,
-        "The number of timecode meta %d is not equal to required %d",
+        "The number of timecode meta %d is superior to required %d",
         num_meta, num_clock_ts);
 
     return NULL;
   }
 
   GST_LOG_OBJECT (h264parse,
-      "The number of timecode meta %d is equal", num_meta);
+      "The number of timecode meta %d is compatible", num_meta);
 
   memset (&sei, 0, sizeof (GstH264SEIMessage));
   sei.payloadType = GST_H264_SEI_PIC_TIMING;
@@ -3014,7 +3118,8 @@ gst_h264_parse_pre_push_frame (GstBaseParse * parse, GstBaseParseFrame * frame)
 
   /* In case of byte-stream, insert au delimiter by default
    * if it doesn't exist */
-  if (h264parse->aud_insert && h264parse->format == GST_H264_PARSE_FORMAT_BYTE) {
+  if (h264parse->aud_insert && !h264parse->have_aud_in_frame &&
+      h264parse->format == GST_H264_PARSE_FORMAT_BYTE) {
     GST_DEBUG_OBJECT (h264parse, "Inserting AUD into the stream.");
     if (h264parse->align == GST_H264_PARSE_ALIGN_AU) {
       GstMemory *mem =
@@ -3134,7 +3239,14 @@ gst_h264_parse_pre_push_frame (GstBaseParse * parse, GstBaseParseFrame * frame)
   }
 #endif
 
-  if (!gst_buffer_get_video_time_code_meta (buffer)) {
+  if (frame->out_buffer) {
+    parse_buffer = frame->out_buffer =
+        gst_buffer_make_writable (frame->out_buffer);
+  } else {
+    parse_buffer = frame->buffer = gst_buffer_make_writable (frame->buffer);
+  }
+
+  if (!gst_buffer_get_video_time_code_meta (parse_buffer)) {
     guint i = 0;
 
     for (i = 0; i < 3 && h264parse->num_clock_timestamp; i++) {
@@ -3197,7 +3309,7 @@ gst_h264_parse_pre_push_frame (GstBaseParse * parse, GstBaseParseFrame * frame)
           "Add time code meta %02u:%02u:%02u:%02u",
           tim->hours_value, tim->minutes_value, tim->seconds_value, n_frames);
 
-      gst_buffer_add_video_time_code_meta_full (buffer,
+      gst_buffer_add_video_time_code_meta_full (parse_buffer,
           h264parse->parsed_fps_n,
           h264parse->parsed_fps_d,
           NULL,
@@ -3208,13 +3320,6 @@ gst_h264_parse_pre_push_frame (GstBaseParse * parse, GstBaseParseFrame * frame)
     }
 
     h264parse->num_clock_timestamp = 0;
-  }
-
-  if (frame->out_buffer) {
-    parse_buffer = frame->out_buffer =
-        gst_buffer_make_writable (frame->out_buffer);
-  } else {
-    parse_buffer = frame->buffer = gst_buffer_make_writable (frame->buffer);
   }
 
   if (is_interlaced) {

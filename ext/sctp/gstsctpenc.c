@@ -36,6 +36,8 @@ GST_DEBUG_CATEGORY_STATIC (gst_sctp_enc_debug_category);
 
 #define gst_sctp_enc_parent_class parent_class
 G_DEFINE_TYPE (GstSctpEnc, gst_sctp_enc, GST_TYPE_ELEMENT);
+GST_ELEMENT_REGISTER_DEFINE (sctpenc, "sctpenc", GST_RANK_NONE,
+    GST_TYPE_SCTP_ENC);
 
 static GstStaticPadTemplate sink_template =
 GST_STATIC_PAD_TEMPLATE ("sink_%u", GST_PAD_SINK,
@@ -481,7 +483,10 @@ gst_sctp_enc_release_pad (GstElement * element, GstPad * pad)
   if (self->sctp_association)
     gst_sctp_association_reset_stream (self->sctp_association, stream_id);
 
-  gst_element_remove_pad (element, pad);
+  GST_PAD_STREAM_LOCK (pad);
+  if (gst_object_has_as_parent (GST_OBJECT (pad), GST_OBJECT (element)))
+    gst_element_remove_pad (element, pad);
+  GST_PAD_STREAM_UNLOCK (pad);
 }
 
 static void
@@ -891,7 +896,7 @@ on_sctp_packet_out (GstSctpAssociation * _association, const guint8 * buf,
   GST_DEBUG_OBJECT (self, "Received output packet of size %" G_GSIZE_FORMAT,
       length);
 
-  gstbuf = gst_buffer_new_wrapped (g_memdup (buf, length), length);
+  gstbuf = gst_buffer_new_memdup (buf, length);
 
   item = g_new0 (GstDataQueueItem, 1);
   item->object = GST_MINI_OBJECT (gstbuf);
