@@ -1,3 +1,10 @@
+gst-plugins-bad1.0 (1.20.1-2) unstable; urgency=medium
+
+  * debian/control:
+    + Switch to wpewebkit 1.1 (Closes: #1009721).
+
+ -- Sebastian Dröge <slomo@debian.org>  Wed, 27 Apr 2022 12:27:17 +0300
+
 gst-plugins-bad1.0 (1.20.1-1) unstable; urgency=medium
 
   * debian/control,
