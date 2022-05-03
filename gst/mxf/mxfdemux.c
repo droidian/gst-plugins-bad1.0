@@ -3109,11 +3109,11 @@ gst_mxf_demux_handle_generic_container_essence_element (GstMXFDemux * demux,
         ret =
             gst_mxf_demux_pad_set_component (demux, pad,
             pad->current_component_index + 1);
-        if (ret != GST_FLOW_OK && ret != GST_FLOW_EOS) {
-          GST_ERROR_OBJECT (demux, "Switching component failed");
-        } else {
+        if (ret == GST_FLOW_OK) {
           pad->current_essence_track->position =
               pad->current_essence_track_position;
+        } else if (ret != GST_FLOW_EOS) {
+          GST_ERROR_OBJECT (demux, "Switching component failed");
         }
       } else if (etrack->duration > 0
           && pad->current_essence_track_position >= etrack->duration) {
@@ -4136,6 +4136,7 @@ gst_mxf_demux_pull_and_handle_klv_packet (GstMXFDemux * demux)
     /* We entered a new partition */
     if (ret == GST_FLOW_OK && mxf_is_partition_pack (&klv.key)) {
       GstMXFDemuxPartition *partition = demux->current_partition;
+      gboolean partition_done = FALSE;
 
       /* Grab footer metadata if needed */
       if (demux->pull_footer_metadata
@@ -4178,8 +4179,13 @@ gst_mxf_demux_pull_and_handle_klv_packet (GstMXFDemux * demux)
                 "Track already at another position : %" G_GINT64_FORMAT,
                 partition->single_track->position);
             if (find_edit_entry (demux, partition->single_track,
-                    partition->single_track->position, FALSE, &entry))
+                    partition->single_track->position, FALSE, &entry)) {
               lowest_offset = entry.offset;
+            } else if (partition->single_track->position >=
+                partition->single_track->duration) {
+              GST_DEBUG_OBJECT (demux, "Track fully consumed, partition done");
+              partition_done = TRUE;
+            }
           }
         } else {
           guint i;
@@ -4207,14 +4213,15 @@ gst_mxf_demux_pull_and_handle_klv_packet (GstMXFDemux * demux)
           }
         }
 
-        if (lowest_offset != G_MAXUINT64) {
+        if (partition_done || lowest_offset != G_MAXUINT64) {
           GstMXFDemuxPartition *next_partition = NULL;
           GList *cur_part = g_list_find (demux->partitions, partition);
           if (cur_part && cur_part->next)
             next_partition = (GstMXFDemuxPartition *) cur_part->next->data;
 
           /* If we have completely processed this partition, skip to next partition */
-          if (lowest_offset > next_partition->partition.this_partition) {
+          if (partition_done
+              || lowest_offset > next_partition->partition.this_partition) {
             GST_DEBUG_OBJECT (demux,
                 "Partition entirely processed, skipping to next one");
             demux->offset = next_partition->partition.this_partition;
