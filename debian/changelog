@@ -1,6 +1,11 @@
 gst-plugins-bad1.0 (1.20.3-1) unstable; urgency=medium
 
+  [ Sebastian Dröge ]
   * New upstream bugfix release.
+
+  [ Jeremy Bicha ]
+  * Don't ignore dh_auto_test failures on amd64 & arm64.
+  * Add patch to skip a failing build test.
 
  -- Sebastian Dröge <slomo@debian.org>  Thu, 16 Jun 2022 10:16:48 +0300
 

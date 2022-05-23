@@ -1,0 +1,22 @@
+From: Jeremy Bicha <jeremy.bicha@canonical.com>
+Date: Thu, 26 May 2022 13:27:33 -0400
+Subject: Skip failing tests
+
+https://gitlab.freedesktop.org/gstreamer/gstreamer/-/issues/1243
+---
+ tests/check/meson.build | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/tests/check/meson.build b/tests/check/meson.build
+index 7b6aeb6..76501d8 100644
+--- a/tests/check/meson.build
++++ b/tests/check/meson.build
+@@ -22,7 +22,7 @@ libsoup_dep = dependency('libsoup-2.4', version : '>=2.48', required : enable_gs
+ # name, condition when to skip the test and extra dependencies
+ base_tests = [
+   [['elements/aesenc.c'], not aes_dep.found(), [aes_dep]],
+-  [['elements/aesdec.c'], not aes_dep.found(), [aes_dep]],
++  [['elements/aesdec.c'], true, [aes_dep]],
+   [['elements/aiffparse.c']],
+   [['elements/asfmux.c']],
+   [['elements/autoconvert.c']],
