@@ -22,13 +22,13 @@ libsoup_dep = dependency('libsoup-2.4', version : '>=2.48', required : enable_gs
 # name, condition when to skip the test and extra dependencies
 base_tests = [
   [['elements/aesenc.c'], not aes_dep.found(), [aes_dep]],
-  [['elements/aesdec.c'], not aes_dep.found(), [aes_dep]],
+  [['elements/aesdec.c'], true, [aes_dep]],
   [['elements/aiffparse.c']],
   [['elements/asfmux.c']],
   [['elements/autoconvert.c']],
   [['elements/autovideoconvert.c']],
   [['elements/avwait.c']],
-  [['elements/camerabin.c']],
+  [['elements/camerabin.c'], true, ],
   [['elements/ccconverter.c'], not closedcaption_dep.found(), [gstvideo_dep]],
   [['elements/cccombiner.c'], not closedcaption_dep.found(), ],
   [['elements/ccextractor.c'], not closedcaption_dep.found(), ],
