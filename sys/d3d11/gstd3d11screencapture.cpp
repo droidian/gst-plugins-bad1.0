@@ -280,7 +280,8 @@ public:
     texture_desc.BindFlags =
         D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE;
     texture_desc.CPUAccessFlags = 0;
-    texture_desc.MiscFlags = 0;
+    /* source element may hold different d3d11 device object */
+    texture_desc.MiscFlags = D3D11_RESOURCE_MISC_SHARED;
 
     hr = device_handle->CreateTexture2D (&texture_desc,
         nullptr, &shared_texture_);
@@ -295,7 +296,7 @@ public:
   }
 
   GstFlowReturn
-  Capture (gboolean draw_mouse)
+  Capture ()
   {
     GstFlowReturn ret;
     bool timeout = false;
@@ -314,14 +315,12 @@ public:
       return GST_FLOW_OK;
     }
 
-    if (draw_mouse) {
-      GST_TRACE ("Getting mouse pointer info");
-      ret = GetMouse (&ptr_info_, &frame_info);
-      if (ret != GST_FLOW_OK) {
-        GST_WARNING ("Couldn't get mouse pointer info");
-        dupl_->ReleaseFrame ();
-        return ret;
-      }
+    GST_TRACE ("Getting mouse pointer info");
+    ret = GetMouse (&ptr_info_, &frame_info);
+    if (ret != GST_FLOW_OK) {
+      GST_WARNING ("Couldn't get mouse pointer info");
+      dupl_->ReleaseFrame ();
+      return ret;
     }
 
     ret = ProcessFrame (texture.Get(), shared_texture_.Get(),
@@ -344,7 +343,11 @@ public:
     return GST_FLOW_OK;
   }
 
-  bool DrawMouse (ID3D11RenderTargetView * rtv)
+  bool
+  DrawMouse (GstD3D11Device * device, ID3D11RenderTargetView * rtv,
+      ID3D11VertexShader * vs, ID3D11PixelShader * ps,
+      ID3D11InputLayout * layout, ID3D11SamplerState * sampler,
+      ID3D11BlendState * blend)
   {
     GST_TRACE ("Drawing mouse");
 
@@ -359,9 +362,9 @@ public:
     D3D11_SUBRESOURCE_DATA InitData;
     D3D11_TEXTURE2D_DESC Desc;
     D3D11_SHADER_RESOURCE_VIEW_DESC SDesc;
-    ID3D11Device *device_handle = gst_d3d11_device_get_device_handle (device_);
+    ID3D11Device *device_handle = gst_d3d11_device_get_device_handle (device);
     ID3D11DeviceContext *context_handle =
-        gst_d3d11_device_get_device_context_handle (device_);
+        gst_d3d11_device_get_device_context_handle (device);
 
     VERTEX Vertices[NUMVERTICES] =
     {
@@ -462,7 +465,7 @@ public:
 
     // Create mouseshape as texture
     HRESULT hr = device_handle->CreateTexture2D(&Desc, &InitData, &MouseTex);
-    if (!gst_d3d11_result (hr, device_)) {
+    if (!gst_d3d11_result (hr, device)) {
       GST_ERROR ("Failed to create texture for rendering mouse");
       return false;
     }
@@ -470,7 +473,7 @@ public:
     // Create shader resource from texture
     hr = device_handle->CreateShaderResourceView(MouseTex.Get(), &SDesc,
         &ShaderRes);
-    if (!gst_d3d11_result (hr, device_)) {
+    if (!gst_d3d11_result (hr, device)) {
       GST_ERROR ("Failed to create shader resource view for rendering mouse");
       return false;
     }
@@ -487,7 +490,7 @@ public:
 
     // Create vertex buffer
     hr = device_handle->CreateBuffer(&BDesc, &InitData, &VertexBufferMouse);
-    if (!gst_d3d11_result (hr, device_)) {
+    if (!gst_d3d11_result (hr, device)) {
       GST_ERROR ("Failed to create vertex buffer for rendering mouse");
       return false;
     }
@@ -495,19 +498,27 @@ public:
     FLOAT BlendFactor[4] = {0.f, 0.f, 0.f, 0.f};
     UINT Stride = sizeof(VERTEX);
     UINT Offset = 0;
-    ID3D11SamplerState *samplers = sampler_.Get();
     ID3D11ShaderResourceView *srv = ShaderRes.Get();
     ID3D11Buffer *vert_buf = VertexBufferMouse.Get();
 
     context_handle->IASetVertexBuffers(0, 1, &vert_buf, &Stride, &Offset);
-    context_handle->OMSetBlendState(blend_.Get(), BlendFactor, 0xFFFFFFFF);
+    context_handle->OMSetBlendState(blend, BlendFactor, 0xFFFFFFFF);
     context_handle->OMSetRenderTargets(1, &rtv, nullptr);
-    context_handle->VSSetShader(vs_.Get(), nullptr, 0);
-    context_handle->PSSetShader(ps_.Get(), nullptr, 0);
+    context_handle->VSSetShader(vs, nullptr, 0);
+    context_handle->PSSetShader(ps, nullptr, 0);
     context_handle->PSSetShaderResources(0, 1, &srv);
-    context_handle->PSSetSamplers(0, 1, &samplers);
+    context_handle->PSSetSamplers(0, 1, &sampler);
     context_handle->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-    context_handle->IASetInputLayout(layout_.Get());
+    context_handle->IASetInputLayout(layout);
+
+    D3D11_VIEWPORT VP;
+    VP.Width = static_cast<FLOAT>(FullDesc.Width);
+    VP.Height = static_cast<FLOAT>(FullDesc.Height);
+    VP.MinDepth = 0.0f;
+    VP.MaxDepth = 1.0f;
+    VP.TopLeftX = 0.0f;
+    VP.TopLeftY = 0.0f;
+    context_handle->RSSetViewports(1, &VP);
 
     context_handle->Draw(NUMVERTICES, 0);
 
@@ -522,14 +533,60 @@ public:
     return true;
   }
 
-  void
-  CopyToTexture (ID3D11Texture2D * texture)
+  GstFlowReturn
+  CopyToTexture (GstD3D11Device * device, ID3D11Texture2D * texture)
   {
-    ID3D11DeviceContext *context_handle =
-        gst_d3d11_device_get_device_context_handle (device_);
+    ID3D11DeviceContext *context_handle = nullptr;
+    ComPtr <ID3D11Texture2D> tex;
+    ComPtr < ID3D11Query > query;
+    HRESULT hr;
+
+    context_handle = gst_d3d11_device_get_device_context_handle (device);
+
+    if (device == device_) {
+      tex = shared_texture_;
+    } else {
+      ID3D11Device *device_handle = nullptr;
+      ComPtr < IDXGIResource > dxgi_resource;
+      D3D11_QUERY_DESC query_desc;
+      HANDLE shared_handle;
+
+      device_handle = gst_d3d11_device_get_device_handle (device);
+
+      hr = shared_texture_.As (&dxgi_resource);
+      if (!gst_d3d11_result (hr, device_))
+        return GST_FLOW_ERROR;
+
+      hr = dxgi_resource->GetSharedHandle (&shared_handle);
+      if (!gst_d3d11_result (hr, device_))
+        return GST_FLOW_ERROR;
+
+      hr = device_handle->OpenSharedResource (shared_handle,
+          IID_PPV_ARGS (&tex));
+      if (!gst_d3d11_result (hr, device))
+        return GST_FLOW_ERROR;
+
+      query_desc.Query = D3D11_QUERY_EVENT;
+      query_desc.MiscFlags = 0;
+
+      hr = device_handle->CreateQuery (&query_desc, &query);
+      if (!gst_d3d11_result (hr, device))
+        return GST_FLOW_ERROR;
+    }
 
     context_handle->CopySubresourceRegion (texture, 0, 0, 0, 0,
-      shared_texture_.Get(), 0, nullptr);
+      tex.Get(), 0, nullptr);
+
+    if (query) {
+      BOOL sync_done = FALSE;
+
+      do {
+        hr = context_handle->GetData (query.Get (),
+            &sync_done, sizeof (BOOL), 0);
+      } while (!sync_done && (hr == S_OK || hr == S_FALSE));
+    }
+
+    return GST_FLOW_OK;
   }
 
   void
@@ -619,33 +676,11 @@ private:
       return false;
     }
 
-    /* For blending mouse pointer texture */
-    D3D11_BLEND_DESC blend_desc;
-    blend_desc.AlphaToCoverageEnable = FALSE;
-    blend_desc.IndependentBlendEnable = FALSE;
-    blend_desc.RenderTarget[0].BlendEnable = TRUE;
-    blend_desc.RenderTarget[0].SrcBlend = D3D11_BLEND_SRC_ALPHA;
-    blend_desc.RenderTarget[0].DestBlend = D3D11_BLEND_INV_SRC_ALPHA;
-    blend_desc.RenderTarget[0].BlendOp = D3D11_BLEND_OP_ADD;
-    blend_desc.RenderTarget[0].SrcBlendAlpha = D3D11_BLEND_ONE;
-    blend_desc.RenderTarget[0].DestBlendAlpha = D3D11_BLEND_ZERO;
-    blend_desc.RenderTarget[0].BlendOpAlpha = D3D11_BLEND_OP_ADD;
-    blend_desc.RenderTarget[0].RenderTargetWriteMask =
-        D3D11_COLOR_WRITE_ENABLE_ALL;
-
-    ComPtr<ID3D11BlendState> blend;
-    hr = device_handle->CreateBlendState (&blend_desc, &blend);
-    if (!gst_d3d11_result (hr, device)) {
-      GST_ERROR ("Failed to create blend state, hr 0x%x", (guint) hr);
-      return false;
-    }
-
     /* Everything is prepared now */
     vs_ = vs;
     ps_ = ps;
     layout_ = layout;
     sampler_ = sampler;
-    blend_ = blend;
 
     return true;
   }
@@ -726,10 +761,6 @@ private:
     ptr_info->LastTimeStamp = frame_info->LastMouseUpdateTime;
     ptr_info->Visible = frame_info->PointerPosition.Visible != 0;
 
-    /* Mouse is invisible */
-    if (!ptr_info->Visible)
-      return GST_FLOW_OK;
-
     /* No new shape */
     if (frame_info->PointerShapeBufferSize == 0)
       return GST_FLOW_OK;
@@ -737,7 +768,9 @@ private:
     /* Realloc buffer if needed */
     ptr_info->MaybeReallocBuffer (frame_info->PointerShapeBufferSize);
 
-    /* Get shape */
+    /* Must always get shape of cursor, even if not drawn at the moment.
+     * Shape of cursor is not repeated by the AcquireNextFrame and can be
+     * requested to be drawn any time later */
     UINT dummy;
     HRESULT hr = dupl_->GetFramePointerShape(frame_info->PointerShapeBufferSize,
         (void *) ptr_info->PtrShapeBuffer, &dummy, &ptr_info->shape_info);
@@ -1436,7 +1469,6 @@ private:
   ComPtr<ID3D11InputLayout> layout_;
   ComPtr<ID3D11SamplerState> sampler_;
   ComPtr<IDXGIOutputDuplication> dupl_;
-  ComPtr<ID3D11BlendState> blend_;
 
   /* frame metadata */
   BYTE *metadata_buffer_;
@@ -1470,6 +1502,7 @@ struct _GstD3D11ScreenCapture
   HMONITOR monitor_handle;
   RECT desktop_coordinates;
   gboolean prepared;
+  gint64 adapter_luid;
 
   GRecMutex lock;
 };
@@ -1613,6 +1646,8 @@ gst_d3d11_screen_capture_constructed (GObject * object)
       self->desktop_coordinates.left, self->desktop_coordinates.top,
       self->desktop_coordinates.right, self->desktop_coordinates.bottom,
       self->cached_width, self->cached_height);
+
+  g_object_get (self->device, "adapter-luid", &self->adapter_luid, nullptr);
 
   ret = TRUE;
 
@@ -1789,15 +1824,32 @@ gst_d3d11_screen_capture_get_size (GstD3D11ScreenCapture * capture,
 
 GstFlowReturn
 gst_d3d11_screen_capture_do_capture (GstD3D11ScreenCapture * capture,
-    ID3D11Texture2D * texture, ID3D11RenderTargetView * rtv,
-    gboolean draw_mouse)
+    GstD3D11Device * device, ID3D11Texture2D * texture,
+    ID3D11RenderTargetView * rtv, ID3D11VertexShader * vs,
+    ID3D11PixelShader * ps, ID3D11InputLayout * layout,
+    ID3D11SamplerState * sampler, ID3D11BlendState * blend, gboolean draw_mouse)
 {
   GstFlowReturn ret = GST_FLOW_OK;
   D3D11_TEXTURE2D_DESC desc;
+  gboolean shared_device = FALSE;
   guint width, height;
 
   g_return_val_if_fail (GST_IS_D3D11_SCREEN_CAPTURE (capture), GST_FLOW_ERROR);
   g_return_val_if_fail (texture != nullptr, GST_FLOW_ERROR);
+
+  if (device != capture->device) {
+    gint64 luid;
+
+    g_object_get (device, "adapter-luid", &luid, nullptr);
+    /* source element must hold d3d11 device for the same GPU already
+     * by DXGI duplication API design */
+    if (luid != capture->adapter_luid) {
+      GST_ERROR_OBJECT (capture, "Trying to capture from different device");
+      return GST_FLOW_ERROR;
+    }
+
+    shared_device = TRUE;
+  }
 
   g_rec_mutex_lock (&capture->lock);
   if (!capture->prepared)
@@ -1822,7 +1874,7 @@ gst_d3d11_screen_capture_do_capture (GstD3D11ScreenCapture * capture,
   }
 
   gst_d3d11_device_lock (capture->device);
-  ret = capture->dupl_obj->Capture (draw_mouse);
+  ret = capture->dupl_obj->Capture ();
   if (ret != GST_FLOW_OK) {
     gst_d3d11_device_unlock (capture->device);
 
@@ -1842,14 +1894,24 @@ gst_d3d11_screen_capture_do_capture (GstD3D11ScreenCapture * capture,
   }
 
   GST_LOG_OBJECT (capture, "Capture done");
+  if (shared_device)
+    gst_d3d11_device_lock (device);
 
-  capture->dupl_obj->CopyToTexture (texture);
+  ret = capture->dupl_obj->CopyToTexture (device, texture);
+  if (ret != GST_FLOW_OK)
+    goto out;
+
   if (draw_mouse)
-    capture->dupl_obj->DrawMouse (rtv);
+    capture->dupl_obj->DrawMouse (device, rtv, vs, ps, layout, sampler, blend);
+
+out:
+  if (shared_device)
+    gst_d3d11_device_unlock (device);
+
   gst_d3d11_device_unlock (capture->device);
   g_rec_mutex_unlock (&capture->lock);
 
-  return GST_FLOW_OK;
+  return ret;
 }
 
 HRESULT
