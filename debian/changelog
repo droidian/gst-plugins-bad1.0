@@ -1,3 +1,9 @@
+gst-plugins-bad1.0 (1.20.3-1) unstable; urgency=medium
+
+  * New upstream bugfix release.
+
+ -- Sebastian Dröge <slomo@debian.org>  Thu, 16 Jun 2022 10:16:48 +0300
+
 gst-plugins-bad1.0 (1.20.2-1) unstable; urgency=medium
 
   * New upstream bugfix release.
