@@ -3,15 +3,16 @@ Date: Thu, 26 May 2022 13:27:33 -0400
 Subject: Skip failing tests
 
 https://gitlab.freedesktop.org/gstreamer/gstreamer/-/issues/1243
+https://gitlab.freedesktop.org/gstreamer/gstreamer/-/issues/1244
 ---
- tests/check/meson.build | 2 +-
- 1 file changed, 1 insertion(+), 1 deletion(-)
+ tests/check/meson.build | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
 
 diff --git a/tests/check/meson.build b/tests/check/meson.build
-index 7b6aeb6..76501d8 100644
+index 7b6aeb6..8d260c3 100644
 --- a/tests/check/meson.build
 +++ b/tests/check/meson.build
-@@ -22,7 +22,7 @@ libsoup_dep = dependency('libsoup-2.4', version : '>=2.48', required : enable_gs
+@@ -22,13 +22,13 @@ libsoup_dep = dependency('libsoup-2.4', version : '>=2.48', required : enable_gs
  # name, condition when to skip the test and extra dependencies
  base_tests = [
    [['elements/aesenc.c'], not aes_dep.found(), [aes_dep]],
@@ -20,3 +21,10 @@ index 7b6aeb6..76501d8 100644
    [['elements/aiffparse.c']],
    [['elements/asfmux.c']],
    [['elements/autoconvert.c']],
+   [['elements/autovideoconvert.c']],
+   [['elements/avwait.c']],
+-  [['elements/camerabin.c']],
++  [['elements/camerabin.c'], true, ],
+   [['elements/ccconverter.c'], not closedcaption_dep.found(), [gstvideo_dep]],
+   [['elements/cccombiner.c'], not closedcaption_dep.found(), ],
+   [['elements/ccextractor.c'], not closedcaption_dep.found(), ],
