@@ -1102,7 +1102,11 @@ _collate_ice_gathering_states (GstWebRTCBin * webrtc)
 {
 #define STATE(val) GST_WEBRTC_ICE_GATHERING_STATE_ ## val
   GstWebRTCICEGatheringState any_state = 0;
-  gboolean all_completed = webrtc->priv->transceivers->len > 0;
+  GstWebRTCICEGatheringState ice_state;
+  GstWebRTCDTLSTransport *dtls_transport;
+  GstWebRTCICETransport *transport;
+  gboolean all_completed = webrtc->priv->transceivers->len > 0 ||
+      webrtc->priv->data_channel_transport;
   int i;
 
   for (i = 0; i < webrtc->priv->transceivers->len; i++) {
@@ -1110,9 +1114,6 @@ _collate_ice_gathering_states (GstWebRTCBin * webrtc)
         g_ptr_array_index (webrtc->priv->transceivers, i);
     WebRTCTransceiver *trans = WEBRTC_TRANSCEIVER (rtp_trans);
     TransportStream *stream = trans->stream;
-    GstWebRTCDTLSTransport *dtls_transport;
-    GstWebRTCICETransport *transport;
-    GstWebRTCICEGatheringState ice_state;
 
     if (rtp_trans->stopped || stream == NULL) {
       GST_TRACE_OBJECT (webrtc, "transceiver %p stopped or unassociated",
@@ -1141,6 +1142,20 @@ _collate_ice_gathering_states (GstWebRTCBin * webrtc)
     any_state |= (1 << ice_state);
     if (ice_state != STATE (COMPLETE))
       all_completed = FALSE;
+  }
+
+  /* check data channel transport gathering state */
+  if (all_completed && webrtc->priv->data_channel_transport) {
+    if ((dtls_transport = webrtc->priv->data_channel_transport->transport)) {
+      transport = dtls_transport->transport;
+      g_object_get (transport, "gathering-state", &ice_state, NULL);
+      GST_TRACE_OBJECT (webrtc,
+          "data channel transport %p gathering state: 0x%x", dtls_transport,
+          ice_state);
+      any_state |= (1 << ice_state);
+      if (ice_state != STATE (COMPLETE))
+        all_completed = FALSE;
+    }
   }
 
   GST_TRACE_OBJECT (webrtc, "ICE gathering state: 0x%x", any_state);
@@ -1813,7 +1828,6 @@ _find_codec_preferences (GstWebRTCBin * webrtc,
 
       caps = _query_pad_caps (webrtc, rtp_trans, pad, filter, error);
     }
-    gst_object_unref (pad);
 
     if (*error)
       goto out;
@@ -1867,6 +1881,8 @@ _find_codec_preferences (GstWebRTCBin * webrtc,
 
 out:
 
+  if (pad)
+    gst_object_unref (pad);
   if (codec_preferences)
     gst_caps_unref (codec_preferences);
 
@@ -4010,7 +4026,7 @@ _create_answer_task (GstWebRTCBin * webrtc, const GstStructure * options,
             goto rejected;
           }
 
-          GST_TRACE_OBJECT (webrtc, "trying to compare %" GST_PTR_FORMAT
+          GST_LOG_OBJECT (webrtc, "trying to compare %" GST_PTR_FORMAT
               " and %" GST_PTR_FORMAT, offer_caps, trans_caps);
 
           /* FIXME: technically this is a little overreaching as some fields we
@@ -4041,6 +4057,8 @@ _create_answer_task (GstWebRTCBin * webrtc, const GstStructure * options,
         /* if no transceiver, then we only receive that stream and respond with
          * the intersection with the transceivers codec preferences caps */
         answer_dir = GST_WEBRTC_RTP_TRANSCEIVER_DIRECTION_RECVONLY;
+        GST_WARNING_OBJECT (webrtc, "did not find compatible transceiver for "
+            "offer caps %" GST_PTR_FORMAT ", will only receive", offer_caps);
       }
 
       if (!rtp_trans) {
@@ -5378,18 +5396,16 @@ done:
   return ret;
 }
 
-static gboolean
-check_transceivers_not_removed (GstWebRTCBin * webrtc,
+static gint
+transceivers_media_num_cmp (GstWebRTCBin * webrtc,
     GstWebRTCSessionDescription * previous, GstWebRTCSessionDescription * new)
 {
   if (!previous)
-    return TRUE;
+    return 0;
 
-  if (gst_sdp_message_medias_len (previous->sdp) >
-      gst_sdp_message_medias_len (new->sdp))
-    return FALSE;
+  return gst_sdp_message_medias_len (new->sdp) -
+      gst_sdp_message_medias_len (previous->sdp);
 
-  return TRUE;
 }
 
 static gboolean
@@ -5477,6 +5493,35 @@ get_previous_description (GstWebRTCBin * webrtc, SDPSource source,
   return NULL;
 }
 
+static GstWebRTCSessionDescription *
+get_last_generated_description (GstWebRTCBin * webrtc, SDPSource source,
+    GstWebRTCSDPType type)
+{
+  switch (type) {
+    case GST_WEBRTC_SDP_TYPE_OFFER:
+      if (source == SDP_REMOTE)
+        return webrtc->priv->last_generated_answer;
+      else
+        return webrtc->priv->last_generated_offer;
+      break;
+    case GST_WEBRTC_SDP_TYPE_PRANSWER:
+    case GST_WEBRTC_SDP_TYPE_ANSWER:
+      if (source == SDP_LOCAL)
+        return webrtc->priv->last_generated_answer;
+      else
+        return webrtc->priv->last_generated_offer;
+    case GST_WEBRTC_SDP_TYPE_ROLLBACK:
+      return NULL;
+    default:
+      /* other values mean memory corruption/uninitialized! */
+      g_assert_not_reached ();
+      break;
+  }
+
+  return NULL;
+}
+
+
 /* http://w3c.github.io/webrtc-pc/#set-description */
 static GstStructure *
 _set_description_task (GstWebRTCBin * webrtc, struct set_description *sd)
@@ -5517,13 +5562,24 @@ _set_description_task (GstWebRTCBin * webrtc, struct set_description *sd)
     }
   }
 
-  if (!check_transceivers_not_removed (webrtc,
+  if (transceivers_media_num_cmp (webrtc,
           get_previous_description (webrtc, sd->source, sd->sdp->type),
-          sd->sdp)) {
+          sd->sdp) < 0) {
     g_set_error_literal (&error, GST_WEBRTC_ERROR,
         GST_WEBRTC_ERROR_SDP_SYNTAX_ERROR,
         "m=lines removed from the SDP. Processing a completely new connection "
         "is not currently supported.");
+    goto out;
+  }
+
+  if ((sd->sdp->type == GST_WEBRTC_SDP_TYPE_PRANSWER ||
+          sd->sdp->type == GST_WEBRTC_SDP_TYPE_ANSWER) &&
+      transceivers_media_num_cmp (webrtc,
+          get_last_generated_description (webrtc, sd->source, sd->sdp->type),
+          sd->sdp) != 0) {
+    g_set_error_literal (&error, GST_WEBRTC_ERROR,
+        GST_WEBRTC_ERROR_SDP_SYNTAX_ERROR,
+        "Answer doesn't have the same number of m-lines as the offer.");
     goto out;
   }
 
@@ -7679,25 +7735,29 @@ gst_webrtc_bin_class_init (GstWebRTCBinClass * klass)
    *  "ssrc"                G_TYPE_STRING               the rtp sequence src in use
    *  "transport-id"        G_TYPE_STRING               identifier for the associated RTCTransportStats for this stream
    *  "codec-id"            G_TYPE_STRING               identifier for the associated RTCCodecStats for this stream
-   *  "fir-count"           G_TYPE_UINT                 FIR requests received by the sender (only for local statistics)
-   *  "pli-count"           G_TYPE_UINT                 PLI requests received by the sender (only for local statistics)
-   *  "nack-count"          G_TYPE_UINT                 NACK requests received by the sender (only for local statistics)
    *
    * RTCReceivedStreamStats supported fields (https://w3c.github.io/webrtc-stats/#receivedrtpstats-dict*)
    *
-   *  "packets-received"     G_TYPE_UINT64              number of packets received (only for local inbound)
-   *  "bytes-received"       G_TYPE_UINT64              number of bytes received (only for local inbound)
-   *  "packets-lost"         G_TYPE_UINT                number of packets lost
-   *  "jitter"               G_TYPE_DOUBLE              packet jitter measured in secondss
+   *  "packets-received"    G_TYPE_UINT64               number of packets received (only for local inbound)
+   *  "packets-lost"        G_TYPE_UINT64               number of packets lost
+   *  "packets-discarded"   G_TYPE_UINT64               number of packets discarded
+   *  "packets-repaired"    G_TYPE_UINT64               number of packets repaired
+   *  "jitter"              G_TYPE_DOUBLE               packet jitter measured in seconds
    *
    * RTCInboundRTPStreamStats supported fields (https://w3c.github.io/webrtc-stats/#inboundrtpstats-dict*)
    *
    *  "remote-id"           G_TYPE_STRING               identifier for the associated RTCRemoteOutboundRTPStreamStats
+   *  "bytes-received"      G_TYPE_UINT64               number of bytes received (only for local inbound)
+   *  "packets-duplicated"  G_TYPE_UINT64               number of packets duplicated
+   *  "fir-count"           G_TYPE_UINT                 FIR packets sent by the receiver
+   *  "pli-count"           G_TYPE_UINT                 PLI packets sent by the receiver
+   *  "nack-count"          G_TYPE_UINT                 NACK packets sent by the receiver
    *
    * RTCRemoteInboundRTPStreamStats supported fields (https://w3c.github.io/webrtc-stats/#remoteinboundrtpstats-dict*)
    *
    *  "local-id"            G_TYPE_STRING               identifier for the associated RTCOutboundRTPSTreamStats
    *  "round-trip-time"     G_TYPE_DOUBLE               round trip time of packets measured in seconds
+   *  "fraction-lost"       G_TYPE_DOUBLE               fraction packet loss
    *
    * RTCSentRTPStreamStats supported fields (https://w3c.github.io/webrtc-stats/#sentrtpstats-dict*)
    *
@@ -7707,10 +7767,14 @@ gst_webrtc_bin_class_init (GstWebRTCBinClass * klass)
    * RTCOutboundRTPStreamStats supported fields (https://w3c.github.io/webrtc-stats/#outboundrtpstats-dict*)
    *
    *  "remote-id"           G_TYPE_STRING               identifier for the associated RTCRemoteInboundRTPSTreamStats
+   *  "fir-count"           G_TYPE_UINT                 FIR packets received by the sender
+   *  "pli-count"           G_TYPE_UINT                 PLI packets received by the sender
+   *  "nack-count"          G_TYPE_UINT                 NACK packets received by the sender
    *
    * RTCRemoteOutboundRTPStreamStats supported fields (https://w3c.github.io/webrtc-stats/#remoteoutboundrtpstats-dict*)
    *
    *  "local-id"            G_TYPE_STRING               identifier for the associated RTCInboundRTPSTreamStats
+   *  "remote-timestamp"    G_TYPE_DOUBLE               remote timestamp the statistics were sent by the remote
    *
    */
   gst_webrtc_bin_signals[GET_STATS_SIGNAL] =
