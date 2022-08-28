@@ -4566,9 +4566,7 @@ gst_play_is_play_message (GstMessage * msg)
     const GstStructure *data = NULL;                                      \
     g_return_if_fail (gst_play_is_play_message (msg));                    \
     data = gst_message_get_structure (msg);                               \
-    if (!gst_structure_get (data, field, value_type, value, NULL)) {      \
-      g_error ("Could not parse field from structure: %s", field);        \
-    }                                                                     \
+    gst_structure_get (data, field, value_type, value, NULL);             \
 } G_STMT_END
 
 /**
@@ -4657,14 +4655,14 @@ gst_play_message_parse_buffering_percent (GstMessage * msg, guint * percent)
  * gst_play_message_parse_error:
  * @msg: A #GstMessage
  * @error: (out) (optional) (transfer full): the resulting error
- * @details: (out) (optional) (nullable) (transfer full): A GstStructure containing extra details about the error
+ * @details: (out) (optional) (nullable) (transfer full): A #GstStructure containing additional details about the error
  *
  * Parse the given error @msg and extract the corresponding #GError
  *
  * Since: 1.20
  */
 void
-gst_play_message_parse_error (GstMessage * msg, GError * error,
+gst_play_message_parse_error (GstMessage * msg, GError ** error,
     GstStructure ** details)
 {
   PARSE_MESSAGE_FIELD (msg, GST_PLAY_MESSAGE_DATA_ERROR, G_TYPE_ERROR, error);
@@ -4676,14 +4674,14 @@ gst_play_message_parse_error (GstMessage * msg, GError * error,
  * gst_play_message_parse_warning:
  * @msg: A #GstMessage
  * @error: (out) (optional) (transfer full): the resulting warning
- * @details: (out) (optional) (nullable) (transfer full): A GstStructure containing extra details about the error
+ * @details: (out) (optional) (nullable) (transfer full): A #GstStructure containing additional details about the warning
  *
  * Parse the given error @msg and extract the corresponding #GError warning
  *
  * Since: 1.20
  */
 void
-gst_play_message_parse_warning (GstMessage * msg, GError * error,
+gst_play_message_parse_warning (GstMessage * msg, GError ** error,
     GstStructure ** details)
 {
   PARSE_MESSAGE_FIELD (msg, GST_PLAY_MESSAGE_DATA_WARNING, G_TYPE_ERROR, error);

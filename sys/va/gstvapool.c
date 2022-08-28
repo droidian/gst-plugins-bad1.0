@@ -52,9 +52,7 @@ G_DEFINE_TYPE_WITH_CODE (GstVaPool, gst_va_pool, GST_TYPE_BUFFER_POOL,
 static const gchar **
 gst_va_pool_get_options (GstBufferPool * pool)
 {
-  static const gchar *options[] = { GST_BUFFER_POOL_OPTION_VIDEO_META,
-    GST_BUFFER_POOL_OPTION_VIDEO_ALIGNMENT, NULL
-  };
+  static const gchar *options[] = { GST_BUFFER_POOL_OPTION_VIDEO_META, NULL };
   return options;
 }
 
@@ -66,6 +64,17 @@ gst_buffer_pool_config_get_va_allocation_params (GstStructure * config,
     *usage_hint = VA_SURFACE_ATTRIB_USAGE_HINT_GENERIC;
 
   return TRUE;
+}
+
+static inline gboolean
+gst_buffer_pool_config_get_va_alignment (GstStructure * config,
+    GstVideoAlignment * align)
+{
+  return gst_structure_get (config,
+      "va-padding-top", G_TYPE_UINT, &align->padding_top,
+      "va-padding-bottom", G_TYPE_UINT, &align->padding_bottom,
+      "va-padding-left", G_TYPE_UINT, &align->padding_left,
+      "va-padding-right", G_TYPE_UINT, &align->padding_right, NULL);
 }
 
 static gboolean
@@ -111,12 +120,10 @@ gst_va_pool_set_config (GstBufferPool * pool, GstStructure * config)
       GST_BUFFER_POOL_OPTION_VIDEO_META);
 
   /* parse extra alignment info */
-  has_alignment = gst_buffer_pool_config_has_option (config,
-      GST_BUFFER_POOL_OPTION_VIDEO_ALIGNMENT);
+  has_alignment = gst_buffer_pool_config_get_va_alignment (config,
+      &video_align);
 
   if (has_alignment) {
-    gst_buffer_pool_config_get_video_alignment (config, &video_align);
-
     width += video_align.padding_left + video_align.padding_right;
     height += video_align.padding_bottom + video_align.padding_top;
 
@@ -336,6 +343,17 @@ gst_buffer_pool_config_set_va_allocation_params (GstStructure * config,
     guint usage_hint)
 {
   gst_structure_set (config, "usage-hint", G_TYPE_UINT, usage_hint, NULL);
+}
+
+void
+gst_buffer_pool_config_set_va_alignment (GstStructure * config,
+    const GstVideoAlignment * align)
+{
+  gst_structure_set (config,
+      "va-padding-top", G_TYPE_UINT, align->padding_top,
+      "va-padding-bottom", G_TYPE_UINT, align->padding_bottom,
+      "va-padding-left", G_TYPE_UINT, align->padding_left,
+      "va-padding-right", G_TYPE_UINT, align->padding_right, NULL);
 }
 
 gboolean
