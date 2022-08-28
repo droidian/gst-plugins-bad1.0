@@ -1,3 +1,51 @@
+gst-plugins-bad1.0 (1.20.3-2) unstable; urgency=medium
+
+  * Update patch to skip flaky camerabin test too (Closes: #1014264)
+
+ -- Jeremy Bicha <jbicha@ubuntu.com>  Wed, 17 Aug 2022 15:23:16 -0400
+
+gst-plugins-bad1.0 (1.20.3-1) unstable; urgency=medium
+
+  [ Sebastian Dröge ]
+  * New upstream bugfix release.
+
+  [ Jeremy Bicha ]
+  * Don't ignore dh_auto_test failures on amd64 & arm64.
+  * Add patch to skip a failing build test.
+
+ -- Sebastian Dröge <slomo@debian.org>  Thu, 16 Jun 2022 10:16:48 +0300
+
+gst-plugins-bad1.0 (1.20.2-1) unstable; urgency=medium
+
+  * New upstream bugfix release.
+
+ -- Sebastian Dröge <slomo@debian.org>  Tue, 03 May 2022 10:07:05 +0300
+
+gst-plugins-bad1.0 (1.20.1-2) unstable; urgency=medium
+
+  * debian/control:
+    + Switch to wpewebkit 1.1 (Closes: #1009721).
+
+ -- Sebastian Dröge <slomo@debian.org>  Wed, 27 Apr 2022 12:27:17 +0300
+
+gst-plugins-bad1.0 (1.20.1-1) unstable; urgency=medium
+
+  * debian/control,
+    debian/gstreamer1.0-plugins-bad.install:
+    + Ship openh264 plugin (Closes: #1005226).
+  * New upstream bugfix release.
+
+ -- Sebastian Dröge <slomo@debian.org>  Mon, 14 Mar 2022 17:03:33 +0200
+
+gst-plugins-bad1.0 (1.20.0-4) unstable; urgency=medium
+
+  [ Laurent Bigonville ]
+  * debian/control,
+    debian/patches/03-openaptx-Support-libfreeaptx.patch:
+    + Use libfreeaptx instead of libopenaptx.
+
+ -- Sebastian Dröge <slomo@debian.org>  Wed, 16 Feb 2022 09:13:55 +0200
+
 gst-plugins-bad1.0 (1.20.0-3) unstable; urgency=medium
 
   [ Laurent Bigonville ]
