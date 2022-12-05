@@ -9,7 +9,7 @@ https://gitlab.freedesktop.org/gstreamer/gstreamer/-/issues/1244
  1 file changed, 2 insertions(+), 2 deletions(-)
 
 diff --git a/tests/check/meson.build b/tests/check/meson.build
-index 7b6aeb6..8d260c3 100644
+index cc0d7ab..90e8744 100644
 --- a/tests/check/meson.build
 +++ b/tests/check/meson.build
 @@ -22,13 +22,13 @@ libsoup_dep = dependency('libsoup-2.4', version : '>=2.48', required : enable_gs
@@ -18,12 +18,12 @@ index 7b6aeb6..8d260c3 100644
    [['elements/aesenc.c'], not aes_dep.found(), [aes_dep]],
 -  [['elements/aesdec.c'], not aes_dep.found(), [aes_dep]],
 +  [['elements/aesdec.c'], true, [aes_dep]],
-   [['elements/aiffparse.c']],
-   [['elements/asfmux.c']],
-   [['elements/autoconvert.c']],
-   [['elements/autovideoconvert.c']],
-   [['elements/avwait.c']],
--  [['elements/camerabin.c']],
+   [['elements/aiffparse.c'], get_option('aiff').disabled()],
+   [['elements/asfmux.c'], get_option('asfmux').disabled()],
+   [['elements/autoconvert.c'], get_option('autoconvert').disabled()],
+   [['elements/autovideoconvert.c'], get_option('autoconvert').disabled()],
+   [['elements/avwait.c'], get_option('timecode').disabled()],
+-  [['elements/camerabin.c'], get_option('camerabin2').disabled()],
 +  [['elements/camerabin.c'], true, ],
    [['elements/ccconverter.c'], not closedcaption_dep.found(), [gstvideo_dep]],
    [['elements/cccombiner.c'], not closedcaption_dep.found(), ],
