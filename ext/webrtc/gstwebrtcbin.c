@@ -488,8 +488,10 @@ gst_webrtc_bin_pad_new (const gchar * name, GstPadDirection direction)
       direction, "template", template, NULL);
   gst_object_unref (template);
 
-  gst_pad_set_event_function (GST_PAD (pad), gst_webrtcbin_sink_event);
-  gst_pad_set_query_function (GST_PAD (pad), gst_webrtcbin_sink_query);
+  if (direction == GST_PAD_SINK) {
+    gst_pad_set_event_function (GST_PAD (pad), gst_webrtcbin_sink_event);
+    gst_pad_set_query_function (GST_PAD (pad), gst_webrtcbin_sink_query);
+  }
 
   gst_pad_add_probe (GST_PAD (pad), GST_PAD_PROBE_TYPE_BUFFER |
       GST_PAD_PROBE_TYPE_BUFFER_LIST, webrtc_bin_pad_buffer_cb, NULL, NULL);
@@ -3085,7 +3087,15 @@ sdp_media_from_transceiver (GstWebRTCBin * webrtc, GstSDPMedia * media,
 
     /* this only looks at the first structure so we loop over the given caps
      * and add each structure inside it piecemeal */
-    gst_sdp_media_set_media_from_caps (format, media);
+    if (gst_sdp_media_set_media_from_caps (format, media) != GST_SDP_OK) {
+      GST_ERROR_OBJECT (webrtc,
+          "Failed to build media from caps %" GST_PTR_FORMAT
+          " for transceiver %" GST_PTR_FORMAT, format, trans);
+      gst_caps_unref (caps);
+      gst_caps_unref (format);
+      gst_structure_free (extmap);
+      return FALSE;
+    }
 
     gst_caps_unref (format);
   }
@@ -4125,7 +4135,13 @@ _create_answer_task (GstWebRTCBin * webrtc, const GstStructure * options,
         }
       }
 
-      gst_sdp_media_set_media_from_caps (answer_caps, media);
+      if (gst_sdp_media_set_media_from_caps (answer_caps, media) != GST_SDP_OK) {
+        GST_WARNING_OBJECT (webrtc,
+            "Could not build media from caps %" GST_PTR_FORMAT, answer_caps);
+        gst_clear_caps (&answer_caps);
+        gst_clear_caps (&offer_caps);
+        goto rejected;
+      }
 
       _get_rtx_target_pt_and_ssrc_from_caps (answer_caps, &target_pt,
           &target_ssrc);
@@ -5746,6 +5762,12 @@ _set_description_task (GstWebRTCBin * webrtc, struct set_description *sd)
         continue;
       }
 
+      if (!pad->trans) {
+        GST_LOG_OBJECT (pad, "doesn't have a transceiver");
+        tmp = tmp->next;
+        continue;
+      }
+
       if (pad->trans->mline >= gst_sdp_message_medias_len (sd->sdp->sdp)) {
         GST_DEBUG_OBJECT (pad, "not mentioned in this description. Skipping");
         tmp = tmp->next;
@@ -5758,12 +5780,6 @@ _set_description_task (GstWebRTCBin * webrtc, struct set_description *sd)
         /* FIXME: arrange for an appropriate flow return */
         GST_FIXME_OBJECT (pad, "Media has been rejected.  Need to arrange for "
             "a more correct flow return.");
-        tmp = tmp->next;
-        continue;
-      }
-
-      if (!pad->trans) {
-        GST_LOG_OBJECT (pad, "doesn't have a transceiver");
         tmp = tmp->next;
         continue;
       }
