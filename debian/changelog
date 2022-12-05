@@ -1,9 +1,10 @@
-gst-plugins-bad1.0 (1.20.4-1) UNRELEASED; urgency=medium
+gst-plugins-bad1.0 (1.20.4-1) unstable; urgency=medium
 
   * Team upload
   * New upstream release
+  * Refresh Skip-failing-tests.patch
 
- -- Jeremy Bicha <jbicha@ubuntu.com>  Mon, 05 Dec 2022 08:05:30 -0500
+ -- Jeremy Bicha <jbicha@ubuntu.com>  Mon, 05 Dec 2022 10:54:29 -0500
 
 gst-plugins-bad1.0 (1.20.3-2) unstable; urgency=medium
 
