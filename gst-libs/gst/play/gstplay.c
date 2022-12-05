@@ -212,6 +212,8 @@ static void gst_play_constructed (GObject * object);
 
 static gpointer gst_play_main (gpointer data);
 
+static void gst_play_set_playbin_video_sink (GstPlay * self);
+
 static void gst_play_seek_internal_locked (GstPlay * self);
 static void gst_play_stop_internal (GstPlay * self, gboolean transient);
 static gboolean gst_play_pause_internal (gpointer user_data);
@@ -509,6 +511,8 @@ gst_play_constructed (GObject * object)
   self->thread = g_thread_new ("GstPlay", gst_play_main, self);
   while (!self->loop || !g_main_loop_is_running (self->loop))
     g_cond_wait (&self->cond, &self->lock);
+
+  gst_play_set_playbin_video_sink (self);
   g_mutex_unlock (&self->lock);
 
   G_OBJECT_CLASS (parent_class)->constructed (object);
@@ -594,11 +598,16 @@ gst_play_set_playbin_video_sink (GstPlay * self)
 {
   GstElement *video_sink = NULL;
 
-  if (self->video_renderer != NULL)
+  if (self->video_renderer != NULL) {
     video_sink =
         gst_play_video_renderer_create_video_sink (self->video_renderer, self);
-  if (video_sink)
+  }
+
+  if (video_sink) {
+    gst_object_ref_sink (video_sink);
     g_object_set (self->playbin, "video-sink", video_sink, NULL);
+    gst_object_unref (video_sink);
+  }
 }
 
 static void
@@ -612,7 +621,14 @@ gst_play_set_property (GObject * object, guint prop_id,
       g_mutex_lock (&self->lock);
       g_clear_object (&self->video_renderer);
       self->video_renderer = g_value_dup_object (value);
-      gst_play_set_playbin_video_sink (self);
+
+      // When the video_renderer is a GstPlayerWrappedVideoRenderer it cannot be set
+      // at construction time because it requires a valid pipeline which is created
+      // only after GstPlay has been constructed. That is why the video renderer is
+      // set *after* GstPlay has been constructed.
+      if (self->thread) {
+        gst_play_set_playbin_video_sink (self);
+      }
       g_mutex_unlock (&self->lock);
       break;
     case PROP_URI:{
@@ -2648,15 +2664,8 @@ gst_play_new (GstPlayVideoRenderer * video_renderer)
 
   g_once (&once, gst_play_init_once, NULL);
 
-  self = g_object_new (GST_TYPE_PLAY, NULL);
+  self = g_object_new (GST_TYPE_PLAY, "video-renderer", video_renderer, NULL);
 
-  // When the video_renderer is a GstPlayerWrappedVideoRenderer it cannot be set
-  // at construction time because it requires a valid pipeline which is created
-  // only after GstPlay has been constructed. That is why the video renderer is
-  // set *after* GstPlay has been constructed.
-  if (video_renderer != NULL) {
-    g_object_set (self, "video-renderer", video_renderer, NULL);
-  }
   gst_object_ref_sink (self);
 
   if (video_renderer)
