@@ -2,24 +2,16 @@ From: Jeremy Bicha <jeremy.bicha@canonical.com>
 Date: Thu, 26 May 2022 13:27:33 -0400
 Subject: Skip failing tests
 
-https://gitlab.freedesktop.org/gstreamer/gstreamer/-/issues/1243
 https://gitlab.freedesktop.org/gstreamer/gstreamer/-/issues/1244
 ---
- tests/check/meson.build | 4 ++--
- 1 file changed, 2 insertions(+), 2 deletions(-)
+ tests/check/meson.build | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
 
 diff --git a/tests/check/meson.build b/tests/check/meson.build
-index cc0d7ab..90e8744 100644
+index cc0d7ab..7464caa 100644
 --- a/tests/check/meson.build
 +++ b/tests/check/meson.build
-@@ -22,13 +22,13 @@ libsoup_dep = dependency('libsoup-2.4', version : '>=2.48', required : enable_gs
- # name, condition when to skip the test and extra dependencies
- base_tests = [
-   [['elements/aesenc.c'], not aes_dep.found(), [aes_dep]],
--  [['elements/aesdec.c'], not aes_dep.found(), [aes_dep]],
-+  [['elements/aesdec.c'], true, [aes_dep]],
-   [['elements/aiffparse.c'], get_option('aiff').disabled()],
-   [['elements/asfmux.c'], get_option('asfmux').disabled()],
+@@ -28,7 +28,7 @@ base_tests = [
    [['elements/autoconvert.c'], get_option('autoconvert').disabled()],
    [['elements/autovideoconvert.c'], get_option('autoconvert').disabled()],
    [['elements/avwait.c'], get_option('timecode').disabled()],
