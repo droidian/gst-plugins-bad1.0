@@ -136,7 +136,6 @@ Description: GStreamer helper programs from the "bad" set
 Package: gstreamer1.0-plugins-bad
 Architecture: any
 Multi-Arch: same
-Pre-Depends: ${misc:Pre-Depends}
 Depends: ${misc:Depends},
          ${shlibs:Depends},
          gstreamer1.0-plugins-base (>= 1.20.0),
@@ -231,7 +230,6 @@ Description: GStreamer WPEWebKit plugin
 Package: libgstreamer-plugins-bad1.0-0
 Architecture: any
 Multi-Arch: same
-Pre-Depends: ${misc:Pre-Depends}
 Depends: ${misc:Depends},
          ${shlibs:Depends},
 Conflicts: pitivi (<< 0.9999)
@@ -254,7 +252,6 @@ Description: GStreamer libraries from the "bad" set
 Package: libgstreamer-opencv1.0-0
 Architecture: amd64 arm64 armel armhf i386 mips64el mipsel ppc64el s390x alpha hppa hurd-i386 m68k powerpc ppc64 riscv64
 Multi-Arch: same
-Pre-Depends: ${misc:Pre-Depends}
 Depends: ${misc:Depends},
          ${shlibs:Depends},
 Conflicts: libgstreamer-plugins-bad1.0-0 (<< 1.13.1)
