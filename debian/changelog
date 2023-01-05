@@ -1,13 +1,12 @@
-gst-plugins-bad1.0 (1.20.5-1) UNRELEASED; urgency=medium
+gst-plugins-bad1.0 (1.20.5-1) unstable; urgency=medium
 
   * Team upload
   * New upstream release
   * Add debian/upstream/signing-key.asc and update debian/watch to use it
-  * Trim trailing whitespace
   * Update standards version to 4.6.1, no changes needed
   * Remove fields on binary packages that duplicate source
 
- -- Jeremy Bicha <jbicha@ubuntu.com>  Thu, 05 Jan 2023 11:55:00 -0500
+ -- Jeremy Bicha <jbicha@ubuntu.com>  Thu, 05 Jan 2023 12:05:53 -0500
 
 gst-plugins-bad1.0 (1.20.4-1) unstable; urgency=medium
 
