@@ -107,7 +107,7 @@ static GstFlowReturn gst_d3d111_window_present (GstD3D11Window * self,
     ID3D11RenderTargetView * rtv);
 static void gst_d3d11_window_on_resize_default (GstD3D11Window * window,
     guint width, guint height);
-static gboolean gst_d3d11_window_prepare_default (GstD3D11Window * window,
+static GstFlowReturn gst_d3d11_window_prepare_default (GstD3D11Window * window,
     guint display_width, guint display_height, GstCaps * caps,
     gboolean * video_processor_available, GError ** error);
 
@@ -290,6 +290,8 @@ gst_d3d11_window_on_resize_default (GstD3D11Window * window, guint width,
   ID3D11Texture2D *backbuffer = NULL;
   GstVideoRectangle src_rect, dst_rect, rst_rect;
   IDXGISwapChain *swap_chain;
+  ID3D11DeviceContext *context;
+  const FLOAT clear_color[] = { 0.0, 0.0, 0.0, 1.0 };
 
   gst_d3d11_device_lock (window->device);
   if (!window->swap_chain)
@@ -355,6 +357,9 @@ gst_d3d11_window_on_resize_default (GstD3D11Window * window, guint width,
     goto done;
   }
 
+  context = gst_d3d11_device_get_device_context_handle (window->device);
+  context->ClearRenderTargetView (window->rtv, clear_color);
+
   if (window->processor) {
     D3D11_VIDEO_PROCESSOR_OUTPUT_VIEW_DESC pov_desc;
 
@@ -412,14 +417,14 @@ typedef struct
   gboolean supported;
 } GstD3D11WindowDisplayFormat;
 
-gboolean
+GstFlowReturn
 gst_d3d11_window_prepare (GstD3D11Window * window, guint display_width,
     guint display_height, GstCaps * caps, gboolean * video_processor_available,
     GError ** error)
 {
   GstD3D11WindowClass *klass;
 
-  g_return_val_if_fail (GST_IS_D3D11_WINDOW (window), FALSE);
+  g_return_val_if_fail (GST_IS_D3D11_WINDOW (window), GST_FLOW_ERROR);
 
   klass = GST_D3D11_WINDOW_GET_CLASS (window);
   g_assert (klass->prepare != NULL);
@@ -431,7 +436,7 @@ gst_d3d11_window_prepare (GstD3D11Window * window, guint display_width,
       video_processor_available, error);
 }
 
-static gboolean
+static GstFlowReturn
 gst_d3d11_window_prepare_default (GstD3D11Window * window, guint display_width,
     guint display_height, GstCaps * caps, gboolean * video_processor_available,
     GError ** error)
@@ -491,7 +496,7 @@ gst_d3d11_window_prepare_default (GstD3D11Window * window, guint display_width,
     GST_ERROR_OBJECT (window, "Cannot determine render format");
     g_set_error (error, GST_RESOURCE_ERROR, GST_RESOURCE_ERROR_FAILED,
         "Cannot determine render format");
-    return FALSE;
+    return GST_FLOW_ERROR;
   }
 
   for (i = 0; i < GST_VIDEO_INFO_N_COMPONENTS (&window->info); i++) {
@@ -760,12 +765,12 @@ gst_d3d11_window_prepare_default (GstD3D11Window * window, guint display_width,
 
   GST_DEBUG_OBJECT (window, "New swap chain 0x%p created", window->swap_chain);
 
-  return TRUE;
+  return GST_FLOW_OK;
 
 error:
   gst_d3d11_device_unlock (window->device);
 
-  return FALSE;
+  return GST_FLOW_ERROR;
 }
 
 void
@@ -883,6 +888,11 @@ gst_d3d111_window_present (GstD3D11Window * self, GstBuffer * buffer,
 
   if (!buffer)
     return GST_FLOW_OK;
+
+  if (!rtv) {
+    GST_ERROR_OBJECT (self, "RTV is unavailable");
+    return GST_FLOW_ERROR;
+  }
 
   {
     GstMapInfo infos[GST_VIDEO_MAX_PLANES];

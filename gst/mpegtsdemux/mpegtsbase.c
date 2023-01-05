@@ -1209,6 +1209,10 @@ mpegts_base_apply_pmt (MpegTSBase * base, GstMpegtsSection * section)
   if (G_UNLIKELY (old_program == NULL))
     goto no_program;
 
+  if (G_UNLIKELY (mpegts_base_is_same_program (base, old_program, section->pid,
+              pmt)))
+    goto same_program;
+
   if (base->streams_aware
       && mpegts_base_is_program_update (base, old_program, section->pid, pmt)) {
     GST_FIXME ("We are streams_aware and new program is an update");
@@ -1216,10 +1220,6 @@ mpegts_base_apply_pmt (MpegTSBase * base, GstMpegtsSection * section)
     mpegts_base_update_program (base, old_program, section, pmt);
     goto beach;
   }
-
-  if (G_UNLIKELY (mpegts_base_is_same_program (base, old_program, section->pid,
-              pmt)))
-    goto same_program;
 
   /* If the current program is active, this means we have a new program */
   if (old_program->active) {
@@ -1523,15 +1523,19 @@ mpegts_base_chain (GstPad * pad, GstObject * parent, GstBuffer * buf)
       return res;
 
     mpegts_base_flush (base, FALSE);
-    /* In the case of discontinuities in push-mode with TIME segment
-     * we want to drop all previous observations (hard:TRUE) from
-     * the packetizer */
-    if (base->mode == BASE_MODE_PUSHING
-        && base->segment.format == GST_FORMAT_TIME) {
-      mpegts_packetizer_flush (base->packetizer, TRUE);
+    if (base->mode == BASE_MODE_PUSHING) {
+      if (base->segment.format == GST_FORMAT_TIME) {
+        /* In the case of discontinuities in push-mode with TIME segment
+         * we want to drop all previous observations (hard:TRUE) from
+         * the packetizer */
+        mpegts_packetizer_flush (base->packetizer, TRUE);
+      }
+      /* In all cases, we clear observations when we get a discontinuity in
+       * push-mode to re-check if the sections (PAT/PMT) changed or not */
       mpegts_packetizer_clear (base->packetizer);
-    } else
+    } else {
       mpegts_packetizer_flush (base->packetizer, FALSE);
+    }
   }
 
   mpegts_packetizer_push (base->packetizer, buf);
