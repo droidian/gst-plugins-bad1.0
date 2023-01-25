@@ -76,12 +76,14 @@ gboolean          gst_d3d11_decoder_is_configured (GstD3D11Decoder * decoder);
 
 gboolean          gst_d3d11_decoder_configure     (GstD3D11Decoder * decoder,
                                                    GstVideoCodecState * input_state,
-                                                   GstVideoInfo * info,
+                                                   const GstVideoInfo * out_info,
+                                                   gint offset_x,
+                                                   gint offset_y,
                                                    gint coded_width,
                                                    gint coded_height,
                                                    guint dpb_size);
 
-gboolean          gst_d3d11_decoder_decode_frame  (GstD3D11Decoder * decoder,
+GstFlowReturn     gst_d3d11_decoder_decode_frame  (GstD3D11Decoder * decoder,
                                                    ID3D11VideoDecoderOutputView * output_view,
                                                    GstD3D11DecodeInputStreamArgs * input_args);
 
@@ -95,6 +97,7 @@ ID3D11VideoDecoderOutputView * gst_d3d11_decoder_get_output_view_from_buffer (Gs
 
 gboolean          gst_d3d11_decoder_process_output      (GstD3D11Decoder * decoder,
                                                          GstVideoDecoder * videodec,
+                                                         GstVideoCodecState * in_state,
                                                          gint display_width,
                                                          gint display_height,
                                                          GstBuffer * decoder_buffer,
@@ -143,7 +146,8 @@ gboolean          gst_d3d11_decoder_supports_resolution (GstD3D11Device * device
 GstD3D11DecoderClassData *  gst_d3d11_decoder_class_data_new  (GstD3D11Device * device,
                                                                GstDXVACodec codec,
                                                                GstCaps * sink_caps,
-                                                               GstCaps * src_caps);
+                                                               GstCaps * src_caps,
+                                                               guint max_resolution);
 
 void  gst_d3d11_decoder_class_data_fill_subclass_data (GstD3D11DecoderClassData * data,
                                                        GstD3D11DecoderSubClassData * subclass_data);

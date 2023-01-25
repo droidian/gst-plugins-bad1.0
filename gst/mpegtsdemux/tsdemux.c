@@ -1179,7 +1179,7 @@ handle_psi (MpegTSBase * base, GstMpegtsSection * section)
 
           if (sevent->program_splice_time_specified) {
             pts =
-                mpegts_packetizer_pts_to_ts (base->packetizer,
+                mpegts_packetizer_pts_to_ts_unchecked (base->packetizer,
                 MPEGTIME_TO_GSTTIME (sevent->program_splice_time +
                     sit->pts_adjustment), demux->program->pcr_pid);
             field_name =
@@ -2231,6 +2231,9 @@ gst_ts_demux_update_program (MpegTSBase * base, MpegTSBaseProgram * program)
         gst_pad_push_event (stream->pad, gst_event_new_gap (0, 0));
       }
     }
+    if (stream->pad)
+      gst_pad_push_event (stream->pad,
+          gst_event_new_stream_collection (program->collection));
   }
 }
 
@@ -2317,6 +2320,9 @@ gst_ts_demux_program_started (MpegTSBase * base, MpegTSBaseProgram * program)
         GST_DEBUG_OBJECT (stream->pad, "sparse stream, pushing GAP event");
         gst_pad_push_event (stream->pad, gst_event_new_gap (0, 0));
       }
+      if (stream->pad)
+        gst_pad_push_event (stream->pad,
+            gst_event_new_stream_collection (program->collection));
     }
 
     gst_element_no_more_pads ((GstElement *) demux);
@@ -2732,13 +2738,16 @@ gst_ts_demux_queue_data (GstTSDemux * demux, TSDemuxStream * stream,
         }
         stream->state = PENDING_PACKET_HEADER;
       } else {
+        gchar *pad_name = gst_pad_get_name (stream->pad);
         GST_ELEMENT_WARNING_WITH_DETAILS (demux, STREAM, DEMUX,
             ("CONTINUITY: Mismatch packet %d, stream %d (pid 0x%04x)", cc,
                 stream->continuity_counter, stream->stream.pid), (NULL),
             ("warning-type", G_TYPE_STRING, "continuity-mismatch",
                 "packet", G_TYPE_INT, cc,
                 "stream", G_TYPE_INT, stream->continuity_counter,
-                "pid", G_TYPE_UINT, stream->stream.pid, NULL));
+                "pid", G_TYPE_UINT, stream->stream.pid,
+                "pad-name", G_TYPE_STRING, pad_name, NULL));
+        g_free (pad_name);
         stream->state = PENDING_PACKET_DISCONT;
       }
     }

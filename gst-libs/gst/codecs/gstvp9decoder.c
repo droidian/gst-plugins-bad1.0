@@ -84,6 +84,8 @@ struct _GstVp9DecoderPrivate
   guint preferred_output_delay;
   GstQueueArray *output_queue;
   gboolean is_live;
+
+  gboolean input_state_changed;
 };
 
 typedef struct
@@ -104,6 +106,7 @@ static gboolean gst_vp9_decoder_start (GstVideoDecoder * decoder);
 static gboolean gst_vp9_decoder_stop (GstVideoDecoder * decoder);
 static gboolean gst_vp9_decoder_set_format (GstVideoDecoder * decoder,
     GstVideoCodecState * state);
+static gboolean gst_vp9_decoder_negotiate (GstVideoDecoder * decoder);
 static GstFlowReturn gst_vp9_decoder_finish (GstVideoDecoder * decoder);
 static gboolean gst_vp9_decoder_flush (GstVideoDecoder * decoder);
 static GstFlowReturn gst_vp9_decoder_drain (GstVideoDecoder * decoder);
@@ -125,6 +128,7 @@ gst_vp9_decoder_class_init (GstVp9DecoderClass * klass)
   decoder_class->start = GST_DEBUG_FUNCPTR (gst_vp9_decoder_start);
   decoder_class->stop = GST_DEBUG_FUNCPTR (gst_vp9_decoder_stop);
   decoder_class->set_format = GST_DEBUG_FUNCPTR (gst_vp9_decoder_set_format);
+  decoder_class->negotiate = GST_DEBUG_FUNCPTR (gst_vp9_decoder_negotiate);
   decoder_class->finish = GST_DEBUG_FUNCPTR (gst_vp9_decoder_finish);
   decoder_class->flush = GST_DEBUG_FUNCPTR (gst_vp9_decoder_flush);
   decoder_class->drain = GST_DEBUG_FUNCPTR (gst_vp9_decoder_drain);
@@ -216,6 +220,8 @@ gst_vp9_decoder_check_codec_change (GstVp9Decoder * self,
   GstVp9DecoderClass *klass = GST_VP9_DECODER_GET_CLASS (self);
   GstFlowReturn ret = GST_FLOW_OK;
 
+  g_assert (klass->new_sequence);
+
   if (priv->had_sequence && !gst_vp9_decoder_is_format_change (self, frame_hdr)) {
     return GST_FLOW_OK;
   }
@@ -243,8 +249,8 @@ gst_vp9_decoder_check_codec_change (GstVp9Decoder * self,
     priv->preferred_output_delay = 0;
   }
 
-  if (klass->new_sequence)
-    ret = klass->new_sequence (self, frame_hdr);
+  ret = klass->new_sequence (self, frame_hdr,
+      GST_VP9_REF_FRAMES + priv->preferred_output_delay);
 
   if (ret != GST_FLOW_OK)
     priv->had_sequence = FALSE;
@@ -262,6 +268,8 @@ gst_vp9_decoder_set_format (GstVideoDecoder * decoder,
 
   GST_DEBUG_OBJECT (decoder, "Set format");
 
+  priv->input_state_changed = TRUE;
+
   if (self->input_state)
     gst_video_codec_state_unref (self->input_state);
 
@@ -273,6 +281,17 @@ gst_vp9_decoder_set_format (GstVideoDecoder * decoder,
   gst_query_unref (query);
 
   return TRUE;
+}
+
+static gboolean
+gst_vp9_decoder_negotiate (GstVideoDecoder * decoder)
+{
+  GstVp9Decoder *self = GST_VP9_DECODER (decoder);
+
+  /* output state must be updated by subclass using new input state already */
+  self->priv->input_state_changed = FALSE;
+
+  return GST_VIDEO_DECODER_CLASS (parent_class)->negotiate (decoder);
 }
 
 static void
@@ -340,7 +359,7 @@ gst_vp9_decoder_clear_output_frame (GstVp9DecoderOutputFrame * output_frame)
     output_frame->frame = NULL;
   }
 
-  gst_vp9_picture_clear (&output_frame->picture);
+  gst_clear_vp9_picture (&output_frame->picture);
 }
 
 static GstFlowReturn
@@ -459,6 +478,7 @@ gst_vp9_decoder_handle_frame (GstVideoDecoder * decoder,
       GST_VIDEO_CODEC_FRAME_SET_DECODE_ONLY (frame);
 
       gst_video_decoder_finish_frame (GST_VIDEO_DECODER (self), frame);
+      return GST_FLOW_OK;
     }
 
     pic_to_dup = priv->dpb->pic_list[frame_hdr.frame_to_show_map_idx];
@@ -468,6 +488,8 @@ gst_vp9_decoder_handle_frame (GstVideoDecoder * decoder,
       GST_ERROR_OBJECT (self, "subclass didn't provide duplicated picture");
       goto unmap_and_error;
     }
+
+    picture->system_frame_number = pic_to_dup->system_frame_number;
   } else {
     picture = gst_vp9_picture_new ();
     picture->frame_hdr = frame_hdr;
@@ -524,6 +546,13 @@ gst_vp9_decoder_handle_frame (GstVideoDecoder * decoder,
 
     ret = gst_video_decoder_finish_frame (GST_VIDEO_DECODER (self), frame);
   } else {
+    /* If subclass didn't update output state at this point,
+     * marking this picture as a discont and stores current input state */
+    if (priv->input_state_changed) {
+      picture->discont_state = gst_video_codec_state_ref (self->input_state);
+      priv->input_state_changed = FALSE;
+    }
+
     output_frame.frame = frame;
     output_frame.picture = picture;
     output_frame.self = self;

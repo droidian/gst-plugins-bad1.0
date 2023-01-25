@@ -48,6 +48,13 @@ struct _GstH265Slice
 
   /* parsed nal unit (doesn't take ownership of raw data) */
   GstH265NalUnit nalu;
+
+  /*< private >*/
+  gboolean rap_pic_flag;
+  gboolean no_rasl_output_flag;
+  gboolean no_output_of_prior_pics_flag;
+  gboolean clear_dpb;
+  gboolean intra_pic_flag;
 };
 
 struct _GstH265Picture
@@ -57,7 +64,6 @@ struct _GstH265Picture
 
   GstH265SliceType type;
 
-  GstClockTime pts;
   /* From GstVideoCodecFrame */
   guint32 system_frame_number;
 
@@ -83,6 +89,9 @@ struct _GstH265Picture
   guint8 duplicate_flag;
 
   GstVideoBufferFlags buffer_flags;
+
+  /* decoder input state if this picture is discont point */
+  GstVideoCodecState *discont_state;
 
   gpointer user_data;
   GDestroyNotify notify;
@@ -115,7 +124,7 @@ gst_h265_picture_replace (GstH265Picture ** old_picture,
 }
 
 static inline void
-gst_h265_picture_clear (GstH265Picture ** picture)
+gst_clear_h265_picture (GstH265Picture ** picture)
 {
   if (picture && *picture) {
     gst_h265_picture_unref (*picture);

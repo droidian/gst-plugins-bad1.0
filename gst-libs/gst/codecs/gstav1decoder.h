@@ -53,6 +53,7 @@ struct _GstAV1Decoder
 
   /*< protected >*/
   GstVideoCodecState * input_state;
+  guint highest_spatial_layer;
 
   /*< private >*/
   GstAV1DecoderPrivate *priv;
@@ -70,13 +71,16 @@ struct _GstAV1DecoderClass
    * GstAV1DecoderClass::new_sequence:
    * @decoder: a #GstAV1Decoder
    * @seq_hdr: a #GstAV1SequenceHeaderOBU
+   * @max_dpb_size: the size of dpb including preferred output delay
+   *   by subclass reported via get_preferred_output_delay method.
    *
    * Notifies subclass of SPS update
    *
    * Since: 1.20
    */
   GstFlowReturn   (*new_sequence)      (GstAV1Decoder * decoder,
-                                        const GstAV1SequenceHeaderOBU * seq_hdr);
+                                        const GstAV1SequenceHeaderOBU * seq_hdr,
+                                        gint max_dpb_size);
   /**
    * GstAV1DecoderClass::new_picture:
    * @decoder: a #GstAV1Decoder
@@ -96,13 +100,16 @@ struct _GstAV1DecoderClass
    * GstAV1DecoderClass::duplicate_picture:
    * @decoder: a #GstAV1Decoder
    * @picture: (transfer none): a #GstAV1Picture
+   * @frame: (transfer none): the current #GstVideoCodecFrame
    *
-   * Optional. Called when need to duplicate an existing
-   * #GstAV1Picture.
+   * Called when need to duplicate an existing #GstAV1Picture. As
+   * duplicated key-frame will populate the DPB, this virtual
+   * function is not optional.
    *
-   * Since: 1.20
+   * Since: 1.22
    */
   GstAV1Picture * (*duplicate_picture) (GstAV1Decoder * decoder,
+                                        GstVideoCodecFrame * frame,
                                         GstAV1Picture * picture);
   /**
    * GstAV1DecoderClass::start_picture:
@@ -158,6 +165,21 @@ struct _GstAV1DecoderClass
   GstFlowReturn   (*output_picture)    (GstAV1Decoder * decoder,
                                         GstVideoCodecFrame * frame,
                                         GstAV1Picture * picture);
+
+  /**
+   * GstAV1DecoderClass::get_preferred_output_delay:
+   * @decoder: a #GstAV1Decoder
+   * @live: whether upstream is live or not
+   *
+   * Optional. Called by baseclass to query whether delaying output is
+   * preferred by subclass or not.
+   *
+   * Returns: the number of perferred delayed output frame
+   *
+   * Since: 1.22
+   */
+  guint (*get_preferred_output_delay)   (GstAV1Decoder * decoder,
+                                         gboolean live);
 
   /*< private >*/
   gpointer padding[GST_PADDING_LARGE];

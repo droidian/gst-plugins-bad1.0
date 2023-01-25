@@ -55,6 +55,7 @@ G_BEGIN_DECLS
   (G_TYPE_CHECK_CLASS_TYPE((klass),GST_TYPE_MSDKDEC))
 
 #define MAX_BS_EXTRA_PARAMS             8
+#define MAX_VIDEO_EXTRA_PARAMS          8
 
 typedef struct _GstMsdkDec GstMsdkDec;
 typedef struct _GstMsdkDecClass GstMsdkDecClass;
@@ -74,6 +75,8 @@ struct _GstMsdkDec
   gboolean use_video_memory;
   gboolean use_dmabuf;
   gboolean initialized;
+  gboolean sfc;
+  gboolean ds_has_no_msdk_allocator;
 
   /* for packetization */
   GstAdapter *adapter;
@@ -105,6 +108,9 @@ struct _GstMsdkDec
   mfxExtBuffer *bs_extra_params[MAX_BS_EXTRA_PARAMS];
   guint num_bs_extra_params;
 
+  mfxExtBuffer *video_extra_params[MAX_VIDEO_EXTRA_PARAMS];
+  guint num_video_extra_params;
+
 #if (MFX_VERSION >= 1025)
   mfxExtDecodeErrorReport error_report;
 #endif
@@ -129,6 +135,9 @@ GType gst_msdkdec_get_type (void);
 
 void
 gst_msdkdec_add_bs_extra_param (GstMsdkDec * thiz, mfxExtBuffer * param);
+
+void
+gst_msdkdec_add_video_extra_param (GstMsdkDec * thiz, mfxExtBuffer * param);
 
 G_END_DECLS
 

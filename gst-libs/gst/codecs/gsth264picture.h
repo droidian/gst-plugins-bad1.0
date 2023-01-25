@@ -142,6 +142,7 @@ struct _GstH264Picture
   gint nal_ref_idc;
   gboolean idr;
   gint idr_pic_id;
+  gboolean field_pic_flag;
   GstH264PictureReference ref;
   /* Whether a reference picture. */
   gboolean ref_pic;
@@ -159,6 +160,9 @@ struct _GstH264Picture
   GstH264Picture * other_field;
 
   GstVideoBufferFlags buffer_flags;
+
+  /* decoder input state if this picture is discont point */
+  GstVideoCodecState *discont_state;
 
   gpointer user_data;
   GDestroyNotify notify;
@@ -206,7 +210,7 @@ gst_h264_picture_replace (GstH264Picture ** old_picture,
 }
 
 static inline void
-gst_h264_picture_clear (GstH264Picture ** picture)
+gst_clear_h264_picture (GstH264Picture ** picture)
 {
   if (picture && *picture) {
     gst_h264_picture_unref (*picture);

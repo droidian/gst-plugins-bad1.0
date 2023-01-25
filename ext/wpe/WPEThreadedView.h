@@ -43,6 +43,7 @@ public:
     void resize(int width, int height);
     void loadUri(const gchar*);
     void loadData(GBytes*);
+    void runJavascript(const gchar*);
     void setDrawBackground(gboolean);
 
     GstEGLImage* image();
@@ -51,6 +52,7 @@ public:
     void dispatchKeyboardEvent(struct wpe_input_keyboard_event&);
     void dispatchPointerEvent(struct wpe_input_pointer_event&);
     void dispatchAxisEvent(struct wpe_input_axis_event&);
+    void dispatchTouchEvent(struct wpe_input_touch_event&);
 
     /*  Used by WPEContextThread */
     bool hasUri() const { return webkit.uri; }

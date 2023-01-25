@@ -51,6 +51,7 @@ struct _GstDecklinkVideoSink
 
   GstDecklinkModeEnum mode;
   gint device_number;
+  gint64 persistent_id;
   GstDecklinkVideoFormat video_format;
   GstDecklinkProfileId profile_id;
   BMDTimecodeFormat timecode_format;
@@ -75,6 +76,7 @@ struct _GstDecklinkVideoSink
   guint16 cdp_hdr_sequence_cntr;
 
   gint afd_bar_line;
+  GstDecklinkMappingFormat mapping_format;
 };
 
 struct _GstDecklinkVideoSinkClass

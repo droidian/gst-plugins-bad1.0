@@ -47,6 +47,16 @@ struct _GstFdkAacDec {
   HANDLE_AACDECODER dec;
   gint16 *decode_buffer;
   gint decode_buffer_size;
+
+  INT sample_rate;
+  CHANNEL_MODE config;
+  INT channels;
+  AUDIO_CHANNEL_TYPE channel_types[64];
+  UCHAR channel_indices[64];
+  GstAudioChannelPosition positions[64];
+
+  gboolean need_reorder;
+  GstAudioInfo info;
 };
 
 struct _GstFdkAacDecClass {

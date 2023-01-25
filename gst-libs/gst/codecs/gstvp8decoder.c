@@ -47,6 +47,8 @@ struct _GstVp8DecoderPrivate
   /* for delayed output */
   GstQueueArray *output_queue;
   gboolean is_live;
+
+  gboolean input_state_changed;
 };
 
 typedef struct
@@ -67,6 +69,7 @@ static gboolean gst_vp8_decoder_start (GstVideoDecoder * decoder);
 static gboolean gst_vp8_decoder_stop (GstVideoDecoder * decoder);
 static gboolean gst_vp8_decoder_set_format (GstVideoDecoder * decoder,
     GstVideoCodecState * state);
+static gboolean gst_vp8_decoder_negotiate (GstVideoDecoder * decoder);
 static GstFlowReturn gst_vp8_decoder_finish (GstVideoDecoder * decoder);
 static gboolean gst_vp8_decoder_flush (GstVideoDecoder * decoder);
 static GstFlowReturn gst_vp8_decoder_drain (GstVideoDecoder * decoder);
@@ -87,6 +90,7 @@ gst_vp8_decoder_class_init (GstVp8DecoderClass * klass)
   decoder_class->start = GST_DEBUG_FUNCPTR (gst_vp8_decoder_start);
   decoder_class->stop = GST_DEBUG_FUNCPTR (gst_vp8_decoder_stop);
   decoder_class->set_format = GST_DEBUG_FUNCPTR (gst_vp8_decoder_set_format);
+  decoder_class->negotiate = GST_DEBUG_FUNCPTR (gst_vp8_decoder_negotiate);
   decoder_class->finish = GST_DEBUG_FUNCPTR (gst_vp8_decoder_finish);
   decoder_class->flush = GST_DEBUG_FUNCPTR (gst_vp8_decoder_flush);
   decoder_class->drain = GST_DEBUG_FUNCPTR (gst_vp8_decoder_drain);
@@ -124,9 +128,9 @@ gst_vp8_decoder_reset (GstVp8Decoder * self)
 {
   GstVp8DecoderPrivate *priv = self->priv;
 
-  gst_vp8_picture_clear (&self->last_picture);
-  gst_vp8_picture_clear (&self->golden_ref_picture);
-  gst_vp8_picture_clear (&self->alt_ref_picture);
+  gst_clear_vp8_picture (&self->last_picture);
+  gst_clear_vp8_picture (&self->golden_ref_picture);
+  gst_clear_vp8_picture (&self->alt_ref_picture);
 
   priv->wait_keyframe = TRUE;
   gst_queue_array_clear (priv->output_queue);
@@ -178,14 +182,18 @@ gst_vp8_decoder_check_codec_change (GstVp8Decoder * self,
 
     priv->had_sequence = TRUE;
 
-    if (klass->get_preferred_output_delay)
+    if (klass->get_preferred_output_delay) {
       priv->preferred_output_delay =
           klass->get_preferred_output_delay (self, priv->is_live);
-    else
+    } else {
       priv->preferred_output_delay = 0;
+    }
 
-    if (klass->new_sequence)
-      ret = klass->new_sequence (self, frame_hdr);
+    g_assert (klass->new_sequence);
+
+    ret = klass->new_sequence (self, frame_hdr,
+        /* last/golden/alt 3 pictures */
+        3 + priv->preferred_output_delay);
   }
 
   return ret;
@@ -201,6 +209,8 @@ gst_vp8_decoder_set_format (GstVideoDecoder * decoder,
 
   GST_DEBUG_OBJECT (decoder, "Set format");
 
+  priv->input_state_changed = TRUE;
+
   if (self->input_state)
     gst_video_codec_state_unref (self->input_state);
 
@@ -215,6 +225,17 @@ gst_vp8_decoder_set_format (GstVideoDecoder * decoder,
   gst_query_unref (query);
 
   return TRUE;
+}
+
+static gboolean
+gst_vp8_decoder_negotiate (GstVideoDecoder * decoder)
+{
+  GstVp8Decoder *self = GST_VP8_DECODER (decoder);
+
+  /* output state must be updated by subclass using new input state already */
+  self->priv->input_state_changed = FALSE;
+
+  return GST_VIDEO_DECODER_CLASS (parent_class)->negotiate (decoder);
 }
 
 static gboolean
@@ -288,9 +309,9 @@ gst_vp8_decoder_drain_internal (GstVp8Decoder * self, gboolean wait_keyframe)
   GstVp8DecoderPrivate *priv = self->priv;
 
   gst_vp8_decoder_drain_output_queue (self, 0, &ret);
-  gst_vp8_picture_clear (&self->last_picture);
-  gst_vp8_picture_clear (&self->golden_ref_picture);
-  gst_vp8_picture_clear (&self->alt_ref_picture);
+  gst_clear_vp8_picture (&self->last_picture);
+  gst_clear_vp8_picture (&self->golden_ref_picture);
+  gst_clear_vp8_picture (&self->alt_ref_picture);
 
   priv->wait_keyframe = wait_keyframe;
 
@@ -337,7 +358,7 @@ gst_vp8_decoder_clear_output_frame (GstVp8DecoderOutputFrame * output_frame)
     output_frame->frame = NULL;
   }
 
-  gst_vp8_picture_clear (&output_frame->picture);
+  gst_clear_vp8_picture (&output_frame->picture);
 }
 
 static GstFlowReturn
@@ -448,6 +469,13 @@ gst_vp8_decoder_handle_frame (GstVideoDecoder * decoder,
 
     ret = gst_video_decoder_finish_frame (GST_VIDEO_DECODER (self), frame);
   } else {
+    /* If subclass didn't update output state at this point,
+     * marking this picture as a discont and stores current input state */
+    if (priv->input_state_changed) {
+      picture->discont_state = gst_video_codec_state_ref (self->input_state);
+      priv->input_state_changed = FALSE;
+    }
+
     output_frame.frame = frame;
     output_frame.picture = picture;
     output_frame.self = self;

@@ -363,10 +363,9 @@ create_swap_chain_for_composition (GstD3D11WindowSwapChainPanel * self,
     return NULL;
   }
 
-  gst_d3d11_device_lock (device);
+  GstD3D11DeviceLockGuard lk (device);
   hr = factory2->CreateSwapChainForComposition (device_handle,
       desc, output, &swap_chain);
-  gst_d3d11_device_unlock (device);
 
   if (!gst_d3d11_result (hr, device)) {
     GST_WARNING_OBJECT (self, "Cannot create SwapChain Object: 0x%x",
@@ -443,7 +442,7 @@ gst_d3d11_window_swap_chain_panel_present (GstD3D11Window * window,
   IDXGISwapChain1 *swap_chain = (IDXGISwapChain1 *) window->swap_chain;
 
   /* the first present should not specify dirty-rect */
-  if (!window->first_present) {
+  if (!window->first_present && !window->emit_present) {
     present_params.DirtyRectsCount = 1;
     present_params.pDirtyRects = &window->render_rect;
   }

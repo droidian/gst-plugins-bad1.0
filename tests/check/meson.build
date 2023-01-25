@@ -32,13 +32,15 @@ base_tests = [
   [['elements/ccconverter.c'], not closedcaption_dep.found(), [gstvideo_dep]],
   [['elements/cccombiner.c'], not closedcaption_dep.found(), ],
   [['elements/ccextractor.c'], not closedcaption_dep.found(), ],
-  [['elements/cudaconvert.c'], false, [gmodule_dep, gstgl_dep]],
-  [['elements/cudafilter.c'], false, [gmodule_dep, gstgl_dep]],
+  [['elements/cudaconvert.c'], false, [gstgl_dep, gmodule_dep]],
+  [['elements/cudafilter.c'], false, [gstgl_dep, gmodule_dep]],
   [['elements/d3d11colorconvert.c'], host_machine.system() != 'windows', ],
+  [['elements/fdkaac.c'], not fdkaac_dep.found(), ],
   [['elements/gdpdepay.c'], get_option('gdp').disabled()],
   [['elements/gdppay.c'], get_option('gdp').disabled()],
   [['elements/h263parse.c'], false, [libparser_dep, gstcodecparsers_dep]],
   [['elements/h264parse.c'], false, [libparser_dep, gstcodecparsers_dep]],
+  [['elements/h264timestamper.c'], false, [libparser_dep, gstcodecparsers_dep]],
   [['elements/h265parse.c'], false, [libparser_dep, gstcodecparsers_dep]],
   [['elements/hlsdemux_m3u8.c'], not hls_dep.found(), [hls_dep]],
   [['elements/id3mux.c'], get_option('id3tag').disabled()],
@@ -53,6 +55,8 @@ base_tests = [
   [['elements/msdkh264enc.c'], not have_msdk, [msdk_dep]],
   [['elements/mxfdemux.c'], get_option('mxf').disabled()],
   [['elements/mxfmux.c'], get_option('mxf').disabled()],
+  [['elements/nvenc.c'], false, [gstgl_dep, gmodule_dep]],
+  [['elements/nvdec.c'], not gstgl_dep.found(), [gstgl_dep, gmodule_dep]],
   [['elements/svthevcenc.c'], not svthevcenc_dep.found(), [svthevcenc_dep]],
    [['elements/openjpeg.c'], not openjpeg_dep.found(), [openjpeg_dep]],
   [['elements/pcapparse.c'], false, [libparser_dep]],
@@ -63,9 +67,11 @@ base_tests = [
   [['elements/rtponviftimestamp.c'], get_option('onvif').disabled()],
   [['elements/rtpsrc.c'], get_option('rtp').disabled()],
   [['elements/rtpsink.c'], get_option('rtp').disabled()],
+  [['elements/srtp.c'], not srtp_dep.found(), [srtp_dep]],
   [['elements/switchbin.c'], get_option('switchbin').disabled()],
   [['elements/videoframe-audiolevel.c'], get_option('videoframe_audiolevel').disabled()],
   [['elements/viewfinderbin.c']],
+  [['elements/voamrwbenc.c'], not voamrwbenc_dep.found(), [voamrwbenc_dep]],
   [['elements/vp9parse.c'], false, [gstcodecparsers_dep]],
   [['elements/av1parse.c'], false, [gstcodecparsers_dep]],
   [['elements/wasapi.c'], host_machine.system() != 'windows', ],
@@ -83,6 +89,8 @@ base_tests = [
   [['libs/vp8parser.c'], false, [gstcodecparsers_dep]],
   [['libs/vp9parser.c'], false, [gstcodecparsers_dep]],
   [['libs/av1parser.c'], false, [gstcodecparsers_dep]],
+  [['libs/h264bitwriter.c'], false, [gstcodecparsers_dep]],
+  [['libs/h265bitwriter.c'], false, [gstcodecparsers_dep]],
   [['libs/vkmemory.c'], not gstvulkan_dep.found(), [gstvulkan_dep]],
   [['elements/vkcolorconvert.c'], not gstvulkan_dep.found(), [gstvulkan_dep]],
   [['libs/vkwindow.c'], not gstvulkan_dep.found(), [gstvulkan_dep]],
@@ -143,6 +151,7 @@ endif
 if host_machine.system() == 'linux'
   base_tests += [
     [['elements/vapostproc.c'], not gstva_dep.found(), [gstva_dep]],
+    [['elements/vacompositor.c'], not gstva_dep.found(), [gstva_dep]],
   ]
 endif
 
@@ -160,7 +169,7 @@ test_deps = [gst_dep, gstapp_dep, gstbase_dep,
              gstbasecamerabin_dep, gstphotography_dep,
              gstpbutils_dep, gstcontroller_dep, gstaudio_dep,
              gstvideo_dep, gstrtp_dep, gsturidownloader_dep,
-             gstcheck_dep, gio_dep, glib_dep, gsttag_dep]
+             gstcheck_dep, gio_dep, gsttag_dep]
 
 pluginsdirs = [  ]
 
@@ -226,6 +235,9 @@ endforeach
 # orc tests
 orc_tests = [
   ['orc_bayer', files('../../gst/bayer/gstbayerorc.orc')],
+  ['orc_fieldanalysis', files('../../gst/fieldanalysis/gstfieldanalysisorc.orc')],
+  ['orc_gaudieffects', files('../../gst/gaudieffects/gstgaudieffectsorc.orc')],
+  ['orc_scenechange', files('../../gst/videofilters/gstscenechangeorc.orc')],
 ]
 
 orc_test_dep = dependency('', required : false)

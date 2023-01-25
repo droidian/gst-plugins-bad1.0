@@ -36,9 +36,7 @@ static guint _gst_d3d11_texture_max_dimension = 16384;
 void
 gst_d3d11_plugin_utils_init (D3D_FEATURE_LEVEL feature_level)
 {
-  static gsize _init_once = 0;
-
-  if (g_once_init_enter (&_init_once)) {
+  GST_D3D11_CALL_ONCE_BEGIN {
     /* https://docs.microsoft.com/en-us/windows/win32/direct3d11/overviews-direct3d-11-devices-downlevel-intro */
     if (feature_level >= D3D_FEATURE_LEVEL_11_0)
       _gst_d3d11_texture_max_dimension = 16384;
@@ -46,9 +44,8 @@ gst_d3d11_plugin_utils_init (D3D_FEATURE_LEVEL feature_level)
       _gst_d3d11_texture_max_dimension = 8192;
     else
       _gst_d3d11_texture_max_dimension = 4096;
-
-    g_once_init_leave (&_init_once, 1);
   }
+  GST_D3D11_CALL_ONCE_END;
 }
 
 GstCaps *
@@ -75,19 +72,16 @@ gst_d3d11_get_updated_template_caps (GstStaticCaps * template_caps)
 gboolean
 gst_d3d11_is_windows_8_or_greater (void)
 {
-  static gsize version_once = 0;
   static gboolean ret = FALSE;
 
-  if (g_once_init_enter (&version_once)) {
+  GST_D3D11_CALL_ONCE_BEGIN {
 #if (!GST_D3D11_WINAPI_ONLY_APP)
     if (IsWindows8OrGreater ())
       ret = TRUE;
 #else
     ret = TRUE;
 #endif
-
-    g_once_init_leave (&version_once, 1);
-  }
+  } GST_D3D11_CALL_ONCE_END;
 
   return ret;
 }
@@ -133,7 +127,6 @@ gst_d3d11_get_device_vendor (GstD3D11Device * device)
   return vendor;
 }
 
-#if (GST_D3D11_DXGI_HEADER_VERSION >= 5)
 gboolean
 gst_d3d11_hdr_meta_data_to_dxgi (GstVideoMasteringDisplayInfo * minfo,
     GstVideoContentLightLevel * cll, DXGI_HDR_METADATA_HDR10 * dxgi_hdr10)
@@ -163,417 +156,45 @@ gst_d3d11_hdr_meta_data_to_dxgi (GstVideoMasteringDisplayInfo * minfo,
 
   return TRUE;
 }
-#endif
 
-#if (GST_D3D11_DXGI_HEADER_VERSION >= 4)
-typedef enum
+gboolean
+gst_d3d11_find_swap_chain_color_space (const GstVideoInfo * info,
+    IDXGISwapChain3 * swapchain, DXGI_COLOR_SPACE_TYPE * color_space)
 {
-  GST_DXGI_COLOR_SPACE_RGB_FULL_G22_NONE_P709 = 0,
-  GST_DXGI_COLOR_SPACE_RGB_FULL_G10_NONE_P709 = 1,
-  GST_DXGI_COLOR_SPACE_RGB_STUDIO_G22_NONE_P709 = 2,
-  GST_DXGI_COLOR_SPACE_RGB_STUDIO_G22_NONE_P2020 = 3,
-  GST_DXGI_COLOR_SPACE_RESERVED = 4,
-  GST_DXGI_COLOR_SPACE_YCBCR_FULL_G22_NONE_P709_X601 = 5,
-  GST_DXGI_COLOR_SPACE_YCBCR_STUDIO_G22_LEFT_P601 = 6,
-  GST_DXGI_COLOR_SPACE_YCBCR_FULL_G22_LEFT_P601 = 7,
-  GST_DXGI_COLOR_SPACE_YCBCR_STUDIO_G22_LEFT_P709 = 8,
-  GST_DXGI_COLOR_SPACE_YCBCR_FULL_G22_LEFT_P709 = 9,
-  GST_DXGI_COLOR_SPACE_YCBCR_STUDIO_G22_LEFT_P2020 = 10,
-  GST_DXGI_COLOR_SPACE_YCBCR_FULL_G22_LEFT_P2020 = 11,
-  GST_DXGI_COLOR_SPACE_RGB_FULL_G2084_NONE_P2020 = 12,
-  GST_DXGI_COLOR_SPACE_YCBCR_STUDIO_G2084_LEFT_P2020 = 13,
-  GST_DXGI_COLOR_SPACE_RGB_STUDIO_G2084_NONE_P2020 = 14,
-  GST_DXGI_COLOR_SPACE_YCBCR_STUDIO_G22_TOPLEFT_P2020 = 15,
-  GST_DXGI_COLOR_SPACE_YCBCR_STUDIO_G2084_TOPLEFT_P2020 = 16,
-  GST_DXGI_COLOR_SPACE_RGB_FULL_G22_NONE_P2020 = 17,
-  GST_DXGI_COLOR_SPACE_YCBCR_STUDIO_GHLG_TOPLEFT_P2020 = 18,
-  GST_DXGI_COLOR_SPACE_YCBCR_FULL_GHLG_TOPLEFT_P2020 = 19,
-  GST_DXGI_COLOR_SPACE_RGB_STUDIO_G24_NONE_P709 = 20,
-  GST_DXGI_COLOR_SPACE_RGB_STUDIO_G24_NONE_P2020 = 21,
-  GST_DXGI_COLOR_SPACE_YCBCR_STUDIO_G24_LEFT_P709 = 22,
-  GST_DXGI_COLOR_SPACE_YCBCR_STUDIO_G24_LEFT_P2020 = 23,
-  GST_DXGI_COLOR_SPACE_YCBCR_STUDIO_G24_TOPLEFT_P2020 = 24,
-  GST_DXGI_COLOR_SPACE_CUSTOM = 0xFFFFFFFF
-} GST_DXGI_COLOR_SPACE_TYPE;
-
-/* https://docs.microsoft.com/en-us/windows/win32/api/dxgicommon/ne-dxgicommon-dxgi_color_space_type */
-
-#define MAKE_COLOR_MAP(d,r,m,t,p) \
-  { GST_DXGI_COLOR_SPACE_ ##d, GST_VIDEO_COLOR_RANGE ##r, \
-    GST_VIDEO_COLOR_MATRIX_ ##m, GST_VIDEO_TRANSFER_ ##t, \
-    GST_VIDEO_COLOR_PRIMARIES_ ##p }
-
-static const GstDxgiColorSpace rgb_colorspace_map[] = {
-  /* 1) DXGI_COLOR_SPACE_RGB_FULL_G22_NONE_P709
-   * 2) DXGI_COLOR_SPACE_RGB_FULL_G10_NONE_P709
-   * 3) DXGI_COLOR_SPACE_RGB_STUDIO_G22_NONE_P709
-   * 4) DXGI_COLOR_SPACE_RGB_STUDIO_G22_NONE_P2020
-   * 5) DXGI_COLOR_SPACE_RGB_FULL_G2084_NONE_P2020
-   * 6) DXGI_COLOR_SPACE_RGB_STUDIO_G2084_NONE_P2020
-   * 7) DXGI_COLOR_SPACE_RGB_FULL_G22_NONE_P2020
-   * 8) DXGI_COLOR_SPACE_RGB_STUDIO_G24_NONE_P709
-   * 9) DXGI_COLOR_SPACE_RGB_STUDIO_G24_NONE_P2020
-   *
-   * NOTE: if G24 (Gamma 2.4, SRGB) transfer is not defined,
-   * it will be approximated as G22.
-   * NOTE: BT470BG ~= BT709
-   */
-
-  /* 1) RGB_FULL_G22_NONE_P709 */
-  MAKE_COLOR_MAP (RGB_FULL_G22_NONE_P709, _0_255, UNKNOWN, BT709, BT709),
-  MAKE_COLOR_MAP (RGB_FULL_G22_NONE_P709, _0_255, UNKNOWN, BT601, BT709),
-  MAKE_COLOR_MAP (RGB_FULL_G22_NONE_P709, _0_255, UNKNOWN, BT2020_10, BT709),
-  MAKE_COLOR_MAP (RGB_FULL_G22_NONE_P709, _0_255, UNKNOWN, BT2020_12, BT709),
-  MAKE_COLOR_MAP (RGB_FULL_G22_NONE_P709, _0_255, UNKNOWN, BT709, BT470BG),
-  MAKE_COLOR_MAP (RGB_FULL_G22_NONE_P709, _0_255, UNKNOWN, BT601, BT470BG),
-  MAKE_COLOR_MAP (RGB_FULL_G22_NONE_P709, _0_255, UNKNOWN, BT2020_10, BT470BG),
-  MAKE_COLOR_MAP (RGB_FULL_G22_NONE_P709, _0_255, UNKNOWN, BT2020_12, BT470BG),
-
-  /* 1-1) Approximation for RGB_FULL_G22_NONE_P709 */
-  MAKE_COLOR_MAP (RGB_FULL_G22_NONE_P709, _0_255, UNKNOWN, SRGB, BT709),
-  MAKE_COLOR_MAP (RGB_FULL_G22_NONE_P709, _0_255, UNKNOWN, SRGB, BT470BG),
-
-  /* 2) RGB_FULL_G10_NONE_P709 */
-  MAKE_COLOR_MAP (RGB_FULL_G10_NONE_P709, _0_255, UNKNOWN, GAMMA10, BT709),
-  MAKE_COLOR_MAP (RGB_FULL_G10_NONE_P709, _0_255, UNKNOWN, GAMMA10, BT470BG),
-
-  /* 3) RGB_STUDIO_G22_NONE_P709 */
-  MAKE_COLOR_MAP (RGB_STUDIO_G22_NONE_P709, _16_235, UNKNOWN, BT709, BT709),
-  MAKE_COLOR_MAP (RGB_STUDIO_G22_NONE_P709, _16_235, UNKNOWN, BT601, BT709),
-  MAKE_COLOR_MAP (RGB_STUDIO_G22_NONE_P709, _16_235, UNKNOWN, BT2020_10, BT709),
-  MAKE_COLOR_MAP (RGB_STUDIO_G22_NONE_P709, _16_235, UNKNOWN, BT2020_12, BT709),
-  MAKE_COLOR_MAP (RGB_STUDIO_G22_NONE_P709, _16_235, UNKNOWN, BT709, BT470BG),
-  MAKE_COLOR_MAP (RGB_STUDIO_G22_NONE_P709, _16_235, UNKNOWN, BT601, BT470BG),
-  MAKE_COLOR_MAP (RGB_STUDIO_G22_NONE_P709, _16_235, UNKNOWN, BT2020_10,
-      BT470BG),
-  MAKE_COLOR_MAP (RGB_STUDIO_G22_NONE_P709, _16_235, UNKNOWN, BT2020_12,
-      BT470BG),
-
-  /* 3-1) Approximation for RGB_STUDIO_G22_NONE_P709 */
-  MAKE_COLOR_MAP (RGB_STUDIO_G22_NONE_P709, _16_235, UNKNOWN, SRGB, BT709),
-  MAKE_COLOR_MAP (RGB_STUDIO_G22_NONE_P709, _16_235, UNKNOWN, SRGB, BT470BG),
-
-  /* 4) RGB_STUDIO_G22_NONE_P2020 */
-  MAKE_COLOR_MAP (RGB_STUDIO_G22_NONE_P2020, _16_235, UNKNOWN, BT709, BT2020),
-  MAKE_COLOR_MAP (RGB_STUDIO_G22_NONE_P2020, _16_235, UNKNOWN, BT601, BT2020),
-  MAKE_COLOR_MAP (RGB_STUDIO_G22_NONE_P2020, _16_235, UNKNOWN, BT2020_10,
-      BT2020),
-  MAKE_COLOR_MAP (RGB_STUDIO_G22_NONE_P2020, _16_235, UNKNOWN, BT2020_12,
-      BT2020),
-
-  /* 5) RGB_FULL_G2084_NONE_P2020 */
-  MAKE_COLOR_MAP (RGB_FULL_G2084_NONE_P2020, _0_255, UNKNOWN, SMPTE2084,
-      BT2020),
-
-  /* 6) RGB_STUDIO_G2084_NONE_P2020 */
-  MAKE_COLOR_MAP (RGB_STUDIO_G2084_NONE_P2020, _16_235, UNKNOWN, SMPTE2084,
-      BT2020),
-
-  /* 7) RGB_FULL_G22_NONE_P2020 */
-  MAKE_COLOR_MAP (RGB_FULL_G22_NONE_P2020, _0_255, UNKNOWN, BT709, BT2020),
-  MAKE_COLOR_MAP (RGB_FULL_G22_NONE_P2020, _0_255, UNKNOWN, BT601, BT2020),
-  MAKE_COLOR_MAP (RGB_FULL_G22_NONE_P2020, _0_255, UNKNOWN, BT2020_10, BT2020),
-  MAKE_COLOR_MAP (RGB_FULL_G22_NONE_P2020, _0_255, UNKNOWN, BT2020_12, BT2020),
-
-  /* 7-1) Approximation for RGB_FULL_G22_NONE_P2020 */
-  MAKE_COLOR_MAP (RGB_FULL_G22_NONE_P2020, _0_255, UNKNOWN, SRGB, BT2020),
-
-  /* 8) RGB_STUDIO_G24_NONE_P709 */
-  MAKE_COLOR_MAP (RGB_STUDIO_G24_NONE_P709, _16_235, UNKNOWN, SRGB, BT709),
-  MAKE_COLOR_MAP (RGB_STUDIO_G24_NONE_P709, _16_235, UNKNOWN, SRGB, BT470BG),
-
-  /* 9) RGB_STUDIO_G24_NONE_P2020 */
-  MAKE_COLOR_MAP (RGB_STUDIO_G24_NONE_P2020, _16_235, UNKNOWN, SRGB, BT2020),
-};
-
-static const GstDxgiColorSpace yuv_colorspace_map[] = {
-  /* 1) YCBCR_FULL_G22_NONE_P709_X601
-   * 2) YCBCR_STUDIO_G22_LEFT_P601
-   * 3) YCBCR_FULL_G22_LEFT_P601
-   * 4) YCBCR_STUDIO_G22_LEFT_P709
-   * 5) YCBCR_FULL_G22_LEFT_P709
-   * 6) YCBCR_STUDIO_G22_LEFT_P2020
-   * 7) YCBCR_FULL_G22_LEFT_P2020
-   * 8) YCBCR_STUDIO_G2084_LEFT_P2020
-   * 9) YCBCR_STUDIO_G22_TOPLEFT_P2020
-   * 10) YCBCR_STUDIO_G2084_TOPLEFT_P2020
-   * 11) YCBCR_STUDIO_GHLG_TOPLEFT_P2020
-   * 12) YCBCR_FULL_GHLG_TOPLEFT_P2020
-   * 13) YCBCR_STUDIO_G24_LEFT_P709
-   * 14) YCBCR_STUDIO_G24_LEFT_P2020
-   * 15) YCBCR_STUDIO_G24_TOPLEFT_P2020
-   *
-   * NOTE: BT470BG ~= BT709
-   */
-
-  /* 1) YCBCR_FULL_G22_NONE_P709_X601 */
-  MAKE_COLOR_MAP (YCBCR_FULL_G22_NONE_P709_X601, _0_255, BT601, BT709, BT709),
-  MAKE_COLOR_MAP (YCBCR_FULL_G22_NONE_P709_X601, _0_255, BT601, BT601, BT709),
-  MAKE_COLOR_MAP (YCBCR_FULL_G22_NONE_P709_X601, _0_255, BT601, BT2020_10,
-      BT709),
-  MAKE_COLOR_MAP (YCBCR_FULL_G22_NONE_P709_X601, _0_255, BT601, BT2020_12,
-      BT709),
-  MAKE_COLOR_MAP (YCBCR_FULL_G22_NONE_P709_X601, _0_255, BT601, BT709, BT470BG),
-  MAKE_COLOR_MAP (YCBCR_FULL_G22_NONE_P709_X601, _0_255, BT601, BT601, BT470BG),
-  MAKE_COLOR_MAP (YCBCR_FULL_G22_NONE_P709_X601, _0_255, BT601, BT2020_10,
-      BT470BG),
-  MAKE_COLOR_MAP (YCBCR_FULL_G22_NONE_P709_X601, _0_255, BT601, BT2020_12,
-      BT470BG),
-
-  /* 2) YCBCR_STUDIO_G22_LEFT_P601 */
-  MAKE_COLOR_MAP (YCBCR_STUDIO_G22_LEFT_P601, _16_235, BT601, BT601, SMPTE170M),
-  MAKE_COLOR_MAP (YCBCR_STUDIO_G22_LEFT_P601, _16_235, BT601, BT709, SMPTE170M),
-  MAKE_COLOR_MAP (YCBCR_STUDIO_G22_LEFT_P601, _16_235, BT601, BT2020_10,
-      SMPTE170M),
-  MAKE_COLOR_MAP (YCBCR_STUDIO_G22_LEFT_P601, _16_235, BT601, BT2020_12,
-      SMPTE170M),
-  MAKE_COLOR_MAP (YCBCR_STUDIO_G22_LEFT_P601, _16_235, BT601, BT601, SMPTE240M),
-  MAKE_COLOR_MAP (YCBCR_STUDIO_G22_LEFT_P601, _16_235, BT601, BT709, SMPTE240M),
-  MAKE_COLOR_MAP (YCBCR_STUDIO_G22_LEFT_P601, _16_235, BT601, BT2020_10,
-      SMPTE240M),
-  MAKE_COLOR_MAP (YCBCR_STUDIO_G22_LEFT_P601, _16_235, BT601, BT2020_12,
-      SMPTE240M),
-
-  /* 3) YCBCR_FULL_G22_LEFT_P601 */
-  MAKE_COLOR_MAP (YCBCR_FULL_G22_LEFT_P601, _0_255, BT601, BT601, SMPTE170M),
-  MAKE_COLOR_MAP (YCBCR_FULL_G22_LEFT_P601, _0_255, BT601, BT709, SMPTE170M),
-  MAKE_COLOR_MAP (YCBCR_FULL_G22_LEFT_P601, _0_255, BT601, BT2020_10,
-      SMPTE170M),
-  MAKE_COLOR_MAP (YCBCR_FULL_G22_LEFT_P601, _0_255, BT601, BT2020_12,
-      SMPTE170M),
-  MAKE_COLOR_MAP (YCBCR_FULL_G22_LEFT_P601, _0_255, BT601, BT601, SMPTE240M),
-  MAKE_COLOR_MAP (YCBCR_FULL_G22_LEFT_P601, _0_255, BT601, BT709, SMPTE240M),
-  MAKE_COLOR_MAP (YCBCR_FULL_G22_LEFT_P601, _0_255, BT601, BT2020_10,
-      SMPTE240M),
-  MAKE_COLOR_MAP (YCBCR_FULL_G22_LEFT_P601, _0_255, BT601, BT2020_12,
-      SMPTE240M),
-
-  /* 4) YCBCR_STUDIO_G22_LEFT_P709 */
-  MAKE_COLOR_MAP (YCBCR_STUDIO_G22_LEFT_P709, _16_235, BT709, BT709, BT709),
-  MAKE_COLOR_MAP (YCBCR_STUDIO_G22_LEFT_P709, _16_235, BT709, BT601, BT709),
-  MAKE_COLOR_MAP (YCBCR_STUDIO_G22_LEFT_P709, _16_235, BT709, BT2020_10,
-      BT709),
-  MAKE_COLOR_MAP (YCBCR_STUDIO_G22_LEFT_P709, _16_235, BT709, BT2020_12,
-      BT709),
-  MAKE_COLOR_MAP (YCBCR_STUDIO_G22_LEFT_P709, _16_235, BT709, BT709, BT470BG),
-  MAKE_COLOR_MAP (YCBCR_STUDIO_G22_LEFT_P709, _16_235, BT709, BT601, BT470BG),
-  MAKE_COLOR_MAP (YCBCR_STUDIO_G22_LEFT_P709, _16_235, BT709, BT2020_10,
-      BT470BG),
-  MAKE_COLOR_MAP (YCBCR_STUDIO_G22_LEFT_P709, _16_235, BT709, BT2020_12,
-      BT470BG),
-
-  /* 5) YCBCR_FULL_G22_LEFT_P709 */
-  MAKE_COLOR_MAP (YCBCR_FULL_G22_LEFT_P709, _0_255, BT709, BT709, BT709),
-  MAKE_COLOR_MAP (YCBCR_FULL_G22_LEFT_P709, _0_255, BT709, BT601, BT709),
-  MAKE_COLOR_MAP (YCBCR_FULL_G22_LEFT_P709, _0_255, BT709, BT2020_10, BT709),
-  MAKE_COLOR_MAP (YCBCR_FULL_G22_LEFT_P709, _0_255, BT709, BT2020_12, BT709),
-  MAKE_COLOR_MAP (YCBCR_FULL_G22_LEFT_P709, _0_255, BT709, BT709, BT470BG),
-  MAKE_COLOR_MAP (YCBCR_FULL_G22_LEFT_P709, _0_255, BT709, BT601, BT470BG),
-  MAKE_COLOR_MAP (YCBCR_FULL_G22_LEFT_P709, _0_255, BT709, BT2020_10, BT470BG),
-  MAKE_COLOR_MAP (YCBCR_FULL_G22_LEFT_P709, _0_255, BT709, BT2020_12, BT470BG),
-
-  /* 6) YCBCR_STUDIO_G22_LEFT_P2020 */
-  MAKE_COLOR_MAP (YCBCR_STUDIO_G22_LEFT_P2020, _16_235, BT2020, BT709, BT2020),
-  MAKE_COLOR_MAP (YCBCR_STUDIO_G22_LEFT_P2020, _16_235, BT2020, BT601, BT2020),
-  MAKE_COLOR_MAP (YCBCR_STUDIO_G22_LEFT_P2020, _16_235, BT2020, BT2020_10,
-      BT2020),
-  MAKE_COLOR_MAP (YCBCR_STUDIO_G22_LEFT_P2020, _16_235, BT2020, BT2020_12,
-      BT2020),
-
-  /* 7) YCBCR_FULL_G22_LEFT_P2020 */
-  MAKE_COLOR_MAP (YCBCR_FULL_G22_LEFT_P2020, _0_255, BT2020, BT709, BT2020),
-  MAKE_COLOR_MAP (YCBCR_FULL_G22_LEFT_P2020, _0_255, BT2020, BT601, BT2020),
-  MAKE_COLOR_MAP (YCBCR_FULL_G22_LEFT_P2020, _0_255, BT2020, BT2020_10,
-      BT2020),
-  MAKE_COLOR_MAP (YCBCR_FULL_G22_LEFT_P2020, _0_255, BT2020, BT2020_12,
-      BT2020),
-
-  /* 8) YCBCR_STUDIO_G2084_LEFT_P2020 */
-  MAKE_COLOR_MAP (YCBCR_STUDIO_G2084_LEFT_P2020, _16_235, BT2020, SMPTE2084,
-      BT2020),
-
-  /* 9) YCBCR_STUDIO_G22_TOPLEFT_P2020 */
-  MAKE_COLOR_MAP (YCBCR_STUDIO_G22_TOPLEFT_P2020, _16_235, BT2020, BT2020_10,
-      BT2020),
-  MAKE_COLOR_MAP (YCBCR_STUDIO_G22_TOPLEFT_P2020, _16_235, BT2020, BT2020_12,
-      BT2020),
-
-  /* 10) YCBCR_STUDIO_G2084_TOPLEFT_P2020 */
-  /* FIXME: check chroma-site to differentiate this from
-   * YCBCR_STUDIO_G2084_LEFT_P2020 */
-  MAKE_COLOR_MAP (YCBCR_STUDIO_G2084_TOPLEFT_P2020, _16_235, BT2020, SMPTE2084,
-      BT2020),
-
-  /* 11) YCBCR_STUDIO_GHLG_TOPLEFT_P2020 */
-  MAKE_COLOR_MAP (YCBCR_STUDIO_GHLG_TOPLEFT_P2020, _16_235, BT2020,
-      ARIB_STD_B67, BT2020),
-
-  /* 12) YCBCR_FULL_GHLG_TOPLEFT_P2020 */
-  MAKE_COLOR_MAP (YCBCR_FULL_GHLG_TOPLEFT_P2020, _0_255, BT2020, ARIB_STD_B67,
-      BT2020),
-
-  /* 13) YCBCR_STUDIO_G24_LEFT_P709 */
-  MAKE_COLOR_MAP (YCBCR_STUDIO_G24_LEFT_P709, _16_235, BT709, SRGB, BT709),
-
-  /* 14) YCBCR_STUDIO_G24_LEFT_P2020 */
-  MAKE_COLOR_MAP (YCBCR_STUDIO_G24_LEFT_P2020, _16_235, BT2020, SRGB, BT2020),
-
-  /* 15) YCBCR_STUDIO_G24_TOPLEFT_P2020 */
-  /* FIXME: check chroma-site to differentiate this from
-   * YCBCR_STUDIO_G24_LEFT_P2020 */
-  MAKE_COLOR_MAP (YCBCR_STUDIO_G24_TOPLEFT_P2020, _16_235, BT2020, SRGB,
-      BT2020),
-};
-
-#define SCORE_RANGE_MISMATCH 5
-#define SCORE_MATRIX_MISMATCH 5
-#define SCORE_TRANSFER_MISMATCH 5
-#define SCORE_PRIMARY_MISMATCH 10
-
-static gint
-get_score (GstVideoInfo * info, const GstDxgiColorSpace * color_map,
-    gboolean is_yuv)
-{
-  gint loss = 0;
-  GstVideoColorimetry *color = &info->colorimetry;
-
-  if (color->range != color_map->range)
-    loss += SCORE_RANGE_MISMATCH;
-
-  if (is_yuv && color->matrix != color_map->matrix)
-    loss += SCORE_MATRIX_MISMATCH;
-
-  if (color->transfer != color_map->transfer)
-    loss += SCORE_TRANSFER_MISMATCH;
-
-  if (color->primaries != color_map->primaries)
-    loss += SCORE_PRIMARY_MISMATCH;
-
-  return loss;
-}
-
-static const GstDxgiColorSpace *
-gst_d3d11_video_info_to_dxgi_color_space_rgb (GstVideoInfo * info)
-{
-  gint best_score = G_MAXINT;
-  gint score;
-  guint i;
-  const GstDxgiColorSpace *colorspace = NULL;
-
-  for (i = 0; i < G_N_ELEMENTS (rgb_colorspace_map); i++) {
-    score = get_score (info, &rgb_colorspace_map[i], FALSE);
-
-    if (score < best_score) {
-      best_score = score;
-      colorspace = &rgb_colorspace_map[i];
-
-      if (score == 0)
-        break;
-    }
-  }
-
-  return colorspace;
-}
-
-static const GstDxgiColorSpace *
-gst_d3d11_video_info_to_dxgi_color_space_yuv (GstVideoInfo * info)
-{
-  gint best_score = G_MAXINT;
-  gint score;
-  guint i;
-  const GstDxgiColorSpace *colorspace = NULL;
-
-  for (i = 0; i < G_N_ELEMENTS (yuv_colorspace_map); i++) {
-    score = get_score (info, &yuv_colorspace_map[i], TRUE);
-
-    if (score < best_score) {
-      best_score = score;
-      colorspace = &yuv_colorspace_map[i];
-
-      if (score == 0)
-        break;
-    }
-  }
-
-  return colorspace;
-}
-
-const GstDxgiColorSpace *
-gst_d3d11_video_info_to_dxgi_color_space (GstVideoInfo * info)
-{
-  g_return_val_if_fail (info != NULL, NULL);
-
-  if (GST_VIDEO_INFO_IS_RGB (info)) {
-    return gst_d3d11_video_info_to_dxgi_color_space_rgb (info);
-  } else if (GST_VIDEO_INFO_IS_YUV (info)) {
-    return gst_d3d11_video_info_to_dxgi_color_space_yuv (info);
-  }
-
-  return NULL;
-}
-
-const GstDxgiColorSpace *
-gst_d3d11_find_swap_chain_color_space (GstVideoInfo * info,
-    IDXGISwapChain3 * swapchain)
-{
-  const GstDxgiColorSpace *colorspace = NULL;
-  gint best_score = G_MAXINT;
-  guint i;
-  /* list of tested display color spaces */
-  static GST_DXGI_COLOR_SPACE_TYPE whitelist[] = {
-    GST_DXGI_COLOR_SPACE_RGB_FULL_G22_NONE_P709,
-    GST_DXGI_COLOR_SPACE_RGB_FULL_G10_NONE_P709,
-    GST_DXGI_COLOR_SPACE_RGB_FULL_G2084_NONE_P2020,
-  };
+  UINT can_support = 0;
+  HRESULT hr;
+  DXGI_COLOR_SPACE_TYPE color;
 
   g_return_val_if_fail (info != NULL, FALSE);
   g_return_val_if_fail (swapchain != NULL, FALSE);
+  g_return_val_if_fail (color_space != NULL, FALSE);
 
   if (!GST_VIDEO_INFO_IS_RGB (info)) {
     GST_WARNING ("Swapchain colorspace should be RGB format");
     return FALSE;
   }
 
-  for (i = 0; i < G_N_ELEMENTS (rgb_colorspace_map); i++) {
-    UINT can_support = 0;
-    HRESULT hr;
-    gint score;
-    gboolean valid = FALSE;
-    GST_DXGI_COLOR_SPACE_TYPE cur_type =
-        (GST_DXGI_COLOR_SPACE_TYPE) rgb_colorspace_map[i].dxgi_color_space_type;
-
-    for (guint j = 0; j < G_N_ELEMENTS (whitelist); j++) {
-      if (whitelist[j] == cur_type) {
-        valid = TRUE;
-        break;
-      }
-    }
-
-    if (!valid)
-      continue;
-
-    hr = swapchain->CheckColorSpaceSupport ((DXGI_COLOR_SPACE_TYPE) cur_type,
-        &can_support);
-
-    if (FAILED (hr))
-      continue;
-
-    if ((can_support & DXGI_SWAP_CHAIN_COLOR_SPACE_SUPPORT_FLAG_PRESENT) ==
-        DXGI_SWAP_CHAIN_COLOR_SPACE_SUPPORT_FLAG_PRESENT) {
-      score = get_score (info, &rgb_colorspace_map[i], FALSE);
-
-      GST_DEBUG ("colorspace %d supported, score %d", cur_type, score);
-
-      if (score < best_score) {
-        best_score = score;
-        colorspace = &rgb_colorspace_map[i];
-      }
+  /* Select PQ color space only if input is also PQ */
+  if (info->colorimetry.primaries == GST_VIDEO_COLOR_PRIMARIES_BT2020 &&
+      info->colorimetry.transfer == GST_VIDEO_TRANSFER_SMPTE2084) {
+    color = (DXGI_COLOR_SPACE_TYPE) 12;
+    hr = swapchain->CheckColorSpaceSupport (color, &can_support);
+    if (SUCCEEDED (hr) && can_support) {
+      *color_space = color;
+      return TRUE;
     }
   }
 
-  return colorspace;
+  /* otherwise use standard sRGB color space */
+  color = (DXGI_COLOR_SPACE_TYPE) 0;
+  hr = swapchain->CheckColorSpaceSupport (color, &can_support);
+  if (SUCCEEDED (hr) && can_support) {
+    *color_space = color;
+    return TRUE;
+  }
+
+  return FALSE;
 }
-#endif
 
 static void
 fill_staging_desc (const D3D11_TEXTURE2D_DESC * ref,
@@ -597,13 +218,12 @@ gst_d3d11_allocate_staging_buffer_for (GstBuffer * buffer,
 {
   GstD3D11Memory *dmem;
   GstD3D11Device *device;
-  GstD3D11Allocator *alloc = NULL;
   GstBuffer *staging_buffer = NULL;
   gint stride[GST_VIDEO_MAX_PLANES] = { 0, };
   gsize offset[GST_VIDEO_MAX_PLANES] = { 0, };
   guint i;
   gsize size = 0;
-  const GstD3D11Format *format;
+  GstD3D11Format format;
   D3D11_TEXTURE2D_DESC desc;
 
   for (i = 0; i < gst_buffer_n_memory (buffer); i++) {
@@ -618,16 +238,9 @@ gst_d3d11_allocate_staging_buffer_for (GstBuffer * buffer,
 
   dmem = (GstD3D11Memory *) gst_buffer_peek_memory (buffer, 0);
   device = dmem->device;
-  format = gst_d3d11_device_format_from_gst (device,
-      GST_VIDEO_INFO_FORMAT (info));
-  if (!format) {
+  if (!gst_d3d11_device_get_format (device, GST_VIDEO_INFO_FORMAT (info),
+          &format)) {
     GST_ERROR ("Unknown d3d11 format");
-    return NULL;
-  }
-
-  alloc = (GstD3D11Allocator *) gst_allocator_find (GST_D3D11_MEMORY_NAME);
-  if (!alloc) {
-    GST_ERROR ("D3D11 allocator is not available");
     return NULL;
   }
 
@@ -643,13 +256,13 @@ gst_d3d11_allocate_staging_buffer_for (GstBuffer * buffer,
     fill_staging_desc (&desc, &staging_desc);
 
     new_mem = (GstD3D11Memory *)
-        gst_d3d11_allocator_alloc (alloc, mem->device, &staging_desc);
+        gst_d3d11_allocator_alloc (nullptr, mem->device, &staging_desc);
     if (!new_mem) {
       GST_ERROR ("Failed to allocate memory");
       goto error;
     }
 
-    if (!gst_d3d11_memory_get_texture_stride (new_mem, &cur_stride) ||
+    if (!gst_d3d11_memory_get_resource_stride (new_mem, &cur_stride) ||
         cur_stride < staging_desc.Width) {
       GST_ERROR ("Failed to calculate memory size");
       gst_memory_unref (GST_MEMORY_CAST (mem));
@@ -664,7 +277,7 @@ gst_d3d11_allocate_staging_buffer_for (GstBuffer * buffer,
   }
 
   /* single texture semi-planar formats */
-  if (format->dxgi_format != DXGI_FORMAT_UNKNOWN &&
+  if (format.dxgi_format != DXGI_FORMAT_UNKNOWN &&
       GST_VIDEO_INFO_N_PLANES (info) == 2) {
     stride[1] = stride[0];
     offset[1] = stride[0] * desc.Height;
@@ -675,14 +288,10 @@ gst_d3d11_allocate_staging_buffer_for (GstBuffer * buffer,
       GST_VIDEO_INFO_HEIGHT (info), GST_VIDEO_INFO_N_PLANES (info),
       offset, stride);
 
-  if (alloc)
-    gst_object_unref (alloc);
-
   return staging_buffer;
 
 error:
   gst_clear_buffer (&staging_buffer);
-  gst_clear_object (&alloc);
 
   return NULL;
 }
@@ -801,10 +410,9 @@ gst_d3d11_buffer_copy_into (GstBuffer * dst, GstBuffer * src,
     dst_subidx = gst_d3d11_memory_get_subresource_index (dst_dmem);
     src_subidx = gst_d3d11_memory_get_subresource_index (src_dmem);
 
-    gst_d3d11_device_lock (device);
+    GstD3D11DeviceLockGuard lk (device);
     device_context->CopySubresourceRegion (dst_texture, dst_subidx, 0, 0, 0,
         src_texture, src_subidx, &src_box);
-    gst_d3d11_device_unlock (device);
 
     gst_memory_unmap (src_mem, &src_info);
     gst_memory_unmap (dst_mem, &dst_info);

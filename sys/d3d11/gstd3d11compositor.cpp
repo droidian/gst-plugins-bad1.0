@@ -23,10 +23,16 @@
  */
 
 /**
- * SECTION:element-d3d11compositorelement
- * @title: d3d11compositorelement
+ * SECTION:element-d3d11compositor
+ * @title: d3d11compositor
  *
  * A Direct3D11 based video compositing element.
+ *
+ * ## Example launch line
+ * ```
+ * gst-launch-1.0 d3d11compositor name=c ! d3d11videosink \
+ *     videotestsrc ! video/x-raw,width=320,height=240 ! c. \
+ *     videotestsrc pattern=ball ! video/x-raw,width=100,height=100 ! c.
  *
  * Since: 1.20
  *
@@ -37,286 +43,27 @@
 #endif
 
 #include "gstd3d11compositor.h"
-#include "gstd3d11converter.h"
-#include "gstd3d11shader.h"
 #include "gstd3d11pluginutils.h"
 #include <string.h>
 #include <wrl.h>
 
-GST_DEBUG_CATEGORY_EXTERN (gst_d3d11_compositor_debug);
+GST_DEBUG_CATEGORY_STATIC (gst_d3d11_compositor_debug);
 #define GST_CAT_DEFAULT gst_d3d11_compositor_debug
 
 /* *INDENT-OFF* */
 using namespace Microsoft::WRL;
 /* *INDENT-ON* */
 
-/**
- * GstD3D11CompositorBlendOperation:
- * @GST_D3D11_COMPOSITOR_BLEND_OP_ADD:
- *      Add source 1 and source 2
- * @GST_D3D11_COMPOSITOR_BLEND_OP_SUBTRACT:
- *      Subtract source 1 from source 2
- * @GST_D3D11_COMPOSITOR_BLEND_OP_REV_SUBTRACT:
- *      Subtract source 2 from source 1
- * @GST_D3D11_COMPOSITOR_BLEND_OP_MIN:
- *      Find the minimum of source 1 and source 2
- * @GST_D3D11_COMPOSITOR_BLEND_OP_MAX:
- *      Find the maximum of source 1 and source 2
- *
- * Since: 1.20
- */
-GType
-gst_d3d11_compositor_blend_operation_get_type (void)
+typedef enum
 {
-  static GType blend_operation_type = 0;
+  GST_D3D11_COMPOSITOR_BACKGROUND_CHECKER,
+  GST_D3D11_COMPOSITOR_BACKGROUND_BLACK,
+  GST_D3D11_COMPOSITOR_BACKGROUND_WHITE,
+  GST_D3D11_COMPOSITOR_BACKGROUND_TRANSPARENT,
+} GstD3D11CompositorBackground;
 
-  static const GEnumValue blend_operator[] = {
-    {GST_D3D11_COMPOSITOR_BLEND_OP_ADD, "Add source and background",
-        "add"},
-    {GST_D3D11_COMPOSITOR_BLEND_OP_SUBTRACT,
-          "Subtract source from background",
-        "subtract"},
-    {GST_D3D11_COMPOSITOR_BLEND_OP_REV_SUBTRACT,
-          "Subtract background from source",
-        "rev-subtract"},
-    {GST_D3D11_COMPOSITOR_BLEND_OP_MIN,
-        "Minimum of source and background", "min"},
-    {GST_D3D11_COMPOSITOR_BLEND_OP_MAX,
-        "Maximum of source and background", "max"},
-    {0, NULL, NULL},
-  };
-
-  if (!blend_operation_type) {
-    blend_operation_type =
-        g_enum_register_static ("GstD3D11CompositorBlendOperation",
-        blend_operator);
-  }
-  return blend_operation_type;
-}
-
-static GstD3D11CompositorBlendOperation
-gst_d3d11_compositor_blend_operation_from_native (D3D11_BLEND_OP blend_op)
-{
-  switch (blend_op) {
-    case D3D11_BLEND_OP_ADD:
-      return GST_D3D11_COMPOSITOR_BLEND_OP_ADD;
-    case D3D11_BLEND_OP_SUBTRACT:
-      return GST_D3D11_COMPOSITOR_BLEND_OP_SUBTRACT;
-    case D3D11_BLEND_OP_REV_SUBTRACT:
-      return GST_D3D11_COMPOSITOR_BLEND_OP_REV_SUBTRACT;
-    case D3D11_BLEND_OP_MIN:
-      return GST_D3D11_COMPOSITOR_BLEND_OP_MIN;
-    case D3D11_BLEND_OP_MAX:
-      return GST_D3D11_COMPOSITOR_BLEND_OP_MAX;
-    default:
-      g_assert_not_reached ();
-      break;
-  }
-
-  return GST_D3D11_COMPOSITOR_BLEND_OP_ADD;
-}
-
-static D3D11_BLEND_OP
-gst_d3d11_compositor_blend_operation_to_native (GstD3D11CompositorBlendOperation
-    op)
-{
-  switch (op) {
-    case GST_D3D11_COMPOSITOR_BLEND_OP_ADD:
-      return D3D11_BLEND_OP_ADD;
-    case GST_D3D11_COMPOSITOR_BLEND_OP_SUBTRACT:
-      return D3D11_BLEND_OP_SUBTRACT;
-    case GST_D3D11_COMPOSITOR_BLEND_OP_REV_SUBTRACT:
-      return D3D11_BLEND_OP_REV_SUBTRACT;
-    case GST_D3D11_COMPOSITOR_BLEND_OP_MIN:
-      return D3D11_BLEND_OP_MIN;
-    case GST_D3D11_COMPOSITOR_BLEND_OP_MAX:
-      return D3D11_BLEND_OP_MAX;
-    default:
-      g_assert_not_reached ();
-      break;
-  }
-
-  return D3D11_BLEND_OP_ADD;
-}
-
-/**
- * GstD3D11CompositorBlend:
- * @GST_D3D11_COMPOSITOR_BLEND_ZERO:
- *      The blend factor is (0, 0, 0, 0). No pre-blend operation.
- * @GST_D3D11_COMPOSITOR_BLEND_ONE:
- *      The blend factor is (1, 1, 1, 1). No pre-blend operation.
- * @GST_D3D11_COMPOSITOR_BLEND_SRC_COLOR:
- *      The blend factor is (Rs, Gs, Bs, As),
- *      that is color data (RGB) from a pixel shader. No pre-blend operation.
- * @GST_D3D11_COMPOSITOR_BLEND_INV_SRC_COLOR:
- *      The blend factor is (1 - Rs, 1 - Gs, 1 - Bs, 1 - As),
- *      that is color data (RGB) from a pixel shader.
- *      The pre-blend operation inverts the data, generating 1 - RGB.
- * @GST_D3D11_COMPOSITOR_BLEND_SRC_ALPHA:
- *      The blend factor is (As, As, As, As),
- *      that is alpha data (A) from a pixel shader. No pre-blend operation.
- * @GST_D3D11_COMPOSITOR_BLEND_INV_SRC_ALPHA:
- *      The blend factor is ( 1 - As, 1 - As, 1 - As, 1 - As),
- *      that is alpha data (A) from a pixel shader.
- *      The pre-blend operation inverts the data, generating 1 - A.
- * @GST_D3D11_COMPOSITOR_BLEND_DEST_ALPHA:
- *      The blend factor is (Ad, Ad, Ad, Ad),
- *      that is alpha data from a render target. No pre-blend operation.
- * @GST_D3D11_COMPOSITOR_BLEND_INV_DEST_ALPHA:
- *      The blend factor is (1 - Ad, 1 - Ad, 1 - Ad, 1 - Ad),
- *      that is alpha data from a render target.
- *      The pre-blend operation inverts the data, generating 1 - A.
- * @GST_D3D11_COMPOSITOR_BLEND_DEST_COLOR:
- *      The blend factor is (Rd, Gd, Bd, Ad),
- *      that is color data from a render target. No pre-blend operation.
- * @GST_D3D11_COMPOSITOR_BLEND_INV_DEST_COLOR:
- *      The blend factor is (1 - Rd, 1 - Gd, 1 - Bd, 1 - Ad),
- *      that is color data from a render target.
- *      The pre-blend operation inverts the data, generating 1 - RGB.
- * @GST_D3D11_COMPOSITOR_BLEND_SRC_ALPHA_SAT:
- *      The blend factor is (f, f, f, 1); where f = min(As, 1 - Ad).
- *      The pre-blend operation clamps the data to 1 or less.
- * @GST_D3D11_COMPOSITOR_BLEND_BLEND_FACTOR:
- *      The blend factor is the blend factor set with
- *      ID3D11DeviceContext::OMSetBlendState. No pre-blend operation.
- * @GST_D3D11_COMPOSITOR_BLEND_INV_BLEND_FACTOR:
- *      The blend factor is the blend factor set with
- *      ID3D11DeviceContext::OMSetBlendState.
- *      The pre-blend operation inverts the blend factor,
- *      generating 1 - blend_factor.
- *
- * Since: 1.20
- */
-GType
-gst_d3d11_compositor_blend_get_type (void)
-{
-  static GType blend_type = 0;
-
-  static const GEnumValue blend[] = {
-    {GST_D3D11_COMPOSITOR_BLEND_ZERO,
-        "The blend factor is (0, 0, 0, 0)", "zero"},
-    {GST_D3D11_COMPOSITOR_BLEND_ONE,
-        "The blend factor is (1, 1, 1, 1)", "one"},
-    {GST_D3D11_COMPOSITOR_BLEND_SRC_COLOR,
-        "The blend factor is (Rs, Gs, Bs, As)", "src-color"},
-    {GST_D3D11_COMPOSITOR_BLEND_INV_SRC_COLOR,
-          "The blend factor is (1 - Rs, 1 - Gs, 1 - Bs, 1 - As)",
-        "inv-src-color"},
-    {GST_D3D11_COMPOSITOR_BLEND_SRC_ALPHA,
-        "The blend factor is (As, As, As, As)", "src-alpha"},
-    {GST_D3D11_COMPOSITOR_BLEND_INV_SRC_ALPHA,
-          "The blend factor is (1 - As, 1 - As, 1 - As, 1 - As)",
-        "inv-src-alpha"},
-    {GST_D3D11_COMPOSITOR_BLEND_DEST_ALPHA,
-        "The blend factor is (Ad, Ad, Ad, Ad)", "dest-alpha"},
-    {GST_D3D11_COMPOSITOR_BLEND_INV_DEST_ALPHA,
-          "The blend factor is (1 - Ad, 1 - Ad, 1 - Ad, 1 - Ad)",
-        "inv-dest-alpha"},
-    {GST_D3D11_COMPOSITOR_BLEND_DEST_COLOR,
-        "The blend factor is (Rd, Gd, Bd, Ad)", "dest-color"},
-    {GST_D3D11_COMPOSITOR_BLEND_INV_DEST_COLOR,
-          "The blend factor is (1 - Rd, 1 - Gd, 1 - Bd, 1 - Ad)",
-        "inv-dest-color"},
-    {GST_D3D11_COMPOSITOR_BLEND_SRC_ALPHA_SAT,
-          "The blend factor is (f, f, f, 1); where f = min(As, 1 - Ad)",
-        "src-alpha-sat"},
-    {GST_D3D11_COMPOSITOR_BLEND_BLEND_FACTOR,
-        "User defined blend factor", "blend-factor"},
-    {GST_D3D11_COMPOSITOR_BLEND_INV_BLEND_FACTOR,
-        "Inverse of user defined blend factor", "inv-blend-factor"},
-    {0, NULL, NULL},
-  };
-
-  if (!blend_type) {
-    blend_type = g_enum_register_static ("GstD3D11CompositorBlend", blend);
-  }
-  return blend_type;
-}
-
-static GstD3D11CompositorBlend
-gst_d3d11_compositor_blend_from_native (D3D11_BLEND blend)
-{
-  switch (blend) {
-    case D3D11_BLEND_ZERO:
-      return GST_D3D11_COMPOSITOR_BLEND_ZERO;
-    case D3D11_BLEND_ONE:
-      return GST_D3D11_COMPOSITOR_BLEND_ONE;
-    case D3D11_BLEND_SRC_COLOR:
-      return GST_D3D11_COMPOSITOR_BLEND_SRC_COLOR;
-    case D3D11_BLEND_INV_SRC_COLOR:
-      return GST_D3D11_COMPOSITOR_BLEND_INV_SRC_COLOR;
-    case D3D11_BLEND_SRC_ALPHA:
-      return GST_D3D11_COMPOSITOR_BLEND_SRC_ALPHA;
-    case D3D11_BLEND_INV_SRC_ALPHA:
-      return GST_D3D11_COMPOSITOR_BLEND_INV_SRC_ALPHA;
-    case D3D11_BLEND_DEST_ALPHA:
-      return GST_D3D11_COMPOSITOR_BLEND_DEST_ALPHA;
-    case D3D11_BLEND_INV_DEST_ALPHA:
-      return GST_D3D11_COMPOSITOR_BLEND_INV_DEST_ALPHA;
-    case D3D11_BLEND_DEST_COLOR:
-      return GST_D3D11_COMPOSITOR_BLEND_DEST_COLOR;
-    case D3D11_BLEND_INV_DEST_COLOR:
-      return GST_D3D11_COMPOSITOR_BLEND_INV_DEST_COLOR;
-    case D3D11_BLEND_SRC_ALPHA_SAT:
-      return GST_D3D11_COMPOSITOR_BLEND_SRC_ALPHA_SAT;
-    case D3D11_BLEND_BLEND_FACTOR:
-      return GST_D3D11_COMPOSITOR_BLEND_BLEND_FACTOR;
-    case D3D11_BLEND_INV_BLEND_FACTOR:
-      return GST_D3D11_COMPOSITOR_BLEND_INV_BLEND_FACTOR;
-    default:
-      g_assert_not_reached ();
-      break;
-  }
-
-  return GST_D3D11_COMPOSITOR_BLEND_ZERO;
-}
-
-static D3D11_BLEND
-gst_d3d11_compositor_blend_to_native (GstD3D11CompositorBlend blend)
-{
-  switch (blend) {
-    case GST_D3D11_COMPOSITOR_BLEND_ZERO:
-      return D3D11_BLEND_ZERO;
-    case GST_D3D11_COMPOSITOR_BLEND_ONE:
-      return D3D11_BLEND_ONE;
-    case GST_D3D11_COMPOSITOR_BLEND_SRC_COLOR:
-      return D3D11_BLEND_SRC_COLOR;
-    case GST_D3D11_COMPOSITOR_BLEND_INV_SRC_COLOR:
-      return D3D11_BLEND_INV_SRC_COLOR;
-    case GST_D3D11_COMPOSITOR_BLEND_SRC_ALPHA:
-      return D3D11_BLEND_SRC_ALPHA;
-    case GST_D3D11_COMPOSITOR_BLEND_INV_SRC_ALPHA:
-      return D3D11_BLEND_INV_SRC_ALPHA;
-    case GST_D3D11_COMPOSITOR_BLEND_DEST_ALPHA:
-      return D3D11_BLEND_DEST_ALPHA;
-    case GST_D3D11_COMPOSITOR_BLEND_INV_DEST_ALPHA:
-      return D3D11_BLEND_INV_DEST_ALPHA;
-    case GST_D3D11_COMPOSITOR_BLEND_DEST_COLOR:
-      return D3D11_BLEND_DEST_COLOR;
-    case GST_D3D11_COMPOSITOR_BLEND_INV_DEST_COLOR:
-      return D3D11_BLEND_INV_DEST_COLOR;
-    case GST_D3D11_COMPOSITOR_BLEND_SRC_ALPHA_SAT:
-      return D3D11_BLEND_SRC_ALPHA_SAT;
-    case GST_D3D11_COMPOSITOR_BLEND_BLEND_FACTOR:
-      return D3D11_BLEND_BLEND_FACTOR;
-    case GST_D3D11_COMPOSITOR_BLEND_INV_BLEND_FACTOR:
-      return D3D11_BLEND_INV_BLEND_FACTOR;
-    default:
-      g_assert_not_reached ();
-      break;
-  }
-
-  return D3D11_BLEND_ZERO;
-}
-
-/**
- * GstD3D11CompositorBackground:
- *
- * Background mode
- *
- * Since: 1.20
- */
-GType
+#define GST_TYPE_D3D11_COMPOSITOR_BACKGROUND (gst_d3d11_compositor_background_get_type())
+static GType
 gst_d3d11_compositor_background_get_type (void)
 {
   static GType compositor_background_type = 0;
@@ -327,7 +74,7 @@ gst_d3d11_compositor_background_get_type (void)
     {GST_D3D11_COMPOSITOR_BACKGROUND_WHITE, "White", "white"},
     {GST_D3D11_COMPOSITOR_BACKGROUND_TRANSPARENT,
         "Transparent Background to enable further compositing", "transparent"},
-    {0, NULL, NULL},
+    {0, nullptr, nullptr},
   };
 
   if (!compositor_background_type) {
@@ -338,14 +85,45 @@ gst_d3d11_compositor_background_get_type (void)
   return compositor_background_type;
 }
 
+typedef enum
+{
+  GST_D3D11_COMPOSITOR_OPERATOR_SOURCE,
+  GST_D3D11_COMPOSITOR_OPERATOR_OVER,
+} GstD3D11CompositorOperator;
+
 /**
- * GstD3D11CompositorSizingPolicy:
+ * GstD3D11CompositorOperator:
  *
- * Sizing policy
- *
- * Since: 1.20
+ * Since: 1.22
  */
-GType
+#define GST_TYPE_D3D11_COMPOSITOR_OPERATOR (gst_d3d11_compositor_operator_get_type())
+static GType
+gst_d3d11_compositor_operator_get_type (void)
+{
+  static GType compositor_operator_type = 0;
+
+  static const GEnumValue compositor_operator[] = {
+    {GST_D3D11_COMPOSITOR_OPERATOR_SOURCE, "Source", "source"},
+    {GST_D3D11_COMPOSITOR_OPERATOR_OVER, "Over", "over"},
+    {0, nullptr, nullptr},
+  };
+
+  if (!compositor_operator_type) {
+    compositor_operator_type =
+        g_enum_register_static ("GstD3D11CompositorOperator",
+        compositor_operator);
+  }
+  return compositor_operator_type;
+}
+
+typedef enum
+{
+  GST_D3D11_COMPOSITOR_SIZING_POLICY_NONE,
+  GST_D3D11_COMPOSITOR_SIZING_POLICY_KEEP_ASPECT_RATIO,
+} GstD3D11CompositorSizingPolicy;
+
+#define GST_TYPE_D3D11_COMPOSITOR_SIZING_POLICY (gst_d3d11_compositor_sizing_policy_get_type())
+static GType
 gst_d3d11_compositor_sizing_policy_get_type (void)
 {
   static GType sizing_policy_type = 0;
@@ -360,7 +138,7 @@ gst_d3d11_compositor_sizing_policy_get_type (void)
           "with preserved aspect ratio. Resulting image will be centered in "
           "the destination rectangle with padding if necessary",
         "keep-aspect-ratio"},
-    {0, NULL, NULL},
+    {0, nullptr, nullptr},
   };
 
   if (!sizing_policy_type) {
@@ -388,7 +166,7 @@ static const gchar checker_vs_src[] =
     "  return input;\n"
     "}\n";
 
-static const gchar checker_ps_src[] =
+static const gchar checker_ps_src_rgb[] =
     "static const float blocksize = 8.0;\n"
     "static const float4 high = float4(0.667, 0.667, 0.667, 1.0);\n"
     "static const float4 low = float4(0.333, 0.333, 0.333, 1.0);\n"
@@ -416,26 +194,96 @@ static const gchar checker_ps_src[] =
     "  }\n"
     "  return output;\n"
     "}\n";
+
+static const gchar checker_ps_src_vuya[] =
+    "static const float blocksize = 8.0;\n"
+    "static const float4 high = float4(0.5, 0.5, 0.667, 1.0);\n"
+    "static const float4 low = float4(0.5, 0.5, 0.333, 1.0);\n"
+    "struct PS_INPUT\n"
+    "{\n"
+    "  float4 Position: SV_POSITION;\n"
+    "};\n"
+    "struct PS_OUTPUT\n"
+    "{\n"
+    "  float4 Plane: SV_TARGET;\n"
+    "};\n"
+    "PS_OUTPUT main(PS_INPUT input)\n"
+    "{\n"
+    "  PS_OUTPUT output;\n"
+    "  if ((input.Position.x % (blocksize * 2.0)) >= blocksize) {\n"
+    "    if ((input.Position.y % (blocksize * 2.0)) >= blocksize)\n"
+    "      output.Plane = low;\n"
+    "    else\n"
+    "      output.Plane = high;\n"
+    "  } else {\n"
+    "    if ((input.Position.y % (blocksize * 2.0)) < blocksize)\n"
+    "      output.Plane = low;\n"
+    "    else\n"
+    "      output.Plane = high;\n"
+    "  }\n"
+    "  return output;\n"
+    "}\n";
+
+static const gchar checker_ps_src_luma[] =
+    "static const float blocksize = 8.0;\n"
+    "static const float4 high = float4(0.667, 0.0, 0.0, 1.0);\n"
+    "static const float4 low = float4(0.333, 0.0, 0.0, 1.0);\n"
+    "struct PS_INPUT\n"
+    "{\n"
+    "  float4 Position: SV_POSITION;\n"
+    "};\n"
+    "struct PS_OUTPUT\n"
+    "{\n"
+    "  float4 Plane: SV_TARGET;\n"
+    "};\n"
+    "PS_OUTPUT main(PS_INPUT input)\n"
+    "{\n"
+    "  PS_OUTPUT output;\n"
+    "  if ((input.Position.x % (blocksize * 2.0)) >= blocksize) {\n"
+    "    if ((input.Position.y % (blocksize * 2.0)) >= blocksize)\n"
+    "      output.Plane = low;\n"
+    "    else\n"
+    "      output.Plane = high;\n"
+    "  } else {\n"
+    "    if ((input.Position.y % (blocksize * 2.0)) < blocksize)\n"
+    "      output.Plane = low;\n"
+    "    else\n"
+    "      output.Plane = high;\n"
+    "  }\n"
+    "  return output;\n"
+    "}\n";
+
+static D3D11_RENDER_TARGET_BLEND_DESC blend_templ[] = {
+  /* SOURCE */
+  {
+    TRUE,
+    D3D11_BLEND_ONE, D3D11_BLEND_ZERO, D3D11_BLEND_OP_ADD,
+    D3D11_BLEND_ONE, D3D11_BLEND_ZERO, D3D11_BLEND_OP_ADD,
+    D3D11_COLOR_WRITE_ENABLE_ALL
+  },
+  /* OVER */
+  {
+    TRUE,
+    D3D11_BLEND_SRC_ALPHA, D3D11_BLEND_INV_SRC_ALPHA, D3D11_BLEND_OP_ADD,
+    D3D11_BLEND_ONE, D3D11_BLEND_INV_SRC_ALPHA, D3D11_BLEND_OP_ADD,
+    D3D11_COLOR_WRITE_ENABLE_ALL,
+  },
+};
 /* *INDENT-ON* */
 
-/**
- * GstD3D11CompositorPad:
- *
- * Since: 1.20
- */
 struct _GstD3D11CompositorPad
 {
   GstVideoAggregatorConvertPad parent;
 
   GstD3D11Converter *convert;
 
-  GstBufferPool *fallback_pool;
-  GstBuffer *fallback_buf;
-
   gboolean position_updated;
   gboolean alpha_updated;
   gboolean blend_desc_updated;
+  gboolean config_updated;
   ID3D11BlendState *blend;
+
+  D3D11_RENDER_TARGET_BLEND_DESC desc;
 
   /* properties */
   gint xpos;
@@ -443,10 +291,27 @@ struct _GstD3D11CompositorPad
   gint width;
   gint height;
   gdouble alpha;
-  D3D11_RENDER_TARGET_BLEND_DESC desc;
-  gfloat blend_factor[4];
+  GstD3D11CompositorOperator op;
   GstD3D11CompositorSizingPolicy sizing_policy;
+  GstVideoGammaMode gamma_mode;
+  GstVideoPrimariesMode primaries_mode;
 };
+
+typedef struct
+{
+  ID3D11PixelShader *ps;
+  ID3D11VertexShader *vs;
+  ID3D11InputLayout *layout;
+  ID3D11Buffer *vertex_buffer;
+  ID3D11Buffer *index_buffer;
+  D3D11_VIEWPORT viewport;
+} GstD3D11CompositorQuad;
+
+typedef struct
+{
+  /* [rtv][colors] */
+  FLOAT color[4][4];
+} GstD3D11CompositorClearColor;
 
 struct _GstD3D11Compositor
 {
@@ -454,13 +319,13 @@ struct _GstD3D11Compositor
 
   GstD3D11Device *device;
 
-  GstBufferPool *fallback_pool;
   GstBuffer *fallback_buf;
 
-  GstD3D11Quad *checker_background;
-  D3D11_VIEWPORT viewport;
+  GstD3D11CompositorQuad *checker_background;
+  /* black/white/transparent */
+  GstD3D11CompositorClearColor clear_color[3];
 
-  gboolean reconfigured;
+  gboolean downstream_supports_d3d11;
 
   /* properties */
   gint adapter;
@@ -475,17 +340,10 @@ enum
   PROP_PAD_WIDTH,
   PROP_PAD_HEIGHT,
   PROP_PAD_ALPHA,
-  PROP_PAD_BLEND_OP_RGB,
-  PROP_PAD_BLEND_OP_ALPHA,
-  PROP_PAD_BLEND_SRC_RGB,
-  PROP_PAD_BLEND_SRC_ALPHA,
-  PROP_PAD_BLEND_DEST_RGB,
-  PROP_PAD_BLEND_DEST_ALPHA,
-  PROP_PAD_BLEND_FACTOR_RED,
-  PROP_PAD_BLEND_FACTOR_GREEN,
-  PROP_PAD_BLEND_FACTOR_BLUE,
-  PROP_PAD_BLEND_FACTOR_ALPHA,
+  PROP_PAD_OPERATOR,
   PROP_PAD_SIZING_POLICY,
+  PROP_PAD_GAMMA_MODE,
+  PROP_PAD_PRIMARIES_MODE,
 };
 
 #define DEFAULT_PAD_XPOS   0
@@ -493,13 +351,10 @@ enum
 #define DEFAULT_PAD_WIDTH  0
 #define DEFAULT_PAD_HEIGHT 0
 #define DEFAULT_PAD_ALPHA  1.0
-#define DEFAULT_PAD_BLEND_OP_RGB GST_D3D11_COMPOSITOR_BLEND_OP_ADD
-#define DEFAULT_PAD_BLEND_OP_ALPHA GST_D3D11_COMPOSITOR_BLEND_OP_ADD
-#define DEFAULT_PAD_BLEND_SRC_RGB GST_D3D11_COMPOSITOR_BLEND_SRC_ALPHA
-#define DEFAULT_PAD_BLEND_SRC_ALPHA GST_D3D11_COMPOSITOR_BLEND_ONE
-#define DEFAULT_PAD_BLEND_DEST_RGB GST_D3D11_COMPOSITOR_BLEND_INV_SRC_ALPHA
-#define DEFAULT_PAD_BLEND_DEST_ALPHA GST_D3D11_COMPOSITOR_BLEND_INV_SRC_ALPHA
+#define DEFAULT_PAD_OPERATOR GST_D3D11_COMPOSITOR_OPERATOR_OVER
 #define DEFAULT_PAD_SIZING_POLICY GST_D3D11_COMPOSITOR_SIZING_POLICY_NONE
+#define DEFAULT_PAD_GAMMA_MODE GST_VIDEO_GAMMA_MODE_NONE
+#define DEFAULT_PAD_PRIMARIES_MODE GST_VIDEO_PRIMARIES_MODE_NONE
 
 static void gst_d3d11_compositor_pad_set_property (GObject * object,
     guint prop_id, const GValue * value, GParamSpec * pspec);
@@ -509,11 +364,8 @@ static gboolean
 gst_d3d11_compositor_pad_prepare_frame (GstVideoAggregatorPad * pad,
     GstVideoAggregator * vagg, GstBuffer * buffer,
     GstVideoFrame * prepared_frame);
-static void
-gst_d3d11_compositor_pad_clean_frame (GstVideoAggregatorPad * pad,
+static void gst_d3d11_compositor_pad_clean_frame (GstVideoAggregatorPad * vpad,
     GstVideoAggregator * vagg, GstVideoFrame * prepared_frame);
-static void
-gst_d3d11_compositor_pad_init_blend_options (GstD3D11CompositorPad * pad);
 
 #define gst_d3d11_compositor_pad_parent_class parent_pad_class
 G_DEFINE_TYPE (GstD3D11CompositorPad, gst_d3d11_compositor_pad,
@@ -522,144 +374,79 @@ G_DEFINE_TYPE (GstD3D11CompositorPad, gst_d3d11_compositor_pad,
 static void
 gst_d3d11_compositor_pad_class_init (GstD3D11CompositorPadClass * klass)
 {
-  GObjectClass *gobject_class = G_OBJECT_CLASS (klass);
-  GstVideoAggregatorPadClass *vaggpadclass =
+  GObjectClass *object_class = G_OBJECT_CLASS (klass);
+  GstVideoAggregatorPadClass *vagg_pad_class =
       GST_VIDEO_AGGREGATOR_PAD_CLASS (klass);
+  GParamFlags param_flags = (GParamFlags)
+      (G_PARAM_READWRITE | GST_PARAM_CONTROLLABLE | G_PARAM_STATIC_STRINGS);
 
-  gobject_class->set_property = gst_d3d11_compositor_pad_set_property;
-  gobject_class->get_property = gst_d3d11_compositor_pad_get_property;
+  object_class->set_property = gst_d3d11_compositor_pad_set_property;
+  object_class->get_property = gst_d3d11_compositor_pad_get_property;
 
-  g_object_class_install_property (gobject_class, PROP_PAD_XPOS,
+  g_object_class_install_property (object_class, PROP_PAD_XPOS,
       g_param_spec_int ("xpos", "X Position", "X position of the picture",
-          G_MININT, G_MAXINT, DEFAULT_PAD_XPOS,
-          (GParamFlags) (G_PARAM_READWRITE | GST_PARAM_CONTROLLABLE |
-              G_PARAM_STATIC_STRINGS)));
-
-  g_object_class_install_property (gobject_class, PROP_PAD_YPOS,
+          G_MININT, G_MAXINT, DEFAULT_PAD_XPOS, param_flags));
+  g_object_class_install_property (object_class, PROP_PAD_YPOS,
       g_param_spec_int ("ypos", "Y Position", "Y position of the picture",
-          G_MININT, G_MAXINT, DEFAULT_PAD_YPOS,
-          (GParamFlags) (G_PARAM_READWRITE | GST_PARAM_CONTROLLABLE |
-              G_PARAM_STATIC_STRINGS)));
-
-  g_object_class_install_property (gobject_class, PROP_PAD_WIDTH,
+          G_MININT, G_MAXINT, DEFAULT_PAD_YPOS, param_flags));
+  g_object_class_install_property (object_class, PROP_PAD_WIDTH,
       g_param_spec_int ("width", "Width", "Width of the picture",
-          G_MININT, G_MAXINT, DEFAULT_PAD_WIDTH,
-          (GParamFlags) (G_PARAM_READWRITE | GST_PARAM_CONTROLLABLE |
-              G_PARAM_STATIC_STRINGS)));
-
-  g_object_class_install_property (gobject_class, PROP_PAD_HEIGHT,
+          G_MININT, G_MAXINT, DEFAULT_PAD_WIDTH, param_flags));
+  g_object_class_install_property (object_class, PROP_PAD_HEIGHT,
       g_param_spec_int ("height", "Height", "Height of the picture",
-          G_MININT, G_MAXINT, DEFAULT_PAD_HEIGHT,
-          (GParamFlags) (G_PARAM_READWRITE | GST_PARAM_CONTROLLABLE |
-              G_PARAM_STATIC_STRINGS)));
-
-  g_object_class_install_property (gobject_class, PROP_PAD_ALPHA,
+          G_MININT, G_MAXINT, DEFAULT_PAD_HEIGHT, param_flags));
+  g_object_class_install_property (object_class, PROP_PAD_ALPHA,
       g_param_spec_double ("alpha", "Alpha", "Alpha of the picture", 0.0, 1.0,
-          DEFAULT_PAD_ALPHA,
-          (GParamFlags) (G_PARAM_READWRITE | GST_PARAM_CONTROLLABLE |
-              G_PARAM_STATIC_STRINGS)));
+          DEFAULT_PAD_ALPHA, param_flags));
 
-  g_object_class_install_property (gobject_class, PROP_PAD_BLEND_OP_RGB,
-      g_param_spec_enum ("blend-op-rgb", "Blend Operation RGB",
-          "Blend equation for RGB", GST_TYPE_D3D11_COMPOSITOR_BLEND_OPERATION,
-          DEFAULT_PAD_BLEND_OP_RGB,
-          (GParamFlags) (G_PARAM_READWRITE | GST_PARAM_CONTROLLABLE |
-              G_PARAM_STATIC_STRINGS)));
-
-  g_object_class_install_property (gobject_class, PROP_PAD_BLEND_OP_ALPHA,
-      g_param_spec_enum ("blend-op-alpha", "Blend Operation Alpha",
-          "Blend equation for alpha", GST_TYPE_D3D11_COMPOSITOR_BLEND_OPERATION,
-          DEFAULT_PAD_BLEND_OP_ALPHA,
-          (GParamFlags) (G_PARAM_READWRITE | GST_PARAM_CONTROLLABLE |
-              G_PARAM_STATIC_STRINGS)));
-
-  g_object_class_install_property (gobject_class,
-      PROP_PAD_BLEND_SRC_RGB,
-      g_param_spec_enum ("blend-src-rgb", "Blend Source RGB",
-          "Blend factor for source RGB",
-          GST_TYPE_D3D11_COMPOSITOR_BLEND,
-          DEFAULT_PAD_BLEND_SRC_RGB,
-          (GParamFlags) (G_PARAM_READWRITE | GST_PARAM_CONTROLLABLE |
-              G_PARAM_STATIC_STRINGS)));
-
-  g_object_class_install_property (gobject_class,
-      PROP_PAD_BLEND_SRC_ALPHA,
-      g_param_spec_enum ("blend-src-alpha",
-          "Blend Source Alpha",
-          "Blend factor for source alpha, \"*-color\" values are not allowed",
-          GST_TYPE_D3D11_COMPOSITOR_BLEND,
-          DEFAULT_PAD_BLEND_SRC_ALPHA,
-          (GParamFlags) (G_PARAM_READWRITE | GST_PARAM_CONTROLLABLE |
-              G_PARAM_STATIC_STRINGS)));
-
-  g_object_class_install_property (gobject_class,
-      PROP_PAD_BLEND_DEST_RGB,
-      g_param_spec_enum ("blend-dest-rgb",
-          "Blend Destination RGB",
-          "Blend factor for destination RGB",
-          GST_TYPE_D3D11_COMPOSITOR_BLEND,
-          DEFAULT_PAD_BLEND_DEST_RGB,
-          (GParamFlags) (G_PARAM_READWRITE | GST_PARAM_CONTROLLABLE |
-              G_PARAM_STATIC_STRINGS)));
-
-  g_object_class_install_property (gobject_class,
-      PROP_PAD_BLEND_DEST_ALPHA,
-      g_param_spec_enum ("blend-dest-alpha",
-          "Blend Destination Alpha",
-          "Blend factor for destination alpha, "
-          "\"*-color\" values are not allowed",
-          GST_TYPE_D3D11_COMPOSITOR_BLEND,
-          DEFAULT_PAD_BLEND_DEST_ALPHA,
-          (GParamFlags) (G_PARAM_READWRITE | GST_PARAM_CONTROLLABLE |
-              G_PARAM_STATIC_STRINGS)));
-
-  g_object_class_install_property (gobject_class, PROP_PAD_BLEND_FACTOR_RED,
-      g_param_spec_float ("blend-factor-red", "Blend Factor Red",
-          "Blend factor for red component "
-          "when blend type is \"blend-factor\" or \"inv-blend-factor\"",
-          0.0, 1.0, 1.0,
-          (GParamFlags) (G_PARAM_READWRITE | GST_PARAM_CONTROLLABLE |
-              G_PARAM_STATIC_STRINGS)));
-
-  g_object_class_install_property (gobject_class, PROP_PAD_BLEND_FACTOR_GREEN,
-      g_param_spec_float ("blend-factor-green", "Blend Factor Green",
-          "Blend factor for green component "
-          "when blend type is \"blend-factor\" or \"inv-blend-factor\"",
-          0.0, 1.0, 1.0,
-          (GParamFlags) (G_PARAM_READWRITE | GST_PARAM_CONTROLLABLE |
-              G_PARAM_STATIC_STRINGS)));
-
-  g_object_class_install_property (gobject_class, PROP_PAD_BLEND_FACTOR_BLUE,
-      g_param_spec_float ("blend-factor-blue", "Blend Factor Blue",
-          "Blend factor for blue component "
-          "when blend type is \"blend-factor\" or \"inv-blend-factor\"",
-          0.0, 1.0, 1.0,
-          (GParamFlags) (G_PARAM_READWRITE | GST_PARAM_CONTROLLABLE |
-              G_PARAM_STATIC_STRINGS)));
-
-  g_object_class_install_property (gobject_class, PROP_PAD_BLEND_FACTOR_ALPHA,
-      g_param_spec_float ("blend-factor-alpha", "Blend Factor Alpha",
-          "Blend factor for alpha component "
-          "when blend type is \"blend-factor\" or \"inv-blend-factor\"",
-          0.0, 1.0, 1.0,
-          (GParamFlags) (G_PARAM_READWRITE | GST_PARAM_CONTROLLABLE |
-              G_PARAM_STATIC_STRINGS)));
-
-  g_object_class_install_property (gobject_class, PROP_PAD_SIZING_POLICY,
+  /**
+   * GstD3D11CompositorPad:operator:
+   *
+   * Blending operator to use for blending this pad over the previous ones
+   *
+   * Since: 1.22
+   */
+  g_object_class_install_property (object_class, PROP_PAD_OPERATOR,
+      g_param_spec_enum ("operator", "Operator",
+          "Blending operator to use for blending this pad over the previous ones",
+          GST_TYPE_D3D11_COMPOSITOR_OPERATOR, DEFAULT_PAD_OPERATOR,
+          param_flags));
+  g_object_class_install_property (object_class, PROP_PAD_SIZING_POLICY,
       g_param_spec_enum ("sizing-policy", "Sizing policy",
           "Sizing policy to use for image scaling",
           GST_TYPE_D3D11_COMPOSITOR_SIZING_POLICY, DEFAULT_PAD_SIZING_POLICY,
-          (GParamFlags) (G_PARAM_READWRITE | GST_PARAM_CONTROLLABLE |
-              G_PARAM_STATIC_STRINGS)));
+          param_flags));
 
-  vaggpadclass->prepare_frame =
+  /**
+   * GstD3D11CompositorPad:gamma-mode:
+   *
+   * Gamma conversion mode
+   *
+   * Since: 1.22
+   */
+  g_object_class_install_property (object_class, PROP_PAD_GAMMA_MODE,
+      g_param_spec_enum ("gamma-mode", "Gamma mode",
+          "Gamma conversion mode", GST_TYPE_VIDEO_GAMMA_MODE,
+          DEFAULT_PAD_GAMMA_MODE, param_flags));
+
+  /**
+   * GstD3D11CompositorPad:primaries-mode:
+   *
+   * Primaries conversion mode
+   *
+   * Since: 1.22
+   */
+  g_object_class_install_property (object_class, PROP_PAD_PRIMARIES_MODE,
+      g_param_spec_enum ("primaries-mode", "Primaries Mode",
+          "Primaries conversion mode", GST_TYPE_VIDEO_PRIMARIES_MODE,
+          DEFAULT_PAD_PRIMARIES_MODE, param_flags));
+
+  vagg_pad_class->prepare_frame =
       GST_DEBUG_FUNCPTR (gst_d3d11_compositor_pad_prepare_frame);
-  vaggpadclass->clean_frame =
+  vagg_pad_class->clean_frame =
       GST_DEBUG_FUNCPTR (gst_d3d11_compositor_pad_clean_frame);
 
-  gst_type_mark_as_plugin_api (GST_TYPE_D3D11_COMPOSITOR_BLEND,
-      (GstPluginAPIFlags) 0);
-  gst_type_mark_as_plugin_api (GST_TYPE_D3D11_COMPOSITOR_BLEND_OPERATION,
+  gst_type_mark_as_plugin_api (GST_TYPE_D3D11_COMPOSITOR_OPERATOR,
       (GstPluginAPIFlags) 0);
   gst_type_mark_as_plugin_api (GST_TYPE_D3D11_COMPOSITOR_SIZING_POLICY,
       (GstPluginAPIFlags) 0);
@@ -673,36 +460,23 @@ gst_d3d11_compositor_pad_init (GstD3D11CompositorPad * pad)
   pad->width = DEFAULT_PAD_WIDTH;
   pad->height = DEFAULT_PAD_HEIGHT;
   pad->alpha = DEFAULT_PAD_ALPHA;
+  pad->op = DEFAULT_PAD_OPERATOR;
   pad->sizing_policy = DEFAULT_PAD_SIZING_POLICY;
-
-  gst_d3d11_compositor_pad_init_blend_options (pad);
+  pad->desc = blend_templ[DEFAULT_PAD_OPERATOR];
+  pad->gamma_mode = DEFAULT_PAD_GAMMA_MODE;
+  pad->primaries_mode = DEFAULT_PAD_PRIMARIES_MODE;
 }
 
 static void
-gst_d3d11_compositor_pad_update_blend_function (GstD3D11CompositorPad * pad,
-    D3D11_BLEND * value, GstD3D11CompositorBlend new_value)
+gst_d3d11_compositor_pad_update_position (GstD3D11CompositorPad * self,
+    gint * old, const GValue * value)
 {
-  D3D11_BLEND temp = gst_d3d11_compositor_blend_to_native (new_value);
+  gint tmp = g_value_get_int (value);
 
-  if (temp == *value)
-    return;
-
-  *value = temp;
-  pad->blend_desc_updated = TRUE;
-}
-
-static void
-gst_d3d11_compositor_pad_update_blend_equation (GstD3D11CompositorPad * pad,
-    D3D11_BLEND_OP * value, GstD3D11CompositorBlendOperation new_value)
-{
-  D3D11_BLEND_OP temp =
-      gst_d3d11_compositor_blend_operation_to_native (new_value);
-
-  if (temp == *value)
-    return;
-
-  *value = temp;
-  pad->blend_desc_updated = TRUE;
+  if (*old != tmp) {
+    *old = tmp;
+    self->position_updated = TRUE;
+  }
 }
 
 static void
@@ -713,23 +487,18 @@ gst_d3d11_compositor_pad_set_property (GObject * object, guint prop_id,
 
   switch (prop_id) {
     case PROP_PAD_XPOS:
-      pad->xpos = g_value_get_int (value);
-      pad->position_updated = TRUE;
+      gst_d3d11_compositor_pad_update_position (pad, &pad->xpos, value);
       break;
     case PROP_PAD_YPOS:
-      pad->ypos = g_value_get_int (value);
-      pad->position_updated = TRUE;
+      gst_d3d11_compositor_pad_update_position (pad, &pad->ypos, value);
       break;
     case PROP_PAD_WIDTH:
-      pad->width = g_value_get_int (value);
-      pad->position_updated = TRUE;
+      gst_d3d11_compositor_pad_update_position (pad, &pad->width, value);
       break;
     case PROP_PAD_HEIGHT:
-      pad->height = g_value_get_int (value);
-      pad->position_updated = TRUE;
+      gst_d3d11_compositor_pad_update_position (pad, &pad->height, value);
       break;
-    case PROP_PAD_ALPHA:
-    {
+    case PROP_PAD_ALPHA:{
       gdouble alpha = g_value_get_double (value);
       if (pad->alpha != alpha) {
         pad->alpha_updated = TRUE;
@@ -737,70 +506,42 @@ gst_d3d11_compositor_pad_set_property (GObject * object, guint prop_id,
       }
       break;
     }
-    case PROP_PAD_BLEND_OP_RGB:
-      gst_d3d11_compositor_pad_update_blend_equation (pad, &pad->desc.BlendOp,
-          (GstD3D11CompositorBlendOperation) g_value_get_enum (value));
-      break;
-    case PROP_PAD_BLEND_OP_ALPHA:
-      gst_d3d11_compositor_pad_update_blend_equation (pad,
-          &pad->desc.BlendOpAlpha,
-          (GstD3D11CompositorBlendOperation) g_value_get_enum (value));
-      break;
-    case PROP_PAD_BLEND_SRC_RGB:
-      gst_d3d11_compositor_pad_update_blend_function (pad, &pad->desc.SrcBlend,
-          (GstD3D11CompositorBlend) g_value_get_enum (value));
-      break;
-    case PROP_PAD_BLEND_SRC_ALPHA:
-    {
-      GstD3D11CompositorBlend blend =
-          (GstD3D11CompositorBlend) g_value_get_enum (value);
-      if (blend == GST_D3D11_COMPOSITOR_BLEND_SRC_COLOR ||
-          blend == GST_D3D11_COMPOSITOR_BLEND_INV_SRC_COLOR ||
-          blend == GST_D3D11_COMPOSITOR_BLEND_DEST_COLOR ||
-          blend == GST_D3D11_COMPOSITOR_BLEND_INV_DEST_COLOR) {
-        g_warning ("%d is not allowed for %s", blend, pspec->name);
-      } else {
-        gst_d3d11_compositor_pad_update_blend_function (pad,
-            &pad->desc.SrcBlendAlpha, blend);
+    case PROP_PAD_OPERATOR:{
+      GstD3D11CompositorOperator op =
+          (GstD3D11CompositorOperator) g_value_get_enum (value);
+      if (op != pad->op) {
+        pad->op = op;
+        pad->desc = blend_templ[op];
+        pad->blend_desc_updated = TRUE;
       }
       break;
     }
-    case PROP_PAD_BLEND_DEST_RGB:
-      gst_d3d11_compositor_pad_update_blend_function (pad, &pad->desc.DestBlend,
-          (GstD3D11CompositorBlend) g_value_get_enum (value));
-      break;
-    case PROP_PAD_BLEND_DEST_ALPHA:
-    {
-      GstD3D11CompositorBlend blend =
-          (GstD3D11CompositorBlend) g_value_get_enum (value);
-      if (blend == GST_D3D11_COMPOSITOR_BLEND_SRC_COLOR ||
-          blend == GST_D3D11_COMPOSITOR_BLEND_INV_SRC_COLOR ||
-          blend == GST_D3D11_COMPOSITOR_BLEND_DEST_COLOR ||
-          blend == GST_D3D11_COMPOSITOR_BLEND_INV_DEST_COLOR) {
-        g_warning ("%d is not allowed for %s", blend, pspec->name);
-      } else {
-        gst_d3d11_compositor_pad_update_blend_function (pad,
-            &pad->desc.DestBlendAlpha, blend);
-      }
-      break;
-    }
-    case PROP_PAD_BLEND_FACTOR_RED:
-      pad->blend_factor[0] = g_value_get_float (value);
-      break;
-    case PROP_PAD_BLEND_FACTOR_GREEN:
-      pad->blend_factor[1] = g_value_get_float (value);
-      break;
-    case PROP_PAD_BLEND_FACTOR_BLUE:
-      pad->blend_factor[2] = g_value_get_float (value);
-      break;
-    case PROP_PAD_BLEND_FACTOR_ALPHA:
-      pad->blend_factor[3] = g_value_get_float (value);
-      break;
-    case PROP_PAD_SIZING_POLICY:
-      pad->sizing_policy =
+    case PROP_PAD_SIZING_POLICY:{
+      GstD3D11CompositorSizingPolicy policy =
           (GstD3D11CompositorSizingPolicy) g_value_get_enum (value);
-      pad->position_updated = TRUE;
+      if (pad->sizing_policy != policy) {
+        pad->sizing_policy = policy;
+        pad->position_updated = TRUE;
+      }
       break;
+    }
+    case PROP_PAD_GAMMA_MODE:{
+      GstVideoGammaMode mode = (GstVideoGammaMode) g_value_get_enum (value);
+      if (pad->gamma_mode != mode) {
+        pad->gamma_mode = mode;
+        pad->config_updated = TRUE;
+      }
+      break;
+    }
+    case PROP_PAD_PRIMARIES_MODE:{
+      GstVideoPrimariesMode mode =
+          (GstVideoPrimariesMode) g_value_get_enum (value);
+      if (pad->primaries_mode != mode) {
+        pad->primaries_mode = mode;
+        pad->config_updated = TRUE;
+      }
+      break;
+    }
     default:
       G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
       break;
@@ -829,244 +570,22 @@ gst_d3d11_compositor_pad_get_property (GObject * object, guint prop_id,
     case PROP_PAD_ALPHA:
       g_value_set_double (value, pad->alpha);
       break;
-    case PROP_PAD_BLEND_OP_RGB:
-      g_value_set_enum (value,
-          gst_d3d11_compositor_blend_operation_from_native (pad->desc.BlendOp));
-      break;
-    case PROP_PAD_BLEND_OP_ALPHA:
-      g_value_set_enum (value,
-          gst_d3d11_compositor_blend_operation_from_native (pad->
-              desc.BlendOpAlpha));
-      break;
-    case PROP_PAD_BLEND_SRC_RGB:
-      g_value_set_enum (value,
-          gst_d3d11_compositor_blend_from_native (pad->desc.SrcBlend));
-      break;
-    case PROP_PAD_BLEND_SRC_ALPHA:
-      g_value_set_enum (value,
-          gst_d3d11_compositor_blend_from_native (pad->desc.SrcBlendAlpha));
-      break;
-    case PROP_PAD_BLEND_DEST_RGB:
-      g_value_set_enum (value,
-          gst_d3d11_compositor_blend_from_native (pad->desc.DestBlend));
-      break;
-    case PROP_PAD_BLEND_DEST_ALPHA:
-      g_value_set_enum (value,
-          gst_d3d11_compositor_blend_from_native (pad->desc.DestBlendAlpha));
-      break;
-    case PROP_PAD_BLEND_FACTOR_RED:
-      g_value_set_float (value, pad->blend_factor[0]);
-      break;
-    case PROP_PAD_BLEND_FACTOR_GREEN:
-      g_value_set_float (value, pad->blend_factor[1]);
-      break;
-    case PROP_PAD_BLEND_FACTOR_BLUE:
-      g_value_set_float (value, pad->blend_factor[2]);
-      break;
-    case PROP_PAD_BLEND_FACTOR_ALPHA:
-      g_value_set_float (value, pad->blend_factor[3]);
+    case PROP_PAD_OPERATOR:
+      g_value_set_enum (value, pad->op);
       break;
     case PROP_PAD_SIZING_POLICY:
       g_value_set_enum (value, pad->sizing_policy);
+      break;
+    case PROP_PAD_GAMMA_MODE:
+      g_value_set_enum (value, pad->gamma_mode);
+      break;
+    case PROP_PAD_PRIMARIES_MODE:
+      g_value_set_enum (value, pad->primaries_mode);
       break;
     default:
       G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
       break;
   }
-}
-
-static void
-gst_d3d11_compositor_pad_init_blend_options (GstD3D11CompositorPad * pad)
-{
-  guint i;
-
-  pad->desc.BlendEnable = TRUE;
-  pad->desc.SrcBlend =
-      gst_d3d11_compositor_blend_to_native (DEFAULT_PAD_BLEND_SRC_RGB);
-  pad->desc.DestBlend =
-      gst_d3d11_compositor_blend_to_native (DEFAULT_PAD_BLEND_DEST_RGB);
-  pad->desc.BlendOp =
-      gst_d3d11_compositor_blend_operation_to_native (DEFAULT_PAD_BLEND_OP_RGB);
-  pad->desc.SrcBlendAlpha =
-      gst_d3d11_compositor_blend_to_native (DEFAULT_PAD_BLEND_SRC_ALPHA);
-  pad->desc.DestBlendAlpha =
-      gst_d3d11_compositor_blend_to_native (DEFAULT_PAD_BLEND_DEST_ALPHA);
-  pad->desc.BlendOpAlpha =
-      gst_d3d11_compositor_blend_operation_to_native
-      (DEFAULT_PAD_BLEND_OP_ALPHA);
-  pad->desc.RenderTargetWriteMask = D3D11_COLOR_WRITE_ENABLE_ALL;
-
-  for (i = 0; i < G_N_ELEMENTS (pad->blend_factor); i++)
-    pad->blend_factor[i] = 1.0f;
-}
-
-static gboolean
-gst_d3d11_compositor_configure_fallback_pool (GstD3D11Compositor * self,
-    GstVideoInfo * info, gint bind_flags, GstBufferPool ** pool)
-{
-  GstD3D11AllocationParams *d3d11_params;
-  GstBufferPool *new_pool;
-  GstCaps *caps;
-
-  if (*pool) {
-    gst_buffer_pool_set_active (*pool, FALSE);
-    gst_clear_object (pool);
-  }
-
-  caps = gst_video_info_to_caps (info);
-  if (!caps) {
-    GST_ERROR_OBJECT (self, "Couldn't create caps from info");
-    return FALSE;
-  }
-
-  d3d11_params = gst_d3d11_allocation_params_new (self->device,
-      info, (GstD3D11AllocationFlags) 0, bind_flags);
-
-  new_pool = gst_d3d11_buffer_pool_new_with_options (self->device,
-      caps, d3d11_params, 0, 0);
-  gst_caps_unref (caps);
-  gst_d3d11_allocation_params_free (d3d11_params);
-
-  if (!new_pool) {
-    GST_ERROR_OBJECT (self, "Failed to configure fallback pool");
-    return FALSE;
-  }
-
-  gst_buffer_pool_set_active (new_pool, TRUE);
-  *pool = new_pool;
-
-  return TRUE;
-}
-
-static gboolean
-gst_d3d11_compsitor_prepare_fallback_buffer (GstD3D11Compositor * self,
-    GstVideoInfo * info, gboolean is_input, GstBufferPool ** pool,
-    GstBuffer ** fallback_buffer)
-{
-  GstBuffer *new_buf = NULL;
-  gint bind_flags = D3D11_BIND_SHADER_RESOURCE;
-  guint i;
-
-  gst_clear_buffer (fallback_buffer);
-
-  if (!is_input)
-    bind_flags = D3D11_BIND_RENDER_TARGET;
-
-  if (*pool == NULL &&
-      !gst_d3d11_compositor_configure_fallback_pool (self, info,
-          bind_flags, pool)) {
-    GST_ERROR_OBJECT (self, "Couldn't configure fallback buffer pool");
-    return FALSE;
-  }
-
-  if (gst_buffer_pool_acquire_buffer (*pool, &new_buf, NULL)
-      != GST_FLOW_OK) {
-    GST_ERROR_OBJECT (self, "Couldn't get fallback buffer from pool");
-    return FALSE;
-  }
-
-  for (i = 0; i < gst_buffer_n_memory (new_buf); i++) {
-    GstD3D11Memory *new_mem =
-        (GstD3D11Memory *) gst_buffer_peek_memory (new_buf, i);
-
-    if (is_input && !gst_d3d11_memory_get_shader_resource_view_size (new_mem)) {
-      GST_ERROR_OBJECT (self, "Couldn't prepare shader resource view");
-      gst_buffer_unref (new_buf);
-      return FALSE;
-    } else if (!is_input &&
-        !gst_d3d11_memory_get_render_target_view_size (new_mem)) {
-      GST_ERROR_OBJECT (self, "Couldn't prepare render target view");
-      gst_buffer_unref (new_buf);
-      return FALSE;
-    }
-  }
-
-  *fallback_buffer = new_buf;
-
-  return TRUE;
-}
-
-static gboolean
-gst_d3d11_compositor_copy_buffer (GstD3D11Compositor * self,
-    GstVideoInfo * info, GstBuffer * src_buf, GstBuffer * dest_buf,
-    gboolean do_device_copy)
-{
-  guint i;
-
-  if (do_device_copy) {
-    return gst_d3d11_buffer_copy_into (dest_buf, src_buf, info);
-  } else {
-    GstVideoFrame src_frame, dest_frame;
-
-    if (!gst_video_frame_map (&src_frame, info, src_buf,
-            (GstMapFlags) (GST_MAP_READ | GST_VIDEO_FRAME_MAP_FLAG_NO_REF))) {
-      GST_ERROR_OBJECT (self, "Couldn't map input buffer");
-      return FALSE;
-    }
-
-    if (!gst_video_frame_map (&dest_frame, info, dest_buf,
-            (GstMapFlags) (GST_MAP_WRITE | GST_VIDEO_FRAME_MAP_FLAG_NO_REF))) {
-      GST_ERROR_OBJECT (self, "Couldn't fallback buffer");
-      gst_video_frame_unmap (&src_frame);
-      return FALSE;
-    }
-
-    for (i = 0; i < GST_VIDEO_FRAME_N_PLANES (&src_frame); i++) {
-      if (!gst_video_frame_copy_plane (&dest_frame, &src_frame, i)) {
-        GST_ERROR_OBJECT (self, "Couldn't copy %dth plane", i);
-
-        gst_video_frame_unmap (&dest_frame);
-        gst_video_frame_unmap (&src_frame);
-
-        return FALSE;
-      }
-    }
-
-    gst_video_frame_unmap (&dest_frame);
-    gst_video_frame_unmap (&src_frame);
-  }
-
-  return TRUE;
-}
-
-static gboolean
-gst_d3d11_compositor_check_d3d11_memory (GstD3D11Compositor * self,
-    GstBuffer * buffer, gboolean is_input, gboolean * view_available)
-{
-  guint i;
-  gboolean ret = TRUE;
-
-  *view_available = TRUE;
-
-  for (i = 0; i < gst_buffer_n_memory (buffer); i++) {
-    GstMemory *mem = gst_buffer_peek_memory (buffer, i);
-    GstD3D11Memory *dmem;
-
-    if (!gst_is_d3d11_memory (mem)) {
-      ret = FALSE;
-      goto done;
-    }
-
-    dmem = (GstD3D11Memory *) mem;
-    if (dmem->device != self->device) {
-      ret = FALSE;
-      goto done;
-    }
-
-    if (is_input) {
-      if (!gst_d3d11_memory_get_shader_resource_view_size (dmem))
-        *view_available = FALSE;
-    } else {
-      if (!gst_d3d11_memory_get_render_target_view_size (dmem))
-        *view_available = FALSE;
-    }
-  }
-
-done:
-  if (!ret)
-    *view_available = FALSE;
-
-  return ret;
 }
 
 static void
@@ -1125,8 +644,7 @@ gst_d3d11_compositor_pad_get_output_size (GstD3D11CompositorPad * comp_pad,
         pad_width = gst_util_uint64_scale_int (pad_height, dar_n, dar_d);
       }
       break;
-    case GST_D3D11_COMPOSITOR_SIZING_POLICY_KEEP_ASPECT_RATIO:
-    {
+    case GST_D3D11_COMPOSITOR_SIZING_POLICY_KEEP_ASPECT_RATIO:{
       gint from_dar_n, from_dar_d, to_dar_n, to_dar_d, num, den;
 
       /* Calculate DAR again with actual video size */
@@ -1254,57 +772,22 @@ gst_d3d11_compositor_pad_prepare_frame (GstVideoAggregatorPad * pad,
     GstVideoAggregator * vagg, GstBuffer * buffer,
     GstVideoFrame * prepared_frame)
 {
-  GstD3D11Compositor *self = GST_D3D11_COMPOSITOR (vagg);
-  GstD3D11CompositorPad *cpad = GST_D3D11_COMPOSITOR_PAD (pad);
-  GstBuffer *target_buf = buffer;
-  gboolean do_device_copy = FALSE;
-
   /* Skip this frame */
   if (gst_d3d11_compositor_pad_check_frame_obscured (pad, vagg))
     return TRUE;
 
-  /* Use fallback buffer when input buffer is:
-   * - non-d3d11 memory
-   * - or, from different d3d11 device
-   * - or not bound to shader resource
-   */
-  if (!gst_d3d11_compositor_check_d3d11_memory (self,
-          buffer, TRUE, &do_device_copy) || !do_device_copy) {
-    if (!gst_d3d11_compsitor_prepare_fallback_buffer (self, &pad->info, TRUE,
-            &cpad->fallback_pool, &cpad->fallback_buf)) {
-      GST_ERROR_OBJECT (self, "Couldn't prepare fallback buffer");
-      return FALSE;
-    }
-
-    if (!gst_d3d11_compositor_copy_buffer (self, &pad->info, buffer,
-            cpad->fallback_buf, do_device_copy)) {
-      GST_ERROR_OBJECT (self, "Couldn't copy input buffer to fallback buffer");
-      gst_clear_buffer (&cpad->fallback_buf);
-      return FALSE;
-    }
-
-    target_buf = cpad->fallback_buf;
-  }
-
-  if (!gst_video_frame_map (prepared_frame, &pad->info, target_buf,
-          (GstMapFlags) (GST_MAP_READ | GST_MAP_D3D11))) {
-    GST_WARNING_OBJECT (pad, "Couldn't map input buffer");
-    return FALSE;
-  }
+  /* don't map/upload now, it will happen in converter object.
+   * Just mark this frame is preparted instead */
+  prepared_frame->buffer = buffer;
 
   return TRUE;
 }
 
 static void
-gst_d3d11_compositor_pad_clean_frame (GstVideoAggregatorPad * pad,
+gst_d3d11_compositor_pad_clean_frame (GstVideoAggregatorPad * vpad,
     GstVideoAggregator * vagg, GstVideoFrame * prepared_frame)
 {
-  GstD3D11CompositorPad *cpad = GST_D3D11_COMPOSITOR_PAD (pad);
-
-  GST_VIDEO_AGGREGATOR_PAD_CLASS (parent_pad_class)->clean_frame (pad,
-      vagg, prepared_frame);
-
-  gst_clear_buffer (&cpad->fallback_buf);
+  memset (prepared_frame, 0, sizeof (GstVideoFrame));
 }
 
 static gboolean
@@ -1313,62 +796,88 @@ gst_d3d11_compositor_pad_setup_converter (GstVideoAggregatorPad * pad,
 {
   GstD3D11CompositorPad *cpad = GST_D3D11_COMPOSITOR_PAD (pad);
   GstD3D11Compositor *self = GST_D3D11_COMPOSITOR (vagg);
-  RECT rect;
   gint width, height;
   GstVideoInfo *info = &vagg->info;
   GstVideoRectangle frame_rect;
   gboolean is_first = FALSE;
+  gboolean output_has_alpha_comp = FALSE;
   gint x_offset, y_offset;
 #ifndef GST_DISABLE_GST_DEBUG
   guint zorder = 0;
 #endif
+  static const D3D11_RENDER_TARGET_BLEND_DESC blend_over_no_alpha = {
+    TRUE,
+    D3D11_BLEND_BLEND_FACTOR, D3D11_BLEND_INV_BLEND_FACTOR, D3D11_BLEND_OP_ADD,
+    D3D11_BLEND_BLEND_FACTOR, D3D11_BLEND_INV_BLEND_FACTOR, D3D11_BLEND_OP_ADD,
+    D3D11_COLOR_WRITE_ENABLE_ALL,
+  };
 
-  if (!cpad->convert || self->reconfigured) {
-    GstStructure *config;
+  if (GST_VIDEO_INFO_HAS_ALPHA (info) ||
+      GST_VIDEO_INFO_FORMAT (info) == GST_VIDEO_FORMAT_BGRx ||
+      GST_VIDEO_INFO_FORMAT (info) == GST_VIDEO_FORMAT_RGBx) {
+    output_has_alpha_comp = TRUE;
+  }
 
-    if (cpad->convert)
-      gst_d3d11_converter_free (cpad->convert);
+  if (cpad->config_updated) {
+    gst_clear_object (&cpad->convert);
+    cpad->config_updated = FALSE;
+  }
 
-    config = gst_structure_new_empty ("config");
-    if (cpad->alpha <= 1.0) {
-      gst_structure_set (config, GST_D3D11_CONVERTER_OPT_ALPHA_VALUE,
-          G_TYPE_DOUBLE, cpad->alpha, nullptr);
-    }
+  if (!cpad->convert) {
+    GstStructure *config = gst_structure_new ("converter-config",
+        /* XXX: Always use shader, to workaround buggy blending behavior of
+         * vendor implemented converter. Need investigation */
+        GST_D3D11_CONVERTER_OPT_BACKEND, GST_TYPE_D3D11_CONVERTER_BACKEND,
+        GST_D3D11_CONVERTER_BACKEND_SHADER,
+        GST_D3D11_CONVERTER_OPT_GAMMA_MODE,
+        GST_TYPE_VIDEO_GAMMA_MODE, cpad->gamma_mode,
+        GST_D3D11_CONVERTER_OPT_PRIMARIES_MODE,
+        GST_TYPE_VIDEO_PRIMARIES_MODE, cpad->primaries_mode, nullptr);
 
-    cpad->convert =
-        gst_d3d11_converter_new (self->device, &pad->info, &vagg->info, config);
-
+    cpad->convert = gst_d3d11_converter_new (self->device, &pad->info, info,
+        config);
     if (!cpad->convert) {
       GST_ERROR_OBJECT (pad, "Couldn't create converter");
       return FALSE;
     }
 
     is_first = TRUE;
-  } else if (cpad->alpha_updated) {
-    GstStructure *config;
+  }
 
-    config = gst_structure_new_empty ("config");
-    if (cpad->alpha <= 1.0) {
-      gst_structure_set (config, GST_D3D11_CONVERTER_OPT_ALPHA_VALUE,
-          G_TYPE_DOUBLE, cpad->alpha, nullptr);
+  if (cpad->alpha_updated || is_first) {
+    if (output_has_alpha_comp) {
+      g_object_set (cpad->convert, "alpha", cpad->alpha, nullptr);
+    } else {
+      gfloat blend_factor = cpad->alpha;
+
+      g_object_set (cpad->convert,
+          "blend-factor-red", blend_factor,
+          "blend-factor-green", blend_factor,
+          "blend-factor-blue", blend_factor,
+          "blend-factor-alpha", blend_factor, nullptr);
     }
 
-    gst_d3d11_converter_update_config (cpad->convert, config);
     cpad->alpha_updated = FALSE;
   }
 
-  if (!cpad->blend || cpad->blend_desc_updated) {
+  if (!cpad->blend || cpad->blend_desc_updated || is_first) {
     HRESULT hr;
     D3D11_BLEND_DESC desc = { 0, };
-    ID3D11BlendState *blend = NULL;
+    ID3D11BlendState *blend = nullptr;
     ID3D11Device *device_handle =
         gst_d3d11_device_get_device_handle (self->device);
+    gfloat blend_factor = 1.0f;
 
     GST_D3D11_CLEAR_COM (cpad->blend);
 
     desc.AlphaToCoverageEnable = FALSE;
     desc.IndependentBlendEnable = FALSE;
     desc.RenderTarget[0] = cpad->desc;
+    if (!output_has_alpha_comp &&
+        cpad->op == GST_D3D11_COMPOSITOR_OPERATOR_OVER) {
+      desc.RenderTarget[0] = blend_over_no_alpha;
+      blend_factor = cpad->alpha;
+    }
 
     hr = device_handle->CreateBlendState (&desc, &blend);
     if (!gst_d3d11_result (hr, self->device)) {
@@ -1378,6 +887,13 @@ gst_d3d11_compositor_pad_setup_converter (GstVideoAggregatorPad * pad,
     }
 
     cpad->blend = blend;
+    g_object_set (cpad->convert, "blend-state", blend,
+        "blend-factor-red", blend_factor,
+        "blend-factor-green", blend_factor,
+        "blend-factor-blue", blend_factor,
+        "blend-factor-alpha", blend_factor, nullptr);
+
+    cpad->blend_desc_updated = FALSE;
   }
 
   if (!is_first && !cpad->position_updated)
@@ -1389,31 +905,44 @@ gst_d3d11_compositor_pad_setup_converter (GstVideoAggregatorPad * pad,
   frame_rect = clamp_rectangle (cpad->xpos + x_offset, cpad->ypos + y_offset,
       width, height, GST_VIDEO_INFO_WIDTH (info), GST_VIDEO_INFO_HEIGHT (info));
 
-  rect.left = frame_rect.x;
-  rect.top = frame_rect.y;
-  rect.right = frame_rect.x + frame_rect.w;
-  rect.bottom = frame_rect.y + frame_rect.h;
-
 #ifndef GST_DISABLE_GST_DEBUG
-  g_object_get (pad, "zorder", &zorder, NULL);
+  g_object_get (pad, "zorder", &zorder, nullptr);
 
   GST_LOG_OBJECT (pad, "Update position, pad-xpos %d, pad-ypos %d, "
       "pad-zorder %d, pad-width %d, pad-height %d, in-resolution %dx%d, "
-      "out-resoution %dx%d, dst-{left,top,right,bottom} %d-%d-%d-%d",
+      "out-resoution %dx%d, dst-{x,y,width,height} %d-%d-%d-%d",
       cpad->xpos, cpad->ypos, zorder, cpad->width, cpad->height,
       GST_VIDEO_INFO_WIDTH (&pad->info), GST_VIDEO_INFO_HEIGHT (&pad->info),
       GST_VIDEO_INFO_WIDTH (info), GST_VIDEO_INFO_HEIGHT (info),
-      (gint) rect.left, (gint) rect.top, (gint) rect.right, (gint) rect.bottom);
+      frame_rect.x, frame_rect.y, frame_rect.w, frame_rect.h);
 #endif
 
   cpad->position_updated = FALSE;
 
-  return gst_d3d11_converter_update_dest_rect (cpad->convert, &rect);
+  g_object_set (cpad->convert, "dest-x", frame_rect.x,
+      "dest-y", frame_rect.y, "dest-width", frame_rect.w,
+      "dest-height", frame_rect.h, nullptr);
+
+  return TRUE;
 }
 
-static GstStaticCaps pad_template_caps =
-GST_STATIC_CAPS (GST_VIDEO_CAPS_MAKE_WITH_FEATURES
-    (GST_CAPS_FEATURE_MEMORY_D3D11_MEMORY, "{ RGBA, BGRA }"));
+static GstStaticCaps sink_pad_template_caps =
+    GST_STATIC_CAPS (GST_VIDEO_CAPS_MAKE_WITH_FEATURES
+    (GST_CAPS_FEATURE_MEMORY_D3D11_MEMORY, GST_D3D11_SINK_FORMATS) "; "
+    GST_VIDEO_CAPS_MAKE (GST_D3D11_SINK_FORMATS));
+
+/* formats we can output without conversion.
+ * Excludes 10/12 bits planar YUV (needs bitshift) and
+ * AYUV/AYUV64 (d3d11 runtime does not understand the ayuv order) */
+#define COMPOSITOR_SRC_FORMATS \
+    "{ RGBA64_LE, RGB10A2_LE, BGRA, RGBA, BGRx, RGBx, VUYA, NV12, NV21, " \
+    "P010_10LE, P012_LE, P016_LE, I420, YV12, Y42B, Y444, Y444_16LE, " \
+    "GRAY8, GRAY16_LE }"
+
+static GstStaticCaps src_pad_template_caps =
+    GST_STATIC_CAPS (GST_VIDEO_CAPS_MAKE_WITH_FEATURES
+    (GST_CAPS_FEATURE_MEMORY_D3D11_MEMORY, COMPOSITOR_SRC_FORMATS) "; "
+    GST_VIDEO_CAPS_MAKE (COMPOSITOR_SRC_FORMATS));
 
 enum
 {
@@ -1440,25 +969,28 @@ static void gst_d3d11_compositor_release_pad (GstElement * element,
 static void gst_d3d11_compositor_set_context (GstElement * element,
     GstContext * context);
 
-static gboolean gst_d3d11_compositor_start (GstAggregator * aggregator);
-static gboolean gst_d3d11_compositor_stop (GstAggregator * aggregator);
-static gboolean gst_d3d11_compositor_sink_query (GstAggregator * aggregator,
+static gboolean gst_d3d11_compositor_start (GstAggregator * agg);
+static gboolean gst_d3d11_compositor_stop (GstAggregator * agg);
+static gboolean gst_d3d11_compositor_sink_query (GstAggregator * agg,
     GstAggregatorPad * pad, GstQuery * query);
-static gboolean gst_d3d11_compositor_src_query (GstAggregator * aggregator,
+static gboolean gst_d3d11_compositor_src_query (GstAggregator * agg,
     GstQuery * query);
-static GstCaps *gst_d3d11_compositor_fixate_src_caps (GstAggregator *
-    aggregator, GstCaps * caps);
-static gboolean gst_d3d11_compositor_propose_allocation (GstAggregator *
-    aggregator, GstAggregatorPad * pad, GstQuery * decide_query,
+static GstCaps *gst_d3d11_compositor_fixate_src_caps (GstAggregator * agg,
+    GstCaps * caps);
+static gboolean gst_d3d11_compositor_negotiated_src_caps (GstAggregator * agg,
+    GstCaps * caps);
+static gboolean
+gst_d3d11_compositor_propose_allocation (GstAggregator * agg,
+    GstAggregatorPad * pad, GstQuery * decide_query, GstQuery * query);
+static gboolean gst_d3d11_compositor_decide_allocation (GstAggregator * agg,
     GstQuery * query);
-static gboolean gst_d3d11_compositor_decide_allocation (GstAggregator *
-    aggregator, GstQuery * query);
 static GstFlowReturn
 gst_d3d11_compositor_aggregate_frames (GstVideoAggregator * vagg,
     GstBuffer * outbuf);
 static GstFlowReturn
 gst_d3d11_compositor_create_output_buffer (GstVideoAggregator * vagg,
     GstBuffer ** outbuffer);
+static void gst_d3d11_compositor_quad_free (GstD3D11CompositorQuad * quad);
 
 #define gst_d3d11_compositor_parent_class parent_class
 G_DEFINE_TYPE_WITH_CODE (GstD3D11Compositor, gst_d3d11_compositor,
@@ -1468,24 +1000,24 @@ G_DEFINE_TYPE_WITH_CODE (GstD3D11Compositor, gst_d3d11_compositor,
 static void
 gst_d3d11_compositor_class_init (GstD3D11CompositorClass * klass)
 {
-  GObjectClass *gobject_class = G_OBJECT_CLASS (klass);
+  GObjectClass *object_class = G_OBJECT_CLASS (klass);
   GstElementClass *element_class = GST_ELEMENT_CLASS (klass);
-  GstAggregatorClass *aggregator_class = GST_AGGREGATOR_CLASS (klass);
+  GstAggregatorClass *agg_class = GST_AGGREGATOR_CLASS (klass);
   GstVideoAggregatorClass *vagg_class = GST_VIDEO_AGGREGATOR_CLASS (klass);
   GstCaps *caps;
 
-  gobject_class->dispose = gst_d3d11_compositor_dispose;
-  gobject_class->set_property = gst_d3d11_compositor_set_property;
-  gobject_class->get_property = gst_d3d11_compositor_get_property;
+  object_class->dispose = gst_d3d11_compositor_dispose;
+  object_class->set_property = gst_d3d11_compositor_set_property;
+  object_class->get_property = gst_d3d11_compositor_get_property;
 
-  g_object_class_install_property (gobject_class, PROP_ADAPTER,
+  g_object_class_install_property (object_class, PROP_ADAPTER,
       g_param_spec_int ("adapter", "Adapter",
           "Adapter index for creating device (-1 for default)",
           -1, G_MAXINT32, DEFAULT_ADAPTER,
           (GParamFlags) (G_PARAM_READWRITE | GST_PARAM_MUTABLE_READY |
               G_PARAM_STATIC_STRINGS)));
 
-  g_object_class_install_property (gobject_class, PROP_BACKGROUND,
+  g_object_class_install_property (object_class, PROP_BACKGROUND,
       g_param_spec_enum ("background", "Background", "Background type",
           GST_TYPE_D3D11_COMPOSITOR_BACKGROUND,
           DEFAULT_BACKGROUND,
@@ -1498,17 +1030,17 @@ gst_d3d11_compositor_class_init (GstD3D11CompositorClass * klass)
   element_class->set_context =
       GST_DEBUG_FUNCPTR (gst_d3d11_compositor_set_context);
 
-  aggregator_class->start = GST_DEBUG_FUNCPTR (gst_d3d11_compositor_start);
-  aggregator_class->stop = GST_DEBUG_FUNCPTR (gst_d3d11_compositor_stop);
-  aggregator_class->sink_query =
-      GST_DEBUG_FUNCPTR (gst_d3d11_compositor_sink_query);
-  aggregator_class->src_query =
-      GST_DEBUG_FUNCPTR (gst_d3d11_compositor_src_query);
-  aggregator_class->fixate_src_caps =
+  agg_class->start = GST_DEBUG_FUNCPTR (gst_d3d11_compositor_start);
+  agg_class->stop = GST_DEBUG_FUNCPTR (gst_d3d11_compositor_stop);
+  agg_class->sink_query = GST_DEBUG_FUNCPTR (gst_d3d11_compositor_sink_query);
+  agg_class->src_query = GST_DEBUG_FUNCPTR (gst_d3d11_compositor_src_query);
+  agg_class->fixate_src_caps =
       GST_DEBUG_FUNCPTR (gst_d3d11_compositor_fixate_src_caps);
-  aggregator_class->propose_allocation =
+  agg_class->negotiated_src_caps =
+      GST_DEBUG_FUNCPTR (gst_d3d11_compositor_negotiated_src_caps);
+  agg_class->propose_allocation =
       GST_DEBUG_FUNCPTR (gst_d3d11_compositor_propose_allocation);
-  aggregator_class->decide_allocation =
+  agg_class->decide_allocation =
       GST_DEBUG_FUNCPTR (gst_d3d11_compositor_decide_allocation);
 
   vagg_class->aggregate_frames =
@@ -1516,24 +1048,29 @@ gst_d3d11_compositor_class_init (GstD3D11CompositorClass * klass)
   vagg_class->create_output_buffer =
       GST_DEBUG_FUNCPTR (gst_d3d11_compositor_create_output_buffer);
 
-  caps = gst_d3d11_get_updated_template_caps (&pad_template_caps);
+  caps = gst_d3d11_get_updated_template_caps (&sink_pad_template_caps);
   gst_element_class_add_pad_template (element_class,
       gst_pad_template_new_with_gtype ("sink_%u", GST_PAD_SINK, GST_PAD_REQUEST,
           caps, GST_TYPE_D3D11_COMPOSITOR_PAD));
+  gst_caps_unref (caps);
 
+  caps = gst_d3d11_get_updated_template_caps (&src_pad_template_caps);
   gst_element_class_add_pad_template (element_class,
       gst_pad_template_new_with_gtype ("src", GST_PAD_SRC, GST_PAD_ALWAYS,
           caps, GST_TYPE_AGGREGATOR_PAD));
   gst_caps_unref (caps);
 
   gst_element_class_set_static_metadata (element_class, "Direct3D11 Compositor",
-      "Filter/Editor/Video/Compositor",
-      "A Direct3D11 compositor", "Seungha Yang <seungha@centricular.com>");
+      "Filter/Editor/Video/Compositor", "A Direct3D11 compositor",
+      "Seungha Yang <seungha@centricular.com>");
 
   gst_type_mark_as_plugin_api (GST_TYPE_D3D11_COMPOSITOR_BACKGROUND,
       (GstPluginAPIFlags) 0);
   gst_type_mark_as_plugin_api (GST_TYPE_D3D11_COMPOSITOR_PAD,
       (GstPluginAPIFlags) 0);
+
+  GST_DEBUG_CATEGORY_INIT (gst_d3d11_compositor_debug,
+      "d3d11compositor", 0, "d3d11compositor element");
 }
 
 static void
@@ -1550,8 +1087,7 @@ gst_d3d11_compositor_dispose (GObject * object)
 
   gst_clear_object (&self->device);
   gst_clear_buffer (&self->fallback_buf);
-  gst_clear_object (&self->fallback_pool);
-  g_clear_pointer (&self->checker_background, gst_d3d11_quad_free);
+  g_clear_pointer (&self->checker_background, gst_d3d11_compositor_quad_free);
 
   G_OBJECT_CLASS (parent_class)->dispose (object);
 }
@@ -1600,7 +1136,7 @@ gst_d3d11_compositor_child_proxy_get_child_by_index (GstChildProxy * proxy,
     guint index)
 {
   GstD3D11Compositor *self = GST_D3D11_COMPOSITOR (proxy);
-  GObject *obj = NULL;
+  GObject *obj = nullptr;
 
   GST_OBJECT_LOCK (self);
   obj = (GObject *) g_list_nth_data (GST_ELEMENT_CAST (self)->sinkpads, index);
@@ -1645,8 +1181,10 @@ gst_d3d11_compositor_request_new_pad (GstElement * element,
   pad = GST_ELEMENT_CLASS (parent_class)->request_new_pad (element,
       templ, name, caps);
 
-  if (pad == NULL)
-    goto could_not_create;
+  if (!pad) {
+    GST_DEBUG_OBJECT (element, "could not create/add pad");
+    return nullptr;
+  }
 
   gst_child_proxy_child_added (GST_CHILD_PROXY (element), G_OBJECT (pad),
       GST_OBJECT_NAME (pad));
@@ -1654,24 +1192,13 @@ gst_d3d11_compositor_request_new_pad (GstElement * element,
   GST_DEBUG_OBJECT (element, "Created new pad %s:%s", GST_DEBUG_PAD_NAME (pad));
 
   return pad;
-
-could_not_create:
-  {
-    GST_DEBUG_OBJECT (element, "could not create/add pad");
-    return NULL;
-  }
 }
 
 static gboolean
 gst_d3d11_compositor_pad_clear_resource (GstD3D11Compositor * self,
     GstD3D11CompositorPad * cpad, gpointer user_data)
 {
-  gst_clear_buffer (&cpad->fallback_buf);
-  if (cpad->fallback_pool) {
-    gst_buffer_pool_set_active (cpad->fallback_pool, FALSE);
-    gst_clear_object (&cpad->fallback_pool);
-  }
-  g_clear_pointer (&cpad->convert, gst_d3d11_converter_free);
+  gst_clear_object (&cpad->convert);
   GST_D3D11_CLEAR_COM (cpad->blend);
 
   return TRUE;
@@ -1688,7 +1215,7 @@ gst_d3d11_compositor_release_pad (GstElement * element, GstPad * pad)
   gst_child_proxy_child_removed (GST_CHILD_PROXY (self), G_OBJECT (pad),
       GST_OBJECT_NAME (pad));
 
-  gst_d3d11_compositor_pad_clear_resource (self, cpad, NULL);
+  gst_d3d11_compositor_pad_clear_resource (self, cpad, nullptr);
 
   GST_ELEMENT_CLASS (parent_class)->release_pad (element, pad);
 }
@@ -1704,9 +1231,9 @@ gst_d3d11_compositor_set_context (GstElement * element, GstContext * context)
 }
 
 static gboolean
-gst_d3d11_compositor_start (GstAggregator * aggregator)
+gst_d3d11_compositor_start (GstAggregator * agg)
 {
-  GstD3D11Compositor *self = GST_D3D11_COMPOSITOR (aggregator);
+  GstD3D11Compositor *self = GST_D3D11_COMPOSITOR (agg);
 
   if (!gst_d3d11_ensure_element_data (GST_ELEMENT_CAST (self),
           self->adapter, &self->device)) {
@@ -1714,18 +1241,18 @@ gst_d3d11_compositor_start (GstAggregator * aggregator)
     return FALSE;
   }
 
-  return GST_AGGREGATOR_CLASS (parent_class)->start (aggregator);
+  return GST_AGGREGATOR_CLASS (parent_class)->start (agg);
 }
 
 static gboolean
-gst_d3d11_compositor_stop (GstAggregator * aggregator)
+gst_d3d11_compositor_stop (GstAggregator * agg)
 {
-  GstD3D11Compositor *self = GST_D3D11_COMPOSITOR (aggregator);
+  GstD3D11Compositor *self = GST_D3D11_COMPOSITOR (agg);
 
-  g_clear_pointer (&self->checker_background, gst_d3d11_quad_free);
+  g_clear_pointer (&self->checker_background, gst_d3d11_compositor_quad_free);
   gst_clear_object (&self->device);
 
-  return GST_AGGREGATOR_CLASS (parent_class)->stop (aggregator);
+  return GST_AGGREGATOR_CLASS (parent_class)->stop (agg);
 }
 
 static GstCaps *
@@ -1739,7 +1266,7 @@ gst_d3d11_compositor_sink_getcaps (GstPad * pad, GstCaps * filter)
   template_caps = gst_pad_get_pad_template_caps (pad);
 
   sinkcaps = gst_pad_get_current_caps (pad);
-  if (sinkcaps == NULL) {
+  if (sinkcaps == nullptr) {
     sinkcaps = gst_caps_ref (template_caps);
   } else {
     sinkcaps = gst_caps_merge (sinkcaps, gst_caps_ref (template_caps));
@@ -1782,23 +1309,19 @@ gst_d3d11_compositor_sink_acceptcaps (GstPad * pad, GstCaps * caps)
 }
 
 static gboolean
-gst_d3d11_compositor_sink_query (GstAggregator * aggregator,
+gst_d3d11_compositor_sink_query (GstAggregator * agg,
     GstAggregatorPad * pad, GstQuery * query)
 {
-  GstD3D11Compositor *self = GST_D3D11_COMPOSITOR (aggregator);
+  GstD3D11Compositor *self = GST_D3D11_COMPOSITOR (agg);
 
   switch (GST_QUERY_TYPE (query)) {
     case GST_QUERY_CONTEXT:
-    {
-      gboolean ret;
-      ret = gst_d3d11_handle_context_query (GST_ELEMENT (aggregator), query,
-          self->device);
-      if (ret)
+      if (gst_d3d11_handle_context_query (GST_ELEMENT (agg), query,
+              self->device)) {
         return TRUE;
+      }
       break;
-    }
-    case GST_QUERY_CAPS:
-    {
+    case GST_QUERY_CAPS:{
       GstCaps *filter, *caps;
 
       gst_query_parse_caps (query, &filter);
@@ -1807,8 +1330,7 @@ gst_d3d11_compositor_sink_query (GstAggregator * aggregator,
       gst_caps_unref (caps);
       return TRUE;
     }
-    case GST_QUERY_ACCEPT_CAPS:
-    {
+    case GST_QUERY_ACCEPT_CAPS:{
       GstCaps *caps;
       gboolean ret;
 
@@ -1821,43 +1343,38 @@ gst_d3d11_compositor_sink_query (GstAggregator * aggregator,
       break;
   }
 
-  return GST_AGGREGATOR_CLASS (parent_class)->sink_query (aggregator,
-      pad, query);
+  return GST_AGGREGATOR_CLASS (parent_class)->sink_query (agg, pad, query);
 }
 
 static gboolean
-gst_d3d11_compositor_src_query (GstAggregator * aggregator, GstQuery * query)
+gst_d3d11_compositor_src_query (GstAggregator * agg, GstQuery * query)
 {
-  GstD3D11Compositor *self = GST_D3D11_COMPOSITOR (aggregator);
+  GstD3D11Compositor *self = GST_D3D11_COMPOSITOR (agg);
 
   switch (GST_QUERY_TYPE (query)) {
     case GST_QUERY_CONTEXT:
-    {
-      gboolean ret;
-      ret = gst_d3d11_handle_context_query (GST_ELEMENT (aggregator), query,
-          self->device);
-      if (ret)
+      if (gst_d3d11_handle_context_query (GST_ELEMENT (agg), query,
+              self->device)) {
         return TRUE;
+      }
       break;
-    }
     default:
       break;
   }
 
-  return GST_AGGREGATOR_CLASS (parent_class)->src_query (aggregator, query);
+  return GST_AGGREGATOR_CLASS (parent_class)->src_query (agg, query);
 }
 
 static GstCaps *
-gst_d3d11_compositor_fixate_src_caps (GstAggregator * aggregator,
-    GstCaps * caps)
+gst_d3d11_compositor_fixate_src_caps (GstAggregator * agg, GstCaps * caps)
 {
-  GstVideoAggregator *vagg = GST_VIDEO_AGGREGATOR (aggregator);
+  GstVideoAggregator *vagg = GST_VIDEO_AGGREGATOR (agg);
   GList *l;
   gint best_width = -1, best_height = -1;
   gint best_fps_n = -1, best_fps_d = -1;
   gint par_n, par_d;
   gdouble best_fps = 0.;
-  GstCaps *ret = NULL;
+  GstCaps *ret = nullptr;
   GstStructure *s;
 
   ret = gst_caps_make_writable (caps);
@@ -1926,42 +1443,303 @@ gst_d3d11_compositor_fixate_src_caps (GstAggregator * aggregator,
       best_fps_d);
   ret = gst_caps_fixate (ret);
 
-  GST_LOG_OBJECT (aggregator, "Fixated caps %" GST_PTR_FORMAT, ret);
+  GST_LOG_OBJECT (agg, "Fixated caps %" GST_PTR_FORMAT, ret);
 
   return ret;
 }
 
-static gboolean
-gst_d3d11_compositor_propose_allocation (GstAggregator * aggregator,
-    GstAggregatorPad * pad, GstQuery * decide_query, GstQuery * query)
+static void
+convert_info_gray_to_yuv (const GstVideoInfo * gray, GstVideoInfo * yuv)
 {
-  GstD3D11Compositor *self = GST_D3D11_COMPOSITOR (aggregator);
+  GstVideoInfo tmp;
+
+  if (GST_VIDEO_INFO_IS_YUV (gray)) {
+    *yuv = *gray;
+    return;
+  }
+
+  if (gray->finfo->depth[0] == 8) {
+    gst_video_info_set_format (&tmp,
+        GST_VIDEO_FORMAT_Y444, gray->width, gray->height);
+  } else {
+    gst_video_info_set_format (&tmp,
+        GST_VIDEO_FORMAT_Y444_16LE, gray->width, gray->height);
+  }
+
+  tmp.colorimetry.range = gray->colorimetry.range;
+  if (tmp.colorimetry.range == GST_VIDEO_COLOR_RANGE_UNKNOWN)
+    tmp.colorimetry.range = GST_VIDEO_COLOR_RANGE_0_255;
+
+  tmp.colorimetry.primaries = gray->colorimetry.primaries;
+  if (tmp.colorimetry.primaries == GST_VIDEO_COLOR_PRIMARIES_UNKNOWN)
+    tmp.colorimetry.primaries = GST_VIDEO_COLOR_PRIMARIES_BT709;
+
+  tmp.colorimetry.transfer = gray->colorimetry.transfer;
+  if (tmp.colorimetry.transfer == GST_VIDEO_TRANSFER_UNKNOWN)
+    tmp.colorimetry.transfer = GST_VIDEO_TRANSFER_BT709;
+
+  tmp.colorimetry.matrix = gray->colorimetry.matrix;
+  if (tmp.colorimetry.matrix == GST_VIDEO_COLOR_MATRIX_UNKNOWN)
+    tmp.colorimetry.matrix = GST_VIDEO_COLOR_MATRIX_BT709;
+
+  *yuv = tmp;
+}
+
+static void
+gst_d3d11_compositor_calculate_background_color (GstD3D11Compositor * self,
+    const GstVideoInfo * info)
+{
+  GstD3D11ColorMatrix clear_color_matrix;
+  gdouble rgb[3];
+  gdouble converted[3];
+  GstVideoFormat format = GST_VIDEO_INFO_FORMAT (info);
+
+  if (GST_VIDEO_INFO_IS_RGB (info)) {
+    GstVideoInfo rgb_info = *info;
+    rgb_info.colorimetry.range = GST_VIDEO_COLOR_RANGE_0_255;
+
+    gst_d3d11_color_range_adjust_matrix_unorm (&rgb_info, info,
+        &clear_color_matrix);
+  } else {
+    GstVideoInfo rgb_info;
+    GstVideoInfo yuv_info;
+
+    gst_video_info_set_format (&rgb_info, GST_VIDEO_FORMAT_RGBA64_LE,
+        info->width, info->height);
+    convert_info_gray_to_yuv (info, &yuv_info);
+
+    if (yuv_info.colorimetry.matrix == GST_VIDEO_COLOR_MATRIX_UNKNOWN ||
+        yuv_info.colorimetry.matrix == GST_VIDEO_COLOR_MATRIX_RGB) {
+      GST_WARNING_OBJECT (self, "Invalid matrix is detected");
+      yuv_info.colorimetry.matrix = GST_VIDEO_COLOR_MATRIX_BT709;
+    }
+
+    gst_d3d11_rgb_to_yuv_matrix_unorm (&rgb_info,
+        &yuv_info, &clear_color_matrix);
+  }
+
+  /* Calculate black and white color values */
+  for (guint i = 0; i < 2; i++) {
+    GstD3D11CompositorClearColor *clear_color = &self->clear_color[i];
+    rgb[0] = rgb[1] = rgb[2] = (gdouble) i;
+
+    for (guint j = 0; j < 3; j++) {
+      converted[j] = 0;
+      for (guint k = 0; k < 3; k++) {
+        converted[j] += clear_color_matrix.matrix[j][k] * rgb[k];
+      }
+      converted[j] += clear_color_matrix.offset[j];
+      converted[j] = CLAMP (converted[j],
+          clear_color_matrix.min[j], clear_color_matrix.max[j]);
+    }
+
+    GST_DEBUG_OBJECT (self, "Calculated background color RGB: %f, %f, %f",
+        converted[0], converted[1], converted[2]);
+
+    if (GST_VIDEO_INFO_IS_RGB (info) || GST_VIDEO_INFO_IS_GRAY (info)) {
+      for (guint j = 0; j < 3; j++)
+        clear_color->color[0][j] = converted[j];
+      clear_color->color[0][3] = 1.0;
+    } else {
+      switch (format) {
+        case GST_VIDEO_FORMAT_VUYA:
+          clear_color->color[0][0] = converted[2];
+          clear_color->color[0][1] = converted[1];
+          clear_color->color[0][2] = converted[0];
+          clear_color->color[0][3] = 1.0;
+          break;
+        case GST_VIDEO_FORMAT_NV12:
+        case GST_VIDEO_FORMAT_NV21:
+        case GST_VIDEO_FORMAT_P010_10LE:
+        case GST_VIDEO_FORMAT_P012_LE:
+        case GST_VIDEO_FORMAT_P016_LE:
+          clear_color->color[0][0] = converted[0];
+          clear_color->color[0][1] = 0;
+          clear_color->color[0][2] = 0;
+          clear_color->color[0][3] = 1.0;
+          if (format == GST_VIDEO_FORMAT_NV21) {
+            clear_color->color[1][0] = converted[2];
+            clear_color->color[1][1] = converted[1];
+          } else {
+            clear_color->color[1][0] = converted[1];
+            clear_color->color[1][1] = converted[2];
+          }
+          clear_color->color[1][2] = 0;
+          clear_color->color[1][3] = 1.0;
+          break;
+        case GST_VIDEO_FORMAT_I420:
+        case GST_VIDEO_FORMAT_YV12:
+        case GST_VIDEO_FORMAT_I420_10LE:
+        case GST_VIDEO_FORMAT_I420_12LE:
+        case GST_VIDEO_FORMAT_Y42B:
+        case GST_VIDEO_FORMAT_I422_10LE:
+        case GST_VIDEO_FORMAT_I422_12LE:
+        case GST_VIDEO_FORMAT_Y444:
+        case GST_VIDEO_FORMAT_Y444_10LE:
+        case GST_VIDEO_FORMAT_Y444_12LE:
+        case GST_VIDEO_FORMAT_Y444_16LE:
+          clear_color->color[0][0] = converted[0];
+          clear_color->color[0][1] = 0;
+          clear_color->color[0][2] = 0;
+          clear_color->color[0][3] = 1.0;
+          if (format == GST_VIDEO_FORMAT_YV12) {
+            clear_color->color[1][0] = converted[2];
+            clear_color->color[2][0] = converted[1];
+          } else {
+            clear_color->color[1][0] = converted[1];
+            clear_color->color[2][0] = converted[2];
+          }
+          clear_color->color[1][1] = 0;
+          clear_color->color[1][2] = 0;
+          clear_color->color[1][3] = 1.0;
+          clear_color->color[2][1] = 0;
+          clear_color->color[2][2] = 0;
+          clear_color->color[2][3] = 1.0;
+          break;
+        default:
+          g_assert_not_reached ();
+          break;
+      }
+    }
+  }
+}
+
+static gboolean
+gst_d3d11_compositor_negotiated_src_caps (GstAggregator * agg, GstCaps * caps)
+{
+  GstD3D11Compositor *self = GST_D3D11_COMPOSITOR (agg);
+  GstCapsFeatures *features;
   GstVideoInfo info;
-  GstBufferPool *pool;
-  GstCaps *caps;
-  guint size;
 
-  gst_query_parse_allocation (query, &caps, NULL);
-
-  if (caps == NULL)
+  if (!gst_video_info_from_caps (&info, caps)) {
+    GST_ERROR_OBJECT (self, "Failed to convert caps to info");
     return FALSE;
+  }
 
-  if (!gst_video_info_from_caps (&info, caps))
-    return FALSE;
+  features = gst_caps_get_features (caps, 0);
+  if (features
+      && gst_caps_features_contains (features,
+          GST_CAPS_FEATURE_MEMORY_D3D11_MEMORY)) {
+    GST_DEBUG_OBJECT (self, "Negotiated with D3D11 memory caps");
+    self->downstream_supports_d3d11 = TRUE;
+  } else {
+    GST_DEBUG_OBJECT (self, "Negotiated with system memory caps");
+    self->downstream_supports_d3d11 = FALSE;
+  }
 
-  if (gst_query_get_n_allocation_pools (query) == 0) {
+  gst_element_foreach_sink_pad (GST_ELEMENT_CAST (self),
+      (GstElementForeachPadFunc) gst_d3d11_compositor_pad_clear_resource,
+      nullptr);
+
+  gst_clear_buffer (&self->fallback_buf);
+  g_clear_pointer (&self->checker_background, gst_d3d11_compositor_quad_free);
+
+  gst_d3d11_compositor_calculate_background_color (self, &info);
+
+  if (!self->downstream_supports_d3d11) {
     GstD3D11AllocationParams *d3d11_params;
-    GstStructure *config;
+    GstBufferPool *pool;
+    GstFlowReturn flow_ret;
 
-    d3d11_params = gst_d3d11_allocation_params_new (self->device, &info,
-        (GstD3D11AllocationFlags) 0, D3D11_BIND_SHADER_RESOURCE);
+    d3d11_params = gst_d3d11_allocation_params_new (self->device,
+        &info, GST_D3D11_ALLOCATION_FLAG_DEFAULT,
+        D3D11_BIND_SHADER_RESOURCE | D3D11_BIND_RENDER_TARGET, 0);
 
     pool = gst_d3d11_buffer_pool_new_with_options (self->device,
         caps, d3d11_params, 0, 0);
     gst_d3d11_allocation_params_free (d3d11_params);
 
     if (!pool) {
+      GST_ERROR_OBJECT (self, "Failed to create pool");
+      return FALSE;
+    }
+
+    if (!gst_buffer_pool_set_active (pool, TRUE)) {
+      GST_ERROR_OBJECT (self, "Failed to set active");
+      gst_object_unref (pool);
+      return FALSE;
+    }
+
+    flow_ret = gst_buffer_pool_acquire_buffer (pool, &self->fallback_buf,
+        nullptr);
+    if (flow_ret != GST_FLOW_OK) {
+      GST_ERROR_OBJECT (self, "Failed to acquire buffer");
+      gst_object_unref (pool);
+      return FALSE;
+    }
+
+    gst_buffer_pool_set_active (pool, FALSE);
+    gst_object_unref (pool);
+  }
+
+  return GST_AGGREGATOR_CLASS (parent_class)->negotiated_src_caps (agg, caps);
+}
+
+static gboolean
+gst_d3d11_compositor_propose_allocation (GstAggregator * agg,
+    GstAggregatorPad * pad, GstQuery * decide_query, GstQuery * query)
+{
+  GstD3D11Compositor *self = GST_D3D11_COMPOSITOR (agg);
+  GstVideoInfo info;
+  GstBufferPool *pool;
+  GstCaps *caps;
+  guint size;
+
+  gst_query_parse_allocation (query, &caps, nullptr);
+
+  if (caps == nullptr)
+    return FALSE;
+
+  if (!gst_video_info_from_caps (&info, caps))
+    return FALSE;
+
+  if (gst_query_get_n_allocation_pools (query) == 0) {
+    GstCapsFeatures *features;
+    GstStructure *config;
+    gboolean is_d3d11 = FALSE;
+
+    features = gst_caps_get_features (caps, 0);
+    if (features
+        && gst_caps_features_contains (features,
+            GST_CAPS_FEATURE_MEMORY_D3D11_MEMORY)) {
+      GST_DEBUG_OBJECT (pad, "upstream support d3d11 memory");
+      pool = gst_d3d11_buffer_pool_new (self->device);
+      is_d3d11 = TRUE;
+    } else {
+      pool = gst_video_buffer_pool_new ();
+    }
+
+    if (!pool) {
       GST_ERROR_OBJECT (self, "Failed to create buffer pool");
+      return FALSE;
+    }
+
+    config = gst_buffer_pool_get_config (pool);
+    gst_buffer_pool_config_add_option (config,
+        GST_BUFFER_POOL_OPTION_VIDEO_META);
+
+    size = GST_VIDEO_INFO_SIZE (&info);
+    if (is_d3d11) {
+      GstD3D11AllocationParams *d3d11_params;
+
+      d3d11_params =
+          gst_d3d11_allocation_params_new (self->device,
+          &info, GST_D3D11_ALLOCATION_FLAG_DEFAULT, D3D11_BIND_SHADER_RESOURCE,
+          0);
+
+      gst_buffer_pool_config_set_d3d11_allocation_params (config, d3d11_params);
+      gst_d3d11_allocation_params_free (d3d11_params);
+    } else {
+      gst_buffer_pool_config_add_option (config,
+          GST_BUFFER_POOL_OPTION_VIDEO_ALIGNMENT);
+    }
+
+    gst_buffer_pool_config_set_params (config, caps, (guint) size, 0, 0);
+
+    if (!gst_buffer_pool_set_config (pool, config)) {
+      GST_ERROR_OBJECT (pool, "Couldn't set config");
+      gst_object_unref (pool);
+
       return FALSE;
     }
 
@@ -1976,71 +1754,91 @@ gst_d3d11_compositor_propose_allocation (GstAggregator * aggregator,
     gst_object_unref (pool);
   }
 
-  gst_query_add_allocation_meta (query, GST_VIDEO_META_API_TYPE, NULL);
+  gst_query_add_allocation_meta (query, GST_VIDEO_META_API_TYPE, nullptr);
+  gst_query_add_allocation_meta (query, GST_VIDEO_CROP_META_API_TYPE, nullptr);
 
   return TRUE;
 }
 
 static gboolean
-gst_d3d11_compositor_decide_allocation (GstAggregator * aggregator,
-    GstQuery * query)
+gst_d3d11_compositor_decide_allocation (GstAggregator * agg, GstQuery * query)
 {
-  GstD3D11Compositor *self = GST_D3D11_COMPOSITOR (aggregator);
+  GstD3D11Compositor *self = GST_D3D11_COMPOSITOR (agg);
   GstCaps *caps;
-  GstBufferPool *pool = NULL;
+  GstBufferPool *pool = nullptr;
   guint n, size, min, max;
   GstVideoInfo info;
   GstStructure *config;
-  GstD3D11AllocationParams *d3d11_params;
+  gboolean use_d3d11_pool;
 
-  gst_query_parse_allocation (query, &caps, NULL);
+  gst_query_parse_allocation (query, &caps, nullptr);
 
   if (!caps) {
     GST_DEBUG_OBJECT (self, "No output caps");
     return FALSE;
   }
 
-  gst_video_info_from_caps (&info, caps);
+  if (!gst_video_info_from_caps (&info, caps)) {
+    GST_ERROR_OBJECT (self, "Invalid caps");
+    return FALSE;
+  }
+
+  use_d3d11_pool = self->downstream_supports_d3d11;
+
   n = gst_query_get_n_allocation_pools (query);
   if (n > 0)
     gst_query_parse_nth_allocation_pool (query, 0, &pool, &size, &min, &max);
 
   /* create our own pool */
-  if (pool) {
+  if (pool && use_d3d11_pool) {
     if (!GST_IS_D3D11_BUFFER_POOL (pool)) {
+      GST_DEBUG_OBJECT (self,
+          "Downstream pool is not d3d11, will create new one");
       gst_clear_object (&pool);
     } else {
       GstD3D11BufferPool *dpool = GST_D3D11_BUFFER_POOL (pool);
-      if (dpool->device != self->device)
+      if (dpool->device != self->device) {
+        GST_DEBUG_OBJECT (self, "Different device, will create new one");
         gst_clear_object (&pool);
+      }
     }
   }
 
-  if (!pool) {
-    pool = gst_d3d11_buffer_pool_new (self->device);
+  size = (guint) info.size;
 
-    min = max = 0;
-    size = (guint) info.size;
+  if (!pool) {
+    if (use_d3d11_pool)
+      pool = gst_d3d11_buffer_pool_new (self->device);
+    else
+      pool = gst_video_buffer_pool_new ();
+
+    min = 0;
+    max = 0;
   }
 
   config = gst_buffer_pool_get_config (pool);
   gst_buffer_pool_config_set_params (config, caps, size, min, max);
   gst_buffer_pool_config_add_option (config, GST_BUFFER_POOL_OPTION_VIDEO_META);
 
-  d3d11_params = gst_buffer_pool_config_get_d3d11_allocation_params (config);
-  if (!d3d11_params) {
-    d3d11_params = gst_d3d11_allocation_params_new (self->device,
-        &info, (GstD3D11AllocationFlags) 0, D3D11_BIND_RENDER_TARGET);
-  } else {
-    guint i;
+  if (use_d3d11_pool) {
+    GstD3D11AllocationParams *d3d11_params;
 
-    for (i = 0; i < GST_VIDEO_INFO_N_PLANES (&info); i++) {
-      d3d11_params->desc[i].BindFlags |= D3D11_BIND_RENDER_TARGET;
+    d3d11_params = gst_buffer_pool_config_get_d3d11_allocation_params (config);
+    if (!d3d11_params) {
+      d3d11_params = gst_d3d11_allocation_params_new (self->device,
+          &info, GST_D3D11_ALLOCATION_FLAG_DEFAULT, D3D11_BIND_RENDER_TARGET,
+          0);
+    } else {
+      guint i;
+
+      for (i = 0; i < GST_VIDEO_INFO_N_PLANES (&info); i++) {
+        d3d11_params->desc[i].BindFlags |= D3D11_BIND_RENDER_TARGET;
+      }
     }
-  }
 
-  gst_buffer_pool_config_set_d3d11_allocation_params (config, d3d11_params);
-  gst_d3d11_allocation_params_free (d3d11_params);
+    gst_buffer_pool_config_set_d3d11_allocation_params (config, d3d11_params);
+    gst_d3d11_allocation_params_free (d3d11_params);
+  }
 
   gst_buffer_pool_set_config (pool, config);
 
@@ -2055,8 +1853,6 @@ gst_d3d11_compositor_decide_allocation (GstAggregator * aggregator,
   else
     gst_query_add_allocation_pool (query, pool, size, min, max);
   gst_object_unref (pool);
-
-  self->reconfigured = TRUE;
 
   return TRUE;
 }
@@ -2076,10 +1872,11 @@ typedef struct
   } texture;
 } VertexData;
 
-static GstD3D11Quad *
-gst_d3d11_compositor_create_checker_quad (GstD3D11Compositor * self)
+static GstD3D11CompositorQuad *
+gst_d3d11_compositor_create_checker_quad (GstD3D11Compositor * self,
+    const GstVideoInfo * info)
 {
-  GstD3D11Quad *quad = NULL;
+  GstD3D11CompositorQuad *quad = nullptr;
   VertexData *vertex_data;
   WORD *indices;
   ID3D11Device *device_handle;
@@ -2087,21 +1884,29 @@ gst_d3d11_compositor_create_checker_quad (GstD3D11Compositor * self)
   D3D11_MAPPED_SUBRESOURCE map;
   D3D11_INPUT_ELEMENT_DESC input_desc;
   D3D11_BUFFER_DESC buffer_desc;
-  /* *INDENT-OFF* */
-  ComPtr<ID3D11Buffer> vertex_buffer;
-  ComPtr<ID3D11Buffer> index_buffer;
-  ComPtr<ID3D11PixelShader> ps;
-  ComPtr<ID3D11VertexShader> vs;
-  ComPtr<ID3D11InputLayout> layout;
-  /* *INDENT-ON* */
+  ComPtr < ID3D11Buffer > vertex_buffer;
+  ComPtr < ID3D11Buffer > index_buffer;
+  ComPtr < ID3D11PixelShader > ps;
+  ComPtr < ID3D11VertexShader > vs;
+  ComPtr < ID3D11InputLayout > layout;
   HRESULT hr;
+  const gchar *ps_src;
 
   device_handle = gst_d3d11_device_get_device_handle (self->device);
   context_handle = gst_d3d11_device_get_device_context_handle (self->device);
 
-  if (!gst_d3d11_create_pixel_shader (self->device, checker_ps_src, &ps)) {
+  if (GST_VIDEO_INFO_IS_RGB (info)) {
+    ps_src = checker_ps_src_rgb;
+  } else if (GST_VIDEO_INFO_FORMAT (info) == GST_VIDEO_FORMAT_VUYA) {
+    ps_src = checker_ps_src_vuya;
+  } else {
+    ps_src = checker_ps_src_luma;
+  }
+
+  hr = gst_d3d11_create_pixel_shader_simple (self->device, ps_src, "main", &ps);
+  if (!gst_d3d11_result (hr, self->device)) {
     GST_ERROR_OBJECT (self, "Couldn't setup pixel shader");
-    return NULL;
+    return nullptr;
   }
 
   memset (&input_desc, 0, sizeof (D3D11_INPUT_ELEMENT_DESC));
@@ -2113,10 +1918,11 @@ gst_d3d11_compositor_create_checker_quad (GstD3D11Compositor * self)
   input_desc.InputSlotClass = D3D11_INPUT_PER_VERTEX_DATA;
   input_desc.InstanceDataStepRate = 0;
 
-  if (!gst_d3d11_create_vertex_shader (self->device, checker_vs_src,
-          &input_desc, 1, &vs, &layout)) {
+  hr = gst_d3d11_create_vertex_shader_simple (self->device, checker_vs_src,
+      "main", &input_desc, 1, &vs, &layout);
+  if (!gst_d3d11_result (hr, self->device)) {
     GST_ERROR_OBJECT (self, "Couldn't setup vertex shader");
-    return NULL;
+    return nullptr;
   }
 
   memset (&buffer_desc, 0, sizeof (D3D11_BUFFER_DESC));
@@ -2125,11 +1931,11 @@ gst_d3d11_compositor_create_checker_quad (GstD3D11Compositor * self)
   buffer_desc.BindFlags = D3D11_BIND_VERTEX_BUFFER;
   buffer_desc.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
 
-  hr = device_handle->CreateBuffer (&buffer_desc, NULL, &vertex_buffer);
+  hr = device_handle->CreateBuffer (&buffer_desc, nullptr, &vertex_buffer);
   if (!gst_d3d11_result (hr, self->device)) {
     GST_ERROR_OBJECT (self,
         "Couldn't create vertex buffer, hr: 0x%x", (guint) hr);
-    return NULL;
+    return nullptr;
   }
 
   hr = context_handle->Map (vertex_buffer.Get (),
@@ -2137,11 +1943,10 @@ gst_d3d11_compositor_create_checker_quad (GstD3D11Compositor * self)
 
   if (!gst_d3d11_result (hr, self->device)) {
     GST_ERROR_OBJECT (self, "Couldn't map vertex buffer, hr: 0x%x", (guint) hr);
-    return NULL;
+    return nullptr;
   }
 
   vertex_data = (VertexData *) map.pData;
-  /* bottom left */
   /* bottom left */
   vertex_data[0].position.x = -1.0f;
   vertex_data[0].position.y = -1.0f;
@@ -2177,11 +1982,11 @@ gst_d3d11_compositor_create_checker_quad (GstD3D11Compositor * self)
   buffer_desc.BindFlags = D3D11_BIND_INDEX_BUFFER;
   buffer_desc.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
 
-  hr = device_handle->CreateBuffer (&buffer_desc, NULL, &index_buffer);
+  hr = device_handle->CreateBuffer (&buffer_desc, nullptr, &index_buffer);
   if (!gst_d3d11_result (hr, self->device)) {
     GST_ERROR_OBJECT (self,
         "Couldn't create index buffer, hr: 0x%x", (guint) hr);
-    return NULL;
+    return nullptr;
   }
 
   hr = context_handle->Map (index_buffer.Get (),
@@ -2189,7 +1994,7 @@ gst_d3d11_compositor_create_checker_quad (GstD3D11Compositor * self)
 
   if (!gst_d3d11_result (hr, self->device)) {
     GST_ERROR_OBJECT (self, "Couldn't map index buffer, hr: 0x%x", (guint) hr);
-    return NULL;
+    return nullptr;
   }
 
   indices = (WORD *) map.pData;
@@ -2204,72 +2009,110 @@ gst_d3d11_compositor_create_checker_quad (GstD3D11Compositor * self)
   indices[5] = 2;               /* top right */
 
   context_handle->Unmap (index_buffer.Get (), 0);
+  quad = g_new0 (GstD3D11CompositorQuad, 1);
+  quad->ps = ps.Detach ();
+  quad->vs = vs.Detach ();
+  quad->layout = layout.Detach ();
+  quad->vertex_buffer = vertex_buffer.Detach ();
+  quad->index_buffer = index_buffer.Detach ();
 
-  quad = gst_d3d11_quad_new (self->device,
-      ps.Get (), vs.Get (), layout.Get (), nullptr, 0,
-      vertex_buffer.Get (), sizeof (VertexData), index_buffer.Get (),
-      DXGI_FORMAT_R16_UINT, 6);
-  if (!quad) {
-    GST_ERROR_OBJECT (self, "Couldn't setup quad");
-    return NULL;
-  }
+  quad->viewport.TopLeftX = 0;
+  quad->viewport.TopLeftY = 0;
+  quad->viewport.Width = GST_VIDEO_INFO_WIDTH (info);
+  quad->viewport.Height = GST_VIDEO_INFO_HEIGHT (info);
+  quad->viewport.MinDepth = 0.0f;
+  quad->viewport.MaxDepth = 1.0f;
 
   return quad;
+}
+
+static void
+gst_d3d11_compositor_quad_free (GstD3D11CompositorQuad * quad)
+{
+  if (!quad)
+    return;
+
+  GST_D3D11_CLEAR_COM (quad->ps);
+  GST_D3D11_CLEAR_COM (quad->vs);
+  GST_D3D11_CLEAR_COM (quad->layout);
+  GST_D3D11_CLEAR_COM (quad->vertex_buffer);
+  GST_D3D11_CLEAR_COM (quad->index_buffer);
+
+  g_free (quad);
 }
 
 static gboolean
 gst_d3d11_compositor_draw_background_checker (GstD3D11Compositor * self,
     ID3D11RenderTargetView * rtv)
 {
+  ID3D11DeviceContext *context =
+      gst_d3d11_device_get_device_context_handle (self->device);
+  UINT offsets = 0;
+  UINT strides = sizeof (VertexData);
+  GstD3D11CompositorQuad *quad;
+
   if (!self->checker_background) {
     GstVideoInfo *info = &GST_VIDEO_AGGREGATOR_CAST (self)->info;
 
-    self->checker_background = gst_d3d11_compositor_create_checker_quad (self);
-
+    self->checker_background =
+        gst_d3d11_compositor_create_checker_quad (self, info);
     if (!self->checker_background)
       return FALSE;
-
-    self->viewport.TopLeftX = 0;
-    self->viewport.TopLeftY = 0;
-    self->viewport.Width = GST_VIDEO_INFO_WIDTH (info);
-    self->viewport.Height = GST_VIDEO_INFO_HEIGHT (info);
-    self->viewport.MinDepth = 0.0f;
-    self->viewport.MaxDepth = 1.0f;
   }
 
-  return gst_d3d11_draw_quad_unlocked (self->checker_background,
-      &self->viewport, 1, NULL, 0, &rtv, 1, NULL, NULL, NULL, 0);
+  quad = self->checker_background;
+  context->IASetPrimitiveTopology (D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+  context->IASetInputLayout (quad->layout);
+  context->IASetVertexBuffers (0, 1, &quad->vertex_buffer, &strides, &offsets);
+  context->IASetIndexBuffer (quad->index_buffer, DXGI_FORMAT_R16_UINT, 0);
+  context->VSSetShader (quad->vs, nullptr, 0);
+  context->PSSetShader (quad->ps, nullptr, 0);
+  context->RSSetViewports (1, &quad->viewport);
+  context->OMSetRenderTargets (1, &rtv, nullptr);
+  context->OMSetBlendState (nullptr, nullptr, 0xffffffff);
+  context->DrawIndexed (6, 0, 0);
+  context->OMSetRenderTargets (0, nullptr, nullptr);
+
+  return TRUE;
 }
 
 /* Must be called with d3d11 device lock */
 static gboolean
 gst_d3d11_compositor_draw_background (GstD3D11Compositor * self,
-    ID3D11RenderTargetView * rtv)
+    ID3D11RenderTargetView * rtv[GST_VIDEO_MAX_PLANES], guint num_rtv)
 {
-  ID3D11DeviceContext *device_context =
+  ID3D11DeviceContext *context =
       gst_d3d11_device_get_device_context_handle (self->device);
-  FLOAT rgba[4] = { 0.0f, 0.0f, 0.0f, 1.0f };
+  GstD3D11CompositorClearColor *color = &self->clear_color[0];
+
+  if (self->background == GST_D3D11_COMPOSITOR_BACKGROUND_CHECKER) {
+    if (!gst_d3d11_compositor_draw_background_checker (self, rtv[0]))
+      return FALSE;
+
+    /* clear U and V components if needed */
+    for (guint i = 1; i < num_rtv; i++)
+      context->ClearRenderTargetView (rtv[i], color->color[i]);
+
+    return TRUE;
+  }
 
   switch (self->background) {
-    case GST_D3D11_COMPOSITOR_BACKGROUND_CHECKER:
-      return gst_d3d11_compositor_draw_background_checker (self, rtv);
     case GST_D3D11_COMPOSITOR_BACKGROUND_BLACK:
-      /* {0, 0, 0, 1} */
+      color = &self->clear_color[0];
       break;
     case GST_D3D11_COMPOSITOR_BACKGROUND_WHITE:
-      rgba[0] = 1.0f;
-      rgba[1] = 1.0f;
-      rgba[2] = 1.0f;
+      color = &self->clear_color[1];
       break;
     case GST_D3D11_COMPOSITOR_BACKGROUND_TRANSPARENT:
-      rgba[3] = 0.0f;
+      color = &self->clear_color[2];
       break;
     default:
       g_assert_not_reached ();
       return FALSE;
   }
 
-  device_context->ClearRenderTargetView (rtv, rgba);
+  for (guint i = 0; i < num_rtv; i++)
+    context->ClearRenderTargetView (rtv[i], color->color[i]);
 
   return TRUE;
 }
@@ -2281,80 +2124,43 @@ gst_d3d11_compositor_aggregate_frames (GstVideoAggregator * vagg,
   GstD3D11Compositor *self = GST_D3D11_COMPOSITOR (vagg);
   GList *iter;
   GstBuffer *target_buf = outbuf;
-  gboolean need_copy = FALSE;
-  gboolean do_device_copy = FALSE;
   GstFlowReturn ret = GST_FLOW_OK;
-  ID3D11RenderTargetView *rtv[GST_VIDEO_MAX_PLANES] = { NULL, };
-  guint i, j;
-  gint view_idx;
+  ID3D11RenderTargetView *rtv[GST_VIDEO_MAX_PLANES] = { nullptr, };
+  GstVideoFrame target_frame;
+  guint num_rtv = GST_VIDEO_INFO_N_PLANES (&vagg->info);
+  GstD3D11DeviceLockGuard lk (self->device);
 
-  /* Use fallback buffer when output buffer is:
-   * - non-d3d11 memory
-   * - or, from different d3d11 device
-   * - or not bound to render target
-   */
-  if (!gst_d3d11_compositor_check_d3d11_memory (self,
-          outbuf, FALSE, &do_device_copy) || !do_device_copy) {
-    if (!gst_d3d11_compsitor_prepare_fallback_buffer (self, &vagg->info, FALSE,
-            &self->fallback_pool, &self->fallback_buf)) {
-      GST_ERROR_OBJECT (self, "Couldn't prepare fallback buffer");
-      return GST_FLOW_ERROR;
-    }
-
-    GST_TRACE_OBJECT (self, "Will draw on fallback texture");
-
-    need_copy = TRUE;
+  if (!self->downstream_supports_d3d11)
     target_buf = self->fallback_buf;
+
+  if (!gst_video_frame_map (&target_frame, &vagg->info, target_buf,
+          (GstMapFlags) (GST_MAP_WRITE | GST_MAP_D3D11))) {
+    GST_ERROR_OBJECT (self, "Failed to map render target frame");
+    return GST_FLOW_ERROR;
   }
 
-  view_idx = 0;
-  for (i = 0; i < gst_buffer_n_memory (target_buf); i++) {
-    GstMemory *mem = gst_buffer_peek_memory (target_buf, i);
-    GstD3D11Memory *dmem;
-    guint rtv_size;
-
-    if (!gst_is_d3d11_memory (mem)) {
-      GST_ERROR_OBJECT (self, "Invalid output memory");
-      return GST_FLOW_ERROR;
-    }
-
-    dmem = (GstD3D11Memory *) mem;
-    rtv_size = gst_d3d11_memory_get_render_target_view_size (dmem);
-    if (!rtv_size) {
-      GST_ERROR_OBJECT (self, "Render target view is unavailable");
-      return GST_FLOW_ERROR;
-    }
-
-    for (j = 0; j < rtv_size; j++) {
-      g_assert (view_idx < GST_VIDEO_MAX_PLANES);
-
-      rtv[view_idx] = gst_d3d11_memory_get_render_target_view (dmem, j);
-      view_idx++;
-    }
-
-    /* Mark need-download for fallback buffer use case */
-    GST_MINI_OBJECT_FLAG_SET (dmem, GST_D3D11_MEMORY_TRANSFER_NEED_DOWNLOAD);
+  if (!gst_d3d11_buffer_get_render_target_view (target_buf, rtv)) {
+    GST_ERROR_OBJECT (self, "RTV is unavailable");
+    gst_video_frame_unmap (&target_frame);
+    return GST_FLOW_ERROR;
   }
 
-  gst_d3d11_device_lock (self->device);
-  /* XXX: the number of render target view must be one here, since we support
-   * only RGBA or BGRA */
-  if (!gst_d3d11_compositor_draw_background (self, rtv[0])) {
+  if (!gst_d3d11_compositor_draw_background (self, rtv, num_rtv)) {
     GST_ERROR_OBJECT (self, "Couldn't draw background");
-    gst_d3d11_device_unlock (self->device);
-    ret = GST_FLOW_ERROR;
-    goto done;
+    gst_video_frame_unmap (&target_frame);
+    return GST_FLOW_ERROR;
   }
+
+  gst_video_frame_unmap (&target_frame);
 
   GST_OBJECT_LOCK (self);
-
   for (iter = GST_ELEMENT (vagg)->sinkpads; iter; iter = g_list_next (iter)) {
     GstVideoAggregatorPad *pad = GST_VIDEO_AGGREGATOR_PAD (iter->data);
     GstD3D11CompositorPad *cpad = GST_D3D11_COMPOSITOR_PAD (pad);
     GstVideoFrame *prepared_frame =
         gst_video_aggregator_pad_get_prepared_frame (pad);
-    ID3D11ShaderResourceView *srv[GST_VIDEO_MAX_PLANES] = { NULL, };
-    GstBuffer *buffer;
+    gint x, y, w, h;
+    GstVideoCropMeta *crop_meta;
 
     if (!prepared_frame)
       continue;
@@ -2365,47 +2171,41 @@ gst_d3d11_compositor_aggregate_frames (GstVideoAggregator * vagg,
       break;
     }
 
-    buffer = prepared_frame->buffer;
-
-    view_idx = 0;
-    for (i = 0; i < gst_buffer_n_memory (buffer); i++) {
-      GstD3D11Memory *dmem =
-          (GstD3D11Memory *) gst_buffer_peek_memory (buffer, i);
-      guint srv_size = gst_d3d11_memory_get_shader_resource_view_size (dmem);
-
-      for (j = 0; j < srv_size; j++) {
-        g_assert (view_idx < GST_VIDEO_MAX_PLANES);
-
-        srv[view_idx] = gst_d3d11_memory_get_shader_resource_view (dmem, j);
-        view_idx++;
-      }
+    crop_meta = gst_buffer_get_video_crop_meta (prepared_frame->buffer);
+    if (crop_meta) {
+      x = crop_meta->x;
+      y = crop_meta->y;
+      w = crop_meta->width;
+      h = crop_meta->height;
+    } else {
+      x = y = 0;
+      w = pad->info.width;
+      h = pad->info.height;
     }
 
-    if (!gst_d3d11_converter_convert_unlocked (cpad->convert, srv, rtv,
-            cpad->blend, cpad->blend_factor)) {
+    g_object_set (cpad->convert, "src-x", x, "src-y", y, "src-width", w,
+        "src-height", h, nullptr);
+
+    if (!gst_d3d11_converter_convert_buffer_unlocked (cpad->convert,
+            prepared_frame->buffer, target_buf)) {
       GST_ERROR_OBJECT (self, "Couldn't convert frame");
       ret = GST_FLOW_ERROR;
       break;
     }
   }
-
-  self->reconfigured = FALSE;
   GST_OBJECT_UNLOCK (self);
-  gst_d3d11_device_unlock (self->device);
 
   if (ret != GST_FLOW_OK)
-    goto done;
+    return ret;
 
-  if (need_copy && !gst_d3d11_compositor_copy_buffer (self, &vagg->info,
-          target_buf, outbuf, do_device_copy)) {
-    GST_ERROR_OBJECT (self, "Couldn't copy input buffer to fallback buffer");
-    ret = GST_FLOW_ERROR;
+  if (!self->downstream_supports_d3d11) {
+    if (!gst_d3d11_buffer_copy_into (outbuf, self->fallback_buf, &vagg->info)) {
+      GST_ERROR_OBJECT (self, "Couldn't copy input buffer to fallback buffer");
+      return GST_FLOW_ERROR;
+    }
   }
 
-done:
-  gst_clear_buffer (&self->fallback_buf);
-
-  return ret;
+  return GST_FLOW_OK;
 }
 
 typedef struct
@@ -2436,13 +2236,8 @@ gst_d3d11_compositor_check_device_update (GstElement * agg,
   }
 
   mem = gst_buffer_peek_memory (buf, 0);
-  /* FIXME: we should be able to accept non-d3d11 memory later once
-   * we remove intermediate elements (d3d11upload and d3d11colorconvert)
-   */
-  if (!gst_is_d3d11_memory (mem)) {
-    GST_ELEMENT_ERROR (agg, CORE, FAILED, (NULL), ("Invalid memory"));
-    return FALSE;
-  }
+  if (!gst_is_d3d11_memory (mem))
+    return TRUE;
 
   dmem = GST_D3D11_MEMORY_CAST (mem);
 
@@ -2457,7 +2252,7 @@ gst_d3d11_compositor_check_device_update (GstElement * agg,
   } else {
     guint adapter = 0;
 
-    g_object_get (dmem->device, "adapter", &adapter, NULL);
+    g_object_get (dmem->device, "adapter", &adapter, nullptr);
     /* The same GPU as what user wanted, update */
     if (adapter == (guint) self->adapter)
       update_device = TRUE;
@@ -2482,26 +2277,26 @@ gst_d3d11_compositor_create_output_buffer (GstVideoAggregator * vagg,
 
   /* Check whether there is at least one sinkpad which holds d3d11 buffer
    * with compatible device, and if not, update our device */
-  data.other_device = NULL;
+  data.other_device = nullptr;
   data.have_same_device = FALSE;
 
   gst_element_foreach_sink_pad (GST_ELEMENT_CAST (vagg),
       (GstElementForeachPadFunc) gst_d3d11_compositor_check_device_update,
       &data);
 
-  if (data.have_same_device || !data.other_device)
-    goto done;
+  if (data.have_same_device || !data.other_device) {
+    return
+        GST_VIDEO_AGGREGATOR_CLASS (parent_class)->create_output_buffer (vagg,
+        outbuffer);
+  }
 
   /* Clear all device dependent resources */
   gst_element_foreach_sink_pad (GST_ELEMENT_CAST (vagg),
-      (GstElementForeachPadFunc) gst_d3d11_compositor_pad_clear_resource, NULL);
+      (GstElementForeachPadFunc) gst_d3d11_compositor_pad_clear_resource,
+      nullptr);
 
   gst_clear_buffer (&self->fallback_buf);
-  if (self->fallback_pool) {
-    gst_buffer_pool_set_active (self->fallback_pool, FALSE);
-    gst_clear_object (&self->fallback_pool);
-  }
-  g_clear_pointer (&self->checker_background, gst_d3d11_quad_free);
+  g_clear_pointer (&self->checker_background, gst_d3d11_compositor_quad_free);
 
   GST_INFO_OBJECT (self, "Updating device %" GST_PTR_FORMAT " -> %"
       GST_PTR_FORMAT, self->device, data.other_device);
@@ -2514,8 +2309,4 @@ gst_d3d11_compositor_create_output_buffer (GstVideoAggregator * vagg,
   gst_pad_mark_reconfigure (GST_AGGREGATOR_SRC_PAD (vagg));
 
   return GST_AGGREGATOR_FLOW_NEED_DATA;
-
-done:
-  return GST_VIDEO_AGGREGATOR_CLASS (parent_class)->create_output_buffer (vagg,
-      outbuffer);
 }

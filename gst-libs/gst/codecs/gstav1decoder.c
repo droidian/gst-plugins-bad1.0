@@ -29,6 +29,7 @@
 #include <config.h>
 #endif
 
+#include <gst/base/base.h>
 #include "gstav1decoder.h"
 
 GST_DEBUG_CATEGORY (gst_av1_decoder_debug);
@@ -43,7 +44,22 @@ struct _GstAV1DecoderPrivate
   GstAV1Dpb *dpb;
   GstAV1Picture *current_picture;
   GstVideoCodecFrame *current_frame;
+
+  guint preferred_output_delay;
+  GstQueueArray *output_queue;
+  gboolean is_live;
+
+  gboolean input_state_changed;
 };
+
+typedef struct
+{
+  /* Holds ref */
+  GstVideoCodecFrame *frame;
+  GstAV1Picture *picture;
+  /* Without ref */
+  GstAV1Decoder *self;
+} GstAV1DecoderOutputFrame;
 
 #define parent_class gst_av1_decoder_parent_class
 G_DEFINE_ABSTRACT_TYPE_WITH_CODE (GstAV1Decoder, gst_av1_decoder,
@@ -64,43 +80,63 @@ _floor_log2 (guint32 x)
   return s - 1;
 }
 
+static void gst_av1_decoder_finalize (GObject * object);
 static gboolean gst_av1_decoder_start (GstVideoDecoder * decoder);
 static gboolean gst_av1_decoder_stop (GstVideoDecoder * decoder);
 static gboolean gst_av1_decoder_set_format (GstVideoDecoder * decoder,
     GstVideoCodecState * state);
+static gboolean gst_av1_decoder_negotiate (GstVideoDecoder * decoder);
 static GstFlowReturn gst_av1_decoder_finish (GstVideoDecoder * decoder);
 static gboolean gst_av1_decoder_flush (GstVideoDecoder * decoder);
 static GstFlowReturn gst_av1_decoder_drain (GstVideoDecoder * decoder);
 static GstFlowReturn gst_av1_decoder_handle_frame (GstVideoDecoder * decoder,
     GstVideoCodecFrame * frame);
-
-static GstAV1Picture *gst_av1_decoder_duplicate_picture_default (GstAV1Decoder *
-    decoder, GstAV1Picture * picture);
+static void
+gst_av1_decoder_clear_output_frame (GstAV1DecoderOutputFrame * output_frame);
 
 static void
 gst_av1_decoder_class_init (GstAV1DecoderClass * klass)
 {
+  GObjectClass *object_class = G_OBJECT_CLASS (klass);
   GstVideoDecoderClass *decoder_class = GST_VIDEO_DECODER_CLASS (klass);
+
+  object_class->finalize = gst_av1_decoder_finalize;
 
   decoder_class->start = GST_DEBUG_FUNCPTR (gst_av1_decoder_start);
   decoder_class->stop = GST_DEBUG_FUNCPTR (gst_av1_decoder_stop);
   decoder_class->set_format = GST_DEBUG_FUNCPTR (gst_av1_decoder_set_format);
+  decoder_class->negotiate = GST_DEBUG_FUNCPTR (gst_av1_decoder_negotiate);
   decoder_class->finish = GST_DEBUG_FUNCPTR (gst_av1_decoder_finish);
   decoder_class->flush = GST_DEBUG_FUNCPTR (gst_av1_decoder_flush);
   decoder_class->drain = GST_DEBUG_FUNCPTR (gst_av1_decoder_drain);
   decoder_class->handle_frame =
       GST_DEBUG_FUNCPTR (gst_av1_decoder_handle_frame);
-
-  klass->duplicate_picture =
-      GST_DEBUG_FUNCPTR (gst_av1_decoder_duplicate_picture_default);
 }
 
 static void
 gst_av1_decoder_init (GstAV1Decoder * self)
 {
+  GstAV1DecoderPrivate *priv;
+
   gst_video_decoder_set_packetized (GST_VIDEO_DECODER (self), TRUE);
 
-  self->priv = gst_av1_decoder_get_instance_private (self);
+  self->priv = priv = gst_av1_decoder_get_instance_private (self);
+
+  priv->output_queue =
+      gst_queue_array_new_for_struct (sizeof (GstAV1DecoderOutputFrame), 1);
+  gst_queue_array_set_clear_func (priv->output_queue,
+      (GDestroyNotify) gst_av1_decoder_clear_output_frame);
+}
+
+static void
+gst_av1_decoder_finalize (GObject * object)
+{
+  GstAV1Decoder *self = GST_AV1_DECODER (object);
+  GstAV1DecoderPrivate *priv = self->priv;
+
+  gst_queue_array_free (priv->output_queue);
+
+  G_OBJECT_CLASS (parent_class)->finalize (object);
 }
 
 static void
@@ -108,9 +144,11 @@ gst_av1_decoder_reset (GstAV1Decoder * self)
 {
   GstAV1DecoderPrivate *priv = self->priv;
 
+  self->highest_spatial_layer = 0;
+
   priv->max_width = 0;
   priv->max_height = 0;
-  gst_av1_picture_clear (&priv->current_picture);
+  gst_clear_av1_picture (&priv->current_picture);
   priv->current_frame = NULL;
   priv->profile = GST_AV1_PROFILE_UNDEFINED;
 
@@ -118,6 +156,8 @@ gst_av1_decoder_reset (GstAV1Decoder * self)
     gst_av1_dpb_clear (priv->dpb);
   if (priv->parser)
     gst_av1_parser_reset (priv->parser, FALSE);
+
+  gst_queue_array_clear (priv->output_queue);
 }
 
 static gboolean
@@ -149,14 +189,32 @@ gst_av1_decoder_stop (GstVideoDecoder * decoder)
   return TRUE;
 }
 
+static void
+gst_av1_decoder_clear_output_frame (GstAV1DecoderOutputFrame * output_frame)
+{
+  if (!output_frame)
+    return;
+
+  if (output_frame->frame) {
+    gst_video_decoder_release_frame (GST_VIDEO_DECODER (output_frame->self),
+        output_frame->frame);
+    output_frame->frame = NULL;
+  }
+
+  gst_clear_av1_picture (&output_frame->picture);
+}
+
 static gboolean
 gst_av1_decoder_set_format (GstVideoDecoder * decoder,
     GstVideoCodecState * state)
 {
   GstAV1Decoder *self = GST_AV1_DECODER (decoder);
   GstAV1DecoderPrivate *priv = self->priv;
+  GstQuery *query;
 
   GST_DEBUG_OBJECT (decoder, "Set format");
+
+  priv->input_state_changed = TRUE;
 
   if (self->input_state)
     gst_video_codec_state_unref (self->input_state);
@@ -166,17 +224,58 @@ gst_av1_decoder_set_format (GstVideoDecoder * decoder,
   priv->max_width = GST_VIDEO_INFO_WIDTH (&state->info);
   priv->max_height = GST_VIDEO_INFO_HEIGHT (&state->info);
 
+  priv->is_live = FALSE;
+  query = gst_query_new_latency ();
+  if (gst_pad_peer_query (GST_VIDEO_DECODER_SINK_PAD (self), query))
+    gst_query_parse_latency (query, &priv->is_live, NULL, NULL);
+  gst_query_unref (query);
+
   return TRUE;
+}
+
+static gboolean
+gst_av1_decoder_negotiate (GstVideoDecoder * decoder)
+{
+  GstAV1Decoder *self = GST_AV1_DECODER (decoder);
+
+  /* output state must be updated by subclass using new input state already */
+  self->priv->input_state_changed = FALSE;
+
+  return GST_VIDEO_DECODER_CLASS (parent_class)->negotiate (decoder);
+}
+
+static void
+gst_av1_decoder_drain_output_queue (GstAV1Decoder * self,
+    guint num, GstFlowReturn * ret)
+{
+  GstAV1DecoderClass *klass = GST_AV1_DECODER_GET_CLASS (self);
+  GstAV1DecoderPrivate *priv = self->priv;
+
+  g_assert (klass->output_picture);
+
+  while (gst_queue_array_get_length (priv->output_queue) > num) {
+    GstAV1DecoderOutputFrame *output_frame = (GstAV1DecoderOutputFrame *)
+        gst_queue_array_pop_head_struct (priv->output_queue);
+    GstFlowReturn flow_ret = klass->output_picture (self,
+        output_frame->frame, output_frame->picture);
+
+    if (*ret == GST_FLOW_OK)
+      *ret = flow_ret;
+  }
 }
 
 static GstFlowReturn
 gst_av1_decoder_finish (GstVideoDecoder * decoder)
 {
+  GstAV1Decoder *self = GST_AV1_DECODER (decoder);
+  GstFlowReturn ret = GST_FLOW_OK;
+
   GST_DEBUG_OBJECT (decoder, "finish");
 
-  gst_av1_decoder_reset (GST_AV1_DECODER (decoder));
+  gst_av1_decoder_drain_output_queue (self, 0, &ret);
+  gst_av1_decoder_reset (self);
 
-  return GST_FLOW_OK;
+  return ret;
 }
 
 static gboolean
@@ -192,22 +291,15 @@ gst_av1_decoder_flush (GstVideoDecoder * decoder)
 static GstFlowReturn
 gst_av1_decoder_drain (GstVideoDecoder * decoder)
 {
+  GstAV1Decoder *self = GST_AV1_DECODER (decoder);
+  GstFlowReturn ret = GST_FLOW_OK;
+
   GST_DEBUG_OBJECT (decoder, "drain");
 
-  gst_av1_decoder_reset (GST_AV1_DECODER (decoder));
+  gst_av1_decoder_drain_output_queue (self, 0, &ret);
+  gst_av1_decoder_reset (self);
 
-  return GST_FLOW_OK;
-}
-
-static GstAV1Picture *
-gst_av1_decoder_duplicate_picture_default (GstAV1Decoder * decoder,
-    GstAV1Picture * picture)
-{
-  GstAV1Picture *new_picture;
-
-  new_picture = gst_av1_picture_new ();
-
-  return new_picture;
+  return ret;
 }
 
 static const gchar *
@@ -290,7 +382,33 @@ gst_av1_decoder_process_sequence (GstAV1Decoder * self, GstAV1OBU * obu)
       priv->max_width, priv->max_height, seq_header.max_frame_width_minus_1 + 1,
       seq_header.max_frame_height_minus_1 + 1);
 
-  ret = klass->new_sequence (self, &seq_header);
+  gst_av1_decoder_drain_output_queue (self, 0, &ret);
+  gst_av1_dpb_clear (priv->dpb);
+
+  if (ret != GST_FLOW_OK) {
+    GST_WARNING_OBJECT (self, "Draining for new sequence returned %s",
+        gst_flow_get_name (ret));
+    return ret;
+  }
+
+  if (klass->get_preferred_output_delay) {
+    priv->preferred_output_delay =
+        klass->get_preferred_output_delay (self, priv->is_live);
+  } else {
+    priv->preferred_output_delay = 0;
+  }
+
+  if (priv->parser->state.operating_point_idc) {
+    self->highest_spatial_layer =
+        _floor_log2 (priv->parser->state.operating_point_idc >> 8);
+    GST_INFO_OBJECT (self, "set highest spatial layer to %d",
+        self->highest_spatial_layer);
+  } else {
+    self->highest_spatial_layer = 0;
+  }
+
+  ret = klass->new_sequence (self, &seq_header,
+      GST_AV1_TOTAL_REFS_PER_FRAME + priv->preferred_output_delay);
   if (ret != GST_FLOW_OK) {
     GST_ERROR_OBJECT (self, "subclass does not want accept new sequence");
     return ret;
@@ -299,7 +417,6 @@ gst_av1_decoder_process_sequence (GstAV1Decoder * self, GstAV1OBU * obu)
   priv->profile = seq_header.seq_profile;
   priv->max_width = seq_header.max_frame_width_minus_1 + 1;
   priv->max_height = seq_header.max_frame_height_minus_1 + 1;
-  gst_av1_dpb_clear (priv->dpb);
 
   return GST_FLOW_OK;
 }
@@ -339,7 +456,7 @@ gst_av1_decoder_decode_tile_group (GstAV1Decoder * self,
 
 static GstFlowReturn
 gst_av1_decoder_decode_frame_header (GstAV1Decoder * self,
-    GstAV1FrameHeaderOBU * frame_header)
+    GstAV1OBU * obu, GstAV1FrameHeaderOBU * frame_header)
 {
   GstAV1DecoderPrivate *priv = self->priv;
   GstAV1DecoderClass *klass = GST_AV1_DECODER_GET_CLASS (self);
@@ -363,25 +480,17 @@ gst_av1_decoder_decode_frame_header (GstAV1Decoder * self,
       return GST_FLOW_ERROR;
     }
 
-    if (gst_av1_parser_reference_frame_loading (priv->parser,
-            &ref_picture->frame_hdr) != GST_AV1_PARSER_OK) {
-      GST_WARNING_OBJECT (self, "load the reference frame failed");
-      return GST_FLOW_ERROR;
-    }
-
-    /* FIXME: duplicate picture might be optional feature like that of VP9
-     * decoder baseclass */
+    /* The duplicated picture, if a key frame, will be placed in the DPB and
+     * for this reason is not optional. */
     g_assert (klass->duplicate_picture);
-    picture = klass->duplicate_picture (self, ref_picture);
+    picture = klass->duplicate_picture (self, priv->current_frame, ref_picture);
     if (!picture) {
       GST_ERROR_OBJECT (self, "subclass didn't provide duplicated picture");
       return GST_FLOW_ERROR;
     }
 
-    picture->system_frame_number = priv->current_frame->system_frame_number;
+    picture->system_frame_number = ref_picture->system_frame_number;
     picture->frame_hdr = *frame_header;
-    picture->frame_hdr.render_width = ref_picture->frame_hdr.render_width;
-    picture->frame_hdr.render_height = ref_picture->frame_hdr.render_height;
     priv->current_picture = picture;
   } else {
     picture = gst_av1_picture_new ();
@@ -391,6 +500,11 @@ gst_av1_decoder_decode_frame_header (GstAV1Decoder * self,
     picture->showable_frame = frame_header->showable_frame;
     picture->apply_grain = frame_header->film_grain_params.apply_grain;
     picture->system_frame_number = priv->current_frame->system_frame_number;
+    picture->temporal_id = obu->header.obu_temporal_id;
+    picture->spatial_id = obu->header.obu_spatial_id;
+
+    g_assert (picture->spatial_id <= self->highest_spatial_layer);
+    g_assert (self->highest_spatial_layer < GST_AV1_MAX_NUM_SPATIAL_LAYERS);
 
     if (!frame_header->show_frame && !frame_header->showable_frame)
       GST_VIDEO_CODEC_FRAME_FLAG_SET (priv->current_frame,
@@ -433,7 +547,7 @@ gst_av1_decoder_process_frame_header (GstAV1Decoder * self, GstAV1OBU * obu)
     return GST_FLOW_ERROR;
   }
 
-  return gst_av1_decoder_decode_frame_header (self, &frame_header);
+  return gst_av1_decoder_decode_frame_header (self, obu, &frame_header);
 }
 
 static GstFlowReturn
@@ -466,7 +580,7 @@ gst_av1_decoder_process_frame (GstAV1Decoder * self, GstAV1OBU * obu)
     return GST_FLOW_ERROR;
   }
 
-  ret = gst_av1_decoder_decode_frame_header (self, &frame.frame_header);
+  ret = gst_av1_decoder_decode_frame_header (self, obu, &frame.frame_header);
   if (ret != GST_FLOW_OK)
     return ret;
 
@@ -581,6 +695,11 @@ gst_av1_decoder_handle_frame (GstVideoDecoder * decoder,
   while (total_consumed < map.size) {
     res = gst_av1_parser_identify_one_obu (priv->parser,
         map.data + total_consumed, map.size, &obu, &consumed);
+    if (res == GST_AV1_PARSER_DROP) {
+      total_consumed += consumed;
+      continue;
+    }
+
     if (res != GST_AV1_PARSER_OK) {
       ret = GST_FLOW_ERROR;
       goto out;
@@ -597,6 +716,15 @@ gst_av1_decoder_handle_frame (GstVideoDecoder * decoder,
   if (!priv->current_picture) {
     GST_ERROR_OBJECT (self, "No valid picture after exhaust input frame");
     ret = GST_FLOW_ERROR;
+    goto out;
+  }
+
+  if (priv->current_picture->spatial_id > self->highest_spatial_layer) {
+    ret = GST_FLOW_ERROR;
+    GST_VIDEO_DECODER_ERROR (self, 1, STREAM, DECODE,
+        ("current picture spatial_id %d should not be higher than "
+            "highest spatial layer %d", priv->current_picture->spatial_id,
+            self->highest_spatial_layer), (NULL), ret);
     goto out;
   }
 
@@ -621,15 +749,25 @@ out:
       /* Only output one frame with the highest spatial id from each TU
        * when there are multiple spatial layers.
        */
-      if (priv->parser->state.operating_point_idc &&
-          obu.header.obu_spatial_id <
-          _floor_log2 (priv->parser->state.operating_point_idc >> 8)) {
+      if (obu.header.obu_spatial_id < self->highest_spatial_layer) {
         gst_av1_picture_unref (priv->current_picture);
         gst_video_decoder_release_frame (decoder, frame);
       } else {
-        g_assert (klass->output_picture);
-        /* transfer ownership of frame and picture */
-        ret = klass->output_picture (self, frame, priv->current_picture);
+        GstAV1DecoderOutputFrame output_frame;
+
+        /* If subclass didn't update output state at this point,
+         * marking this picture as a discont and stores current input state */
+        if (priv->input_state_changed) {
+          priv->current_picture->discont_state =
+              gst_video_codec_state_ref (self->input_state);
+          priv->input_state_changed = FALSE;
+        }
+
+        output_frame.frame = frame;
+        output_frame.picture = priv->current_picture;
+        output_frame.self = self;
+
+        gst_queue_array_push_tail_struct (priv->output_queue, &output_frame);
       }
     } else {
       GST_LOG_OBJECT (self, "Decode only picture %p", priv->current_picture);
@@ -643,6 +781,8 @@ out:
 
     gst_video_decoder_drop_frame (decoder, frame);
   }
+
+  gst_av1_decoder_drain_output_queue (self, priv->preferred_output_delay, &ret);
 
   priv->current_picture = NULL;
   priv->current_frame = NULL;

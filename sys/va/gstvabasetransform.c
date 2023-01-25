@@ -24,13 +24,20 @@
 
 #include "gstvabasetransform.h"
 
-#include "gstvaallocator.h"
+#include <gst/va/gstva.h>
+
 #include "gstvacaps.h"
-#include "gstvapool.h"
-#include "gstvautils.h"
 
 #define GST_CAT_DEFAULT gst_va_base_transform_debug
 GST_DEBUG_CATEGORY_STATIC (GST_CAT_DEFAULT);
+
+enum
+{
+  PROP_DEVICE_PATH = 1,
+  N_PROPERTIES
+};
+
+static GParamSpec *properties[N_PROPERTIES];
 
 struct _GstVaBaseTransformPrivate
 {
@@ -53,13 +60,33 @@ struct _GstVaBaseTransformPrivate
  * Since: 1.20
  */
 #define gst_va_base_transform_parent_class parent_class
-G_DEFINE_TYPE_WITH_CODE (GstVaBaseTransform, gst_va_base_transform,
+G_DEFINE_ABSTRACT_TYPE_WITH_CODE (GstVaBaseTransform, gst_va_base_transform,
     GST_TYPE_BASE_TRANSFORM, G_ADD_PRIVATE (GstVaBaseTransform)
     GST_DEBUG_CATEGORY_INIT (gst_va_base_transform_debug,
         "vabasetransform", 0, "vabasetransform element");
     );
 
 extern GRecMutex GST_VA_SHARED_LOCK;
+
+static void
+gst_va_base_transform_get_property (GObject * object, guint prop_id,
+    GValue * value, GParamSpec * pspec)
+{
+  GstVaBaseTransform *self = GST_VA_BASE_TRANSFORM (object);
+
+  switch (prop_id) {
+    case PROP_DEVICE_PATH:{
+      if (!(self->display && GST_IS_VA_DISPLAY_DRM (self->display))) {
+        g_value_set_string (value, NULL);
+        return;
+      }
+      g_object_get_property (G_OBJECT (self->display), "path", value);
+      break;
+    }
+    default:
+      G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
+  }
+}
 
 static void
 gst_va_base_transform_dispose (GObject * object)
@@ -234,7 +261,7 @@ gst_va_base_transform_propose_allocation (GstBaseTransform * trans,
   }
 
   pool = gst_va_pool_new_with_config (caps, size, 1 + self->extra_min_buffers,
-      0, usage_hint, allocator, &params);
+      0, usage_hint, GST_VA_FEATURE_AUTO, allocator, &params);
   if (!pool) {
     gst_object_unref (allocator);
     goto config_failed;
@@ -304,6 +331,7 @@ gst_va_base_transform_decide_allocation (GstBaseTransform * trans,
   GstVideoInfo vinfo;
   guint min, max, size = 0, usage_hint = VA_SURFACE_ATTRIB_USAGE_HINT_VPP_WRITE;
   gboolean update_pool, update_allocator, has_videometa, copy_frames;
+  gboolean dont_use_other_pool = FALSE;
 
   gst_query_parse_allocation (query, &outcaps, NULL);
 
@@ -316,13 +344,20 @@ gst_va_base_transform_decide_allocation (GstBaseTransform * trans,
   }
 
   if (gst_query_get_n_allocation_params (query) > 0) {
+    GstVaDisplay *display;
+
     gst_query_parse_nth_allocation_param (query, 0, &allocator, &other_params);
-    if (allocator && !(GST_IS_VA_DMABUF_ALLOCATOR (allocator)
-            || GST_IS_VA_ALLOCATOR (allocator))) {
+    display = gst_va_allocator_peek_display (allocator);
+    if (!display) {
       /* save the allocator for the other pool */
       other_allocator = allocator;
       allocator = NULL;
+    } else if (display != self->display) {
+      /* The allocator and pool belong to other display, we should not use. */
+      gst_clear_object (&allocator);
+      dont_use_other_pool = TRUE;
     }
+
     update_allocator = TRUE;
   } else {
     update_allocator = FALSE;
@@ -337,6 +372,8 @@ gst_va_base_transform_decide_allocation (GstBaseTransform * trans,
             "may need other pool for copy frames %" GST_PTR_FORMAT, pool);
         other_pool = pool;
         pool = NULL;
+      } else if (dont_use_other_pool) {
+        gst_clear_object (&pool);
       }
     }
 
@@ -365,7 +402,8 @@ gst_va_base_transform_decide_allocation (GstBaseTransform * trans,
   gst_buffer_pool_config_set_allocator (config, allocator, &params);
   gst_buffer_pool_config_add_option (config, GST_BUFFER_POOL_OPTION_VIDEO_META);
   gst_buffer_pool_config_set_params (config, outcaps, size, min, max);
-  gst_buffer_pool_config_set_va_allocation_params (config, usage_hint);
+  gst_buffer_pool_config_set_va_allocation_params (config, usage_hint,
+      GST_VA_FEATURE_AUTO);
   if (!gst_buffer_pool_set_config (pool, config)) {
     gst_object_unref (allocator);
     gst_object_unref (pool);
@@ -376,7 +414,8 @@ gst_va_base_transform_decide_allocation (GstBaseTransform * trans,
     gst_va_dmabuf_allocator_get_format (allocator, &self->priv->srcpad_info,
         NULL);
   } else if (GST_IS_VA_ALLOCATOR (allocator)) {
-    gst_va_allocator_get_format (allocator, &self->priv->srcpad_info, NULL);
+    gst_va_allocator_get_format (allocator, &self->priv->srcpad_info, NULL,
+        NULL);
   }
 
   if (update_allocator)
@@ -505,6 +544,7 @@ gst_va_base_transform_change_state (GstElement * element,
       if (!gst_va_ensure_element_data (element, klass->render_device_path,
               &self->display))
         goto open_failed;
+      g_object_notify_by_pspec (G_OBJECT (self), properties[PROP_DEVICE_PATH]);
       gst_clear_caps (&self->priv->filter_caps);
       gst_clear_object (&self->filter);
       self->filter = gst_va_filter_new (self->display);
@@ -527,6 +567,7 @@ gst_va_base_transform_change_state (GstElement * element,
       gst_clear_caps (&self->priv->filter_caps);
       gst_clear_object (&self->filter);
       gst_clear_object (&self->display);
+      g_object_notify_by_pspec (G_OBJECT (self), properties[PROP_DEVICE_PATH]);
       break;
     default:
       break;
@@ -580,6 +621,7 @@ gst_va_base_transform_class_init (GstVaBaseTransformClass * klass)
   trans_class = GST_BASE_TRANSFORM_CLASS (klass);
 
   gobject_class->dispose = gst_va_base_transform_dispose;
+  gobject_class->get_property = gst_va_base_transform_get_property;
 
   trans_class->query = GST_DEBUG_FUNCPTR (gst_va_base_transform_query);
   trans_class->set_caps = GST_DEBUG_FUNCPTR (gst_va_base_transform_set_caps);
@@ -596,6 +638,19 @@ gst_va_base_transform_class_init (GstVaBaseTransformClass * klass)
       GST_DEBUG_FUNCPTR (gst_va_base_transform_set_context);
   element_class->change_state =
       GST_DEBUG_FUNCPTR (gst_va_base_transform_change_state);
+
+  /**
+   * GstVaBaseTransform:device-path:
+   *
+   * It shows the DRM device path used for the VA operation, if any.
+   *
+   * Since: 1.22
+   */
+  properties[PROP_DEVICE_PATH] = g_param_spec_string ("device-path",
+      "Device Path", "DRM device path", NULL,
+      G_PARAM_READABLE | G_PARAM_STATIC_STRINGS);
+
+  g_object_class_install_properties (gobject_class, N_PROPERTIES, properties);
 
   gst_type_mark_as_plugin_api (GST_TYPE_VA_BASE_TRANSFORM, 0);
 }
@@ -723,7 +778,7 @@ _get_sinkpad_pool (GstVaBaseTransform * self)
 
   allocator = gst_va_base_transform_allocator_from_caps (self, caps);
   self->priv->sinkpad_pool = gst_va_pool_new_with_config (caps, size, 1, 0,
-      usage_hint, allocator, &params);
+      usage_hint, GST_VA_FEATURE_AUTO, allocator, &params);
   if (!self->priv->sinkpad_pool) {
     gst_object_unref (allocator);
     return NULL;
@@ -733,7 +788,8 @@ _get_sinkpad_pool (GstVaBaseTransform * self)
     gst_va_dmabuf_allocator_get_format (allocator, &self->priv->sinkpad_info,
         NULL);
   } else if (GST_IS_VA_ALLOCATOR (allocator)) {
-    gst_va_allocator_get_format (allocator, &self->priv->sinkpad_info, NULL);
+    gst_va_allocator_get_format (allocator, &self->priv->sinkpad_info, NULL,
+        NULL);
   }
 
   gst_object_unref (allocator);
@@ -754,7 +810,8 @@ _try_import_buffer (GstVaBaseTransform * self, GstBuffer * inbuf)
   gboolean ret;
 
   surface = gst_va_buffer_get_surface (inbuf);
-  if (surface != VA_INVALID_ID)
+  if (surface != VA_INVALID_ID &&
+      (gst_va_buffer_peek_display (inbuf) == self->display))
     return TRUE;
 
   g_rec_mutex_lock (&GST_VA_SHARED_LOCK);
@@ -822,11 +879,11 @@ gst_va_base_transform_import_buffer (GstVaBaseTransform * self,
 
 invalid_buffer:
   {
-    GST_ELEMENT_WARNING (self, CORE, NOT_IMPLEMENTED, (NULL),
+    GST_ELEMENT_WARNING (self, STREAM, FORMAT, (NULL),
         ("invalid video buffer received"));
     if (buffer)
       gst_buffer_unref (buffer);
-    return GST_FLOW_OK;
+    return GST_FLOW_ERROR;
   }
 }
 

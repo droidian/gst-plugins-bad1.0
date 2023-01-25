@@ -19,8 +19,7 @@
  * Boston, MA 02110-1301, USA.
  */
 
-#ifndef __GST_D3D11_MEMORY_H__
-#define __GST_D3D11_MEMORY_H__
+#pragma once
 
 #include <gst/gst.h>
 #include <gst/video/video.h>
@@ -31,7 +30,6 @@ G_BEGIN_DECLS
 
 #define GST_TYPE_D3D11_ALLOCATION_PARAMS    (gst_d3d11_allocation_params_get_type())
 
-#define GST_TYPE_D3D11_MEMORY               (gst_d3d11_memory_get_type())
 #define GST_D3D11_MEMORY_CAST(obj)          ((GstD3D11Memory *)obj)
 
 #define GST_TYPE_D3D11_ALLOCATOR            (gst_d3d11_allocator_get_type())
@@ -55,7 +53,7 @@ G_BEGIN_DECLS
  *
  * The name of the Direct3D11 memory
  *
- * Since: 1.20
+ * Since: 1.22
  */
 #define GST_D3D11_MEMORY_NAME "D3D11Memory"
 
@@ -64,7 +62,7 @@ G_BEGIN_DECLS
  *
  * Name of the caps feature for indicating the use of #GstD3D11Memory
  *
- * Since: 1.20
+ * Since: 1.22
  */
 #define GST_CAPS_FEATURE_MEMORY_D3D11_MEMORY "memory:D3D11Memory"
 
@@ -73,23 +71,29 @@ G_BEGIN_DECLS
  *
  * Flag indicating that we should map the D3D11 resource instead of to system memory.
  *
- * Since: 1.20
+ * Since: 1.22
  */
 #define GST_MAP_D3D11 (GST_MAP_FLAG_LAST << 1)
 
 /**
  * GstD3D11AllocationFlags:
+ * @GST_D3D11_ALLOCATION_FLAG_DEFAULT: Default allocation behavior
  * @GST_D3D11_ALLOCATION_FLAG_TEXTURE_ARRAY: Indicates each allocated texture
  *                                           should be array type. This type of
  *                                           is used for D3D11/DXVA decoders
  *                                           in general.
  *
- * Since: 1.20
+ * Since: 1.22
  */
 typedef enum
 {
+  GST_D3D11_ALLOCATION_FLAG_DEFAULT = 0,
   GST_D3D11_ALLOCATION_FLAG_TEXTURE_ARRAY = (1 << 0),
 } GstD3D11AllocationFlags;
+
+GST_D3D11_API
+GType gst_d3d11_allocation_flags_get_type (void);
+#define GST_TYPE_D3D11_ALLOCATION_FLAGS (gst_d3d11_allocation_flags_get_type())
 
 /**
  * GstD3D11MemoryTransfer:
@@ -98,7 +102,7 @@ typedef enum
  * @GST_D3D11_MEMORY_TRANSFER_NEED_UPLOAD:   the staging texture needs uploading
  *                                           to the texture
  *
- * Since: 1.20
+ * Since: 1.22
  */
 typedef enum
 {
@@ -106,19 +110,47 @@ typedef enum
   GST_D3D11_MEMORY_TRANSFER_NEED_UPLOAD     = (GST_MEMORY_FLAG_LAST << 1)
 } GstD3D11MemoryTransfer;
 
+GST_D3D11_API
+GType gst_d3d11_memory_transfer_get_type (void);
+#define GST_TYPE_D3D11_MEMORY_TRANSFER (gst_d3d11_memory_transfer_get_type())
+
+/**
+ * GstD3D11MemoryNativeType:
+ * @GST_D3D11_MEMORY_NATIVE_TYPE_INVALID: not a valid object type
+ * @GST_D3D11_MEMORY_OBJECT_TYPE_BUFFER: memory holds ID3D11Buffer object
+ * @GST_D3D11_MEMORY_OBJECT_TYPE_TEXTURE_2D: memory holds ID3D11Texture2D object
+ *
+ * Since: 1.22
+ */
+typedef enum
+{
+  GST_D3D11_MEMORY_NATIVE_TYPE_INVALID = 0,
+  GST_D3D11_MEMORY_NATIVE_TYPE_BUFFER,
+  GST_D3D11_MEMORY_NATIVE_TYPE_TEXTURE_2D,
+} GstD3D11MemoryNativeType;
+
+GST_D3D11_API
+GType gst_d3d11_memory_native_type_get_type (void);
+#define GST_TYPE_D3D11_MEMORY_NATIVE_TYPE (gst_d3d11_memory_native_type_get_type())
+
+/**
+ * GstD3D11AllocationParams:
+ *
+ * Contains set of parameters for #GstD3D11Memory allocation
+ *
+ * Since: 1.22
+ */
 struct _GstD3D11AllocationParams
 {
   /* Texture description per plane */
   D3D11_TEXTURE2D_DESC desc[GST_VIDEO_MAX_PLANES];
-
   GstVideoInfo info;
   GstVideoInfo aligned_info;
-  const GstD3D11Format *d3d11_format;
-
+  GstD3D11Format d3d11_format;
   GstD3D11AllocationFlags flags;
 
   /*< private >*/
-  gpointer _gst_reserved[GST_PADDING_LARGE];
+  gpointer _gst_reserved[GST_PADDING];
 };
 
 GST_D3D11_API
@@ -126,9 +158,10 @@ GType                      gst_d3d11_allocation_params_get_type (void);
 
 GST_D3D11_API
 GstD3D11AllocationParams * gst_d3d11_allocation_params_new      (GstD3D11Device * device,
-                                                                 GstVideoInfo * info,
+                                                                 const GstVideoInfo * info,
                                                                  GstD3D11AllocationFlags flags,
-                                                                 guint bind_flags);
+                                                                 guint bind_flags,
+                                                                 guint misc_flags);
 
 GST_D3D11_API
 GstD3D11AllocationParams * gst_d3d11_allocation_params_copy     (GstD3D11AllocationParams * src);
@@ -138,8 +171,15 @@ void                       gst_d3d11_allocation_params_free     (GstD3D11Allocat
 
 GST_D3D11_API
 gboolean                   gst_d3d11_allocation_params_alignment (GstD3D11AllocationParams * parms,
-                                                                  GstVideoAlignment * align);
+                                                                  const GstVideoAlignment * align);
 
+/**
+ * GstD3D11Memory:
+ *
+ * Represents information about a Direct3D11 memory object
+ *
+ * Since: 1.22
+ */
 struct _GstD3D11Memory
 {
   GstMemory mem;
@@ -153,24 +193,28 @@ struct _GstD3D11Memory
 };
 
 GST_D3D11_API
-GType                      gst_d3d11_memory_get_type (void);
-
-GST_D3D11_API
 void                       gst_d3d11_memory_init_once (void);
 
 GST_D3D11_API
 gboolean                   gst_is_d3d11_memory        (GstMemory * mem);
 
 GST_D3D11_API
-ID3D11Texture2D *          gst_d3d11_memory_get_texture_handle (GstD3D11Memory * mem);
+GstD3D11MemoryNativeType   gst_d3d11_memory_get_native_type (GstD3D11Memory * mem);
+
+GST_D3D11_API
+ID3D11Resource *           gst_d3d11_memory_get_resource_handle (GstD3D11Memory * mem);
 
 GST_D3D11_API
 gboolean                   gst_d3d11_memory_get_texture_desc (GstD3D11Memory * mem,
                                                               D3D11_TEXTURE2D_DESC * desc);
 
 GST_D3D11_API
-gboolean                   gst_d3d11_memory_get_texture_stride (GstD3D11Memory * mem,
-                                                                guint * stride);
+gboolean                   gst_d3d11_memory_get_buffer_desc  (GstD3D11Memory * mem,
+                                                              D3D11_BUFFER_DESC * desc);
+
+GST_D3D11_API
+gboolean                   gst_d3d11_memory_get_resource_stride (GstD3D11Memory * mem,
+                                                                 guint * stride);
 
 GST_D3D11_API
 guint                      gst_d3d11_memory_get_subresource_index (GstD3D11Memory * mem);
@@ -205,21 +249,32 @@ ID3D11VideoProcessorOutputView *  gst_d3d11_memory_get_processor_output_view (Gs
                                                                               ID3D11VideoDevice * video_device,
                                                                               ID3D11VideoProcessorEnumerator * enumerator);
 
+/**
+ * GstD3D11Allocator:
+ *
+ * A Direct3D11 memory allocator
+ *
+ * Since: 1.22
+ */
 struct _GstD3D11Allocator
 {
-  GstAllocator allocator;
+  GstAllocator parent;
 
   /*< private >*/
   GstD3D11AllocatorPrivate *priv;
-
   gpointer _gst_reserved[GST_PADDING];
 };
 
+/**
+ * GstD3D11AllocatorClass:
+ *
+ * Since: 1.22
+ */
 struct _GstD3D11AllocatorClass
 {
-  GstAllocatorClass allocator_class;
+  GstAllocatorClass parent_class;
 
-  gboolean (*set_actvie)   (GstD3D11Allocator * allocator,
+  gboolean (*set_active)   (GstD3D11Allocator * allocator,
                             gboolean active);
 
   /*< private >*/
@@ -235,25 +290,51 @@ GstMemory * gst_d3d11_allocator_alloc     (GstD3D11Allocator * allocator,
                                            const D3D11_TEXTURE2D_DESC * desc);
 
 GST_D3D11_API
+GstMemory * gst_d3d11_allocator_alloc_buffer (GstD3D11Allocator * allocator,
+                                              GstD3D11Device * device,
+                                              const D3D11_BUFFER_DESC * desc);
+
+GST_D3D11_API
+GstMemory * gst_d3d11_allocator_alloc_wrapped (GstD3D11Allocator * allocator,
+                                               GstD3D11Device * device,
+                                               ID3D11Texture2D * texture,
+                                               gsize size,
+                                               gpointer user_data,
+                                               GDestroyNotify notify);
+
+GST_D3D11_API
 gboolean    gst_d3d11_allocator_set_active (GstD3D11Allocator * allocator,
                                             gboolean active);
 
+/**
+ * GstD3D11PoolAllocator:
+ *
+ * Allocates #GstD3D11Memory objects and pooling allocated memory
+ *
+ * Since: 1.22
+ */
 struct _GstD3D11PoolAllocator
 {
-  GstD3D11Allocator allocator;
+  GstD3D11Allocator parent;
 
   /*< public >*/
   GstD3D11Device *device;
 
   /*< private >*/
   GstD3D11PoolAllocatorPrivate *priv;
-
   gpointer _gst_reserved[GST_PADDING];
 };
 
+/**
+ * GstD3D11PoolAllocatorClass:
+ *
+ * Opaque GstD3D11PoolAllocatorClass struct
+ *
+ * Since: 1.22
+ */
 struct _GstD3D11PoolAllocatorClass
 {
-  GstD3D11AllocatorClass allocator_class;
+  GstD3D11AllocatorClass parent_class;
 
   /*< private >*/
   gpointer _gst_reserved[GST_PADDING];
@@ -277,4 +358,3 @@ gboolean                gst_d3d11_pool_allocator_get_pool_size (GstD3D11PoolAllo
 
 G_END_DECLS
 
-#endif /* __GST_D3D11_MEMORY_H__ */

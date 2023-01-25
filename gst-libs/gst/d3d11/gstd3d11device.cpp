@@ -25,7 +25,7 @@
 #include "gstd3d11device.h"
 #include "gstd3d11utils.h"
 #include "gstd3d11format.h"
-#include "gstd3d11_private.h"
+#include "gstd3d11-private.h"
 #include "gstd3d11memory.h"
 #include <gmodule.h>
 #include <wrl.h>
@@ -35,8 +35,8 @@
 
 /**
  * SECTION:gstd3d11device
- * @short_description: Direct3D11 device abstraction
  * @title: GstD3D11Device
+ * @short_description: Direct3D11 device abstraction
  *
  * #GstD3D11Device wraps ID3D11Device and ID3D11DeviceContext for GPU resources
  * to be able to be shared among various elements. Caller can get native
@@ -54,7 +54,6 @@ using namespace Microsoft::WRL;
 
 #if HAVE_D3D11SDKLAYERS_H
 #include <d3d11sdklayers.h>
-static GModule *d3d11_debug_module = NULL;
 
 /* mingw header does not define D3D11_RLDO_IGNORE_INTERNAL
  * D3D11_RLDO_SUMMARY = 0x1,
@@ -68,8 +67,7 @@ static GModule *d3d11_debug_module = NULL;
 #include <dxgidebug.h>
 typedef HRESULT (WINAPI * DXGIGetDebugInterface_t) (REFIID riid,
     void **ppDebug);
-static GModule *dxgi_debug_module = NULL;
-static DXGIGetDebugInterface_t GstDXGIGetDebugInterface = NULL;
+static DXGIGetDebugInterface_t GstDXGIGetDebugInterface = nullptr;
 
 #endif
 
@@ -94,8 +92,6 @@ enum
 #define DEFAULT_ADAPTER 0
 #define DEFAULT_CREATE_FLAGS 0
 
-#define GST_D3D11_N_FORMATS 25
-
 struct _GstD3D11DevicePrivate
 {
   guint adapter;
@@ -107,16 +103,20 @@ struct _GstD3D11DevicePrivate
   gint64 adapter_luid;
 
   ID3D11Device *device;
+  ID3D11Device5 *device5;
   ID3D11DeviceContext *device_context;
+  ID3D11DeviceContext4 *device_context4;
 
   ID3D11VideoDevice *video_device;
   ID3D11VideoContext *video_context;
 
   IDXGIFactory1 *factory;
-  GstD3D11Format format_table[GST_D3D11_N_FORMATS];
+  GArray *format_table;
 
-  GRecMutex extern_lock;
-  GMutex resource_lock;
+  CRITICAL_SECTION extern_lock;
+  SRWLOCK resource_lock;
+
+  LARGE_INTEGER frequency;
 
 #if HAVE_D3D11SDKLAYERS_H
   ID3D11Debug *d3d11_debug;
@@ -132,17 +132,14 @@ struct _GstD3D11DevicePrivate
 static void
 debug_init_once (void)
 {
-  static gsize init_once = 0;
-
-  if (g_once_init_enter (&init_once)) {
+  GST_D3D11_CALL_ONCE_BEGIN {
     GST_DEBUG_CATEGORY_INIT (gst_d3d11_device_debug,
         "d3d11device", 0, "d3d11 device object");
 #if defined(HAVE_D3D11SDKLAYERS_H) || defined(HAVE_DXGIDEBUG_H)
     GST_DEBUG_CATEGORY_INIT (gst_d3d11_debug_layer_debug,
         "d3d11debuglayer", 0, "native d3d11 and dxgi debug");
 #endif
-    g_once_init_leave (&init_once, 1);
-  }
+  } GST_D3D11_CALL_ONCE_END;
 }
 
 #define gst_d3d11_device_parent_class parent_class
@@ -158,26 +155,24 @@ static void gst_d3d11_device_finalize (GObject * object);
 static gboolean
 gst_d3d11_device_enable_d3d11_debug (void)
 {
-  static gsize _init = 0;
-
+  static GModule *d3d11_debug_module = nullptr;
   /* If all below libraries are unavailable, d3d11 device would fail with
    * D3D11_CREATE_DEVICE_DEBUG flag */
-  if (g_once_init_enter (&_init)) {
-    d3d11_debug_module =
-        g_module_open ("d3d11sdklayers.dll", G_MODULE_BIND_LAZY);
+  static const gchar *sdk_dll_names[] = {
+    "d3d11sdklayers.dll",
+    "d3d11_1sdklayers.dll",
+    "d3d11_2sdklayers.dll",
+    "d3d11_3sdklayers.dll",
+  };
 
-    if (!d3d11_debug_module)
-      d3d11_debug_module =
-          g_module_open ("d3d11_1sdklayers.dll", G_MODULE_BIND_LAZY);
-    if (!d3d11_debug_module)
-      d3d11_debug_module =
-          g_module_open ("d3d11_2sdklayers.dll", G_MODULE_BIND_LAZY);
-    if (!d3d11_debug_module)
-      d3d11_debug_module =
-          g_module_open ("d3d11_3sdklayers.dll", G_MODULE_BIND_LAZY);
-
-    g_once_init_leave (&_init, 1);
+  GST_D3D11_CALL_ONCE_BEGIN {
+    for (guint i = 0; i < G_N_ELEMENTS (sdk_dll_names); i++) {
+      d3d11_debug_module = g_module_open (sdk_dll_names[i], G_MODULE_BIND_LAZY);
+      if (d3d11_debug_module)
+        return;
+    }
   }
+  GST_D3D11_CALL_ONCE_END;
 
   if (d3d11_debug_module)
     return TRUE;
@@ -263,27 +258,23 @@ gst_d3d11_device_d3d11_debug (GstD3D11Device * device,
 static gboolean
 gst_d3d11_device_enable_dxgi_debug (void)
 {
-  static gsize _init = 0;
-  gboolean ret = FALSE;
-
-  /* If all below libraries are unavailable, d3d11 device would fail with
-   * D3D11_CREATE_DEVICE_DEBUG flag */
-  if (g_once_init_enter (&_init)) {
 #if (!GST_D3D11_WINAPI_ONLY_APP)
+  static GModule *dxgi_debug_module = nullptr;
+
+  GST_D3D11_CALL_ONCE_BEGIN {
     dxgi_debug_module = g_module_open ("dxgidebug.dll", G_MODULE_BIND_LAZY);
 
     if (dxgi_debug_module)
       g_module_symbol (dxgi_debug_module,
           "DXGIGetDebugInterface", (gpointer *) & GstDXGIGetDebugInterface);
-    if (GstDXGIGetDebugInterface)
-      ret = TRUE;
-#elif (GST_D3D11_DXGI_HEADER_VERSION >= 3)
-    ret = TRUE;
-#endif
-    g_once_init_leave (&_init, 1);
   }
+  GST_D3D11_CALL_ONCE_END;
 
-  return ret;
+  if (!GstDXGIGetDebugInterface)
+    return FALSE;
+#endif
+
+  return TRUE;
 }
 
 static HRESULT
@@ -292,12 +283,12 @@ gst_d3d11_device_dxgi_get_device_interface (REFIID riid, void **debug)
 #if (!GST_D3D11_WINAPI_ONLY_APP)
   if (GstDXGIGetDebugInterface) {
     return GstDXGIGetDebugInterface (riid, debug);
+  } else {
+    return E_NOINTERFACE;
   }
-#elif (GST_D3D11_DXGI_HEADER_VERSION >= 3)
+#else
   return DXGIGetDebugInterface1 (0, riid, debug);
 #endif
-
-  return E_NOINTERFACE;
 }
 
 static inline GstDebugLevel
@@ -415,9 +406,10 @@ gst_d3d11_device_init (GstD3D11Device * self)
   priv = (GstD3D11DevicePrivate *)
       gst_d3d11_device_get_instance_private (self);
   priv->adapter = DEFAULT_ADAPTER;
+  priv->format_table = g_array_sized_new (FALSE, FALSE,
+      sizeof (GstD3D11Format), GST_D3D11_N_FORMATS);
 
-  g_rec_mutex_init (&priv->extern_lock);
-  g_mutex_init (&priv->resource_lock);
+  InitializeCriticalSection (&priv->extern_lock);
 
   self->priv = priv;
 }
@@ -425,118 +417,196 @@ gst_d3d11_device_init (GstD3D11Device * self)
 static gboolean
 is_windows_8_or_greater (void)
 {
-  static gsize version_once = 0;
   static gboolean ret = FALSE;
 
-  if (g_once_init_enter (&version_once)) {
+  GST_D3D11_CALL_ONCE_BEGIN {
 #if (!GST_D3D11_WINAPI_ONLY_APP)
     if (IsWindows8OrGreater ())
       ret = TRUE;
 #else
     ret = TRUE;
 #endif
-
-    g_once_init_leave (&version_once, 1);
-  }
+  } GST_D3D11_CALL_ONCE_END;
 
   return ret;
 }
 
-inline D3D11_FORMAT_SUPPORT
-operator | (D3D11_FORMAT_SUPPORT lhs, D3D11_FORMAT_SUPPORT rhs)
-{
-  return static_cast < D3D11_FORMAT_SUPPORT > (static_cast < UINT >
-      (lhs) | static_cast < UINT > (rhs));
-}
-
-inline D3D11_FORMAT_SUPPORT
-operator |= (D3D11_FORMAT_SUPPORT lhs, D3D11_FORMAT_SUPPORT rhs)
-{
-  return lhs | rhs;
-}
-
-static gboolean
-can_support_format (GstD3D11Device * self, DXGI_FORMAT format,
-    D3D11_FORMAT_SUPPORT extra_flags)
+static guint
+check_format_support (GstD3D11Device * self, DXGI_FORMAT format)
 {
   GstD3D11DevicePrivate *priv = self->priv;
   ID3D11Device *handle = priv->device;
   HRESULT hr;
-  UINT supported;
-  D3D11_FORMAT_SUPPORT flags = D3D11_FORMAT_SUPPORT_TEXTURE2D;
+  UINT format_support;
 
-  flags |= extra_flags;
+  hr = handle->CheckFormatSupport (format, &format_support);
+  if (FAILED (hr) || format_support == 0)
+    return 0;
 
-  if (!is_windows_8_or_greater ()) {
-    GST_INFO_OBJECT (self, "DXGI format %d needs Windows 8 or greater",
-        (guint) format);
-    return FALSE;
-  }
+  return format_support;
+}
 
-  hr = handle->CheckFormatSupport (format, &supported);
-  if (FAILED (hr)) {
-    GST_DEBUG_OBJECT (self, "DXGI format %d is not supported by device",
-        (guint) format);
-    return FALSE;
-  }
+static void
+dump_format (GstD3D11Device * self, GstD3D11Format * format)
+{
+  gchar *format_support_str = g_flags_to_string (GST_TYPE_D3D11_FORMAT_SUPPORT,
+      format->format_support[0]);
 
-  if ((supported & flags) != flags) {
-    GST_DEBUG_OBJECT (self,
-        "DXGI format %d doesn't support flag 0x%x (supported flag 0x%x)",
-        (guint) format, (guint) supported, (guint) flags);
-    return FALSE;
-  }
+  GST_LOG_OBJECT (self, "%s -> %s (%d), "
+      "resource format: %s (%d), %s (%d), %s (%d), %s (%d), flags (0x%x) %s",
+      gst_video_format_to_string (format->format),
+      gst_d3d11_dxgi_format_to_string (format->dxgi_format),
+      format->dxgi_format,
+      gst_d3d11_dxgi_format_to_string (format->resource_format[0]),
+      format->resource_format[0],
+      gst_d3d11_dxgi_format_to_string (format->resource_format[1]),
+      format->resource_format[1],
+      gst_d3d11_dxgi_format_to_string (format->resource_format[2]),
+      format->resource_format[2],
+      gst_d3d11_dxgi_format_to_string (format->resource_format[3]),
+      format->resource_format[3], format->format_support[0],
+      format_support_str);
 
-  GST_INFO_OBJECT (self, "Device supports DXGI format %d", (guint) format);
-
-  return TRUE;
+  g_free (format_support_str);
 }
 
 static void
 gst_d3d11_device_setup_format_table (GstD3D11Device * self)
 {
   GstD3D11DevicePrivate *priv = self->priv;
-  guint n_formats = 0;
 
-  /* RGB formats */
-  priv->format_table[n_formats].format = GST_VIDEO_FORMAT_BGRA;
-  priv->format_table[n_formats].resource_format[0] = DXGI_FORMAT_B8G8R8A8_UNORM;
-  priv->format_table[n_formats].dxgi_format = DXGI_FORMAT_B8G8R8A8_UNORM;
-  n_formats++;
+  for (guint i = 0; i < G_N_ELEMENTS (_gst_d3d11_default_format_map); i++) {
+    const GstD3D11Format *iter = &_gst_d3d11_default_format_map[i];
+    GstD3D11Format format;
+    guint support[GST_VIDEO_MAX_PLANES] = { 0, };
+    gboolean native = TRUE;
 
-  /* Identical to BGRA, but alpha will be ignored */
-  priv->format_table[n_formats].format = GST_VIDEO_FORMAT_BGRx;
-  priv->format_table[n_formats].resource_format[0] = DXGI_FORMAT_B8G8R8A8_UNORM;
-  priv->format_table[n_formats].dxgi_format = DXGI_FORMAT_B8G8R8A8_UNORM;
-  n_formats++;
+    switch (iter->format) {
+        /* RGB/GRAY */
+      case GST_VIDEO_FORMAT_BGRA:
+      case GST_VIDEO_FORMAT_BGRx:
+      case GST_VIDEO_FORMAT_RGBA:
+      case GST_VIDEO_FORMAT_RGBx:
+      case GST_VIDEO_FORMAT_RGB10A2_LE:
+      case GST_VIDEO_FORMAT_RGBA64_LE:
+      case GST_VIDEO_FORMAT_GRAY8:
+      case GST_VIDEO_FORMAT_GRAY16_LE:
+        support[0] = check_format_support (self, iter->dxgi_format);
+        if (!support[0]) {
+          const gchar *format_name =
+              gst_d3d11_dxgi_format_to_string (iter->dxgi_format);
+          GST_INFO_OBJECT (self, "DXGI_FORMAT_%s (%d) for %s is not supported",
+              format_name, (guint) iter->dxgi_format,
+              gst_video_format_to_string (iter->format));
+          continue;
+        }
+        break;
+        /* YUV DXGI native formats */
+      case GST_VIDEO_FORMAT_VUYA:
+      case GST_VIDEO_FORMAT_Y410:
+      case GST_VIDEO_FORMAT_NV12:
+      case GST_VIDEO_FORMAT_P010_10LE:
+      case GST_VIDEO_FORMAT_P012_LE:
+      case GST_VIDEO_FORMAT_P016_LE:
+      case GST_VIDEO_FORMAT_YUY2:
+      {
+        gboolean supported = TRUE;
 
-  priv->format_table[n_formats].format = GST_VIDEO_FORMAT_RGBA;
-  priv->format_table[n_formats].resource_format[0] = DXGI_FORMAT_R8G8B8A8_UNORM;
-  priv->format_table[n_formats].dxgi_format = DXGI_FORMAT_R8G8B8A8_UNORM;
-  n_formats++;
+        if (is_windows_8_or_greater ())
+          support[0] = check_format_support (self, iter->dxgi_format);
 
-  /* Identical to RGBA, but alpha will be ignored */
-  priv->format_table[n_formats].format = GST_VIDEO_FORMAT_RGBx;
-  priv->format_table[n_formats].resource_format[0] = DXGI_FORMAT_R8G8B8A8_UNORM;
-  priv->format_table[n_formats].dxgi_format = DXGI_FORMAT_R8G8B8A8_UNORM;
-  n_formats++;
+        if (!support[0]) {
+          GST_DEBUG_OBJECT (self,
+              "DXGI_FORMAT_%s (%d) for %s is not supported, "
+              "checking resource format",
+              gst_d3d11_dxgi_format_to_string (iter->dxgi_format),
+              (guint) iter->dxgi_format,
+              gst_video_format_to_string (iter->format));
 
-  priv->format_table[n_formats].format = GST_VIDEO_FORMAT_RGB10A2_LE;
-  priv->format_table[n_formats].resource_format[0] =
-      DXGI_FORMAT_R10G10B10A2_UNORM;
-  priv->format_table[n_formats].dxgi_format = DXGI_FORMAT_R10G10B10A2_UNORM;
-  n_formats++;
+          native = FALSE;
+          for (guint j = 0; j < GST_VIDEO_MAX_PLANES; j++) {
+            if (iter->resource_format[j] == DXGI_FORMAT_UNKNOWN)
+              break;
 
-  /* YUV packed */
-  priv->format_table[n_formats].format = GST_VIDEO_FORMAT_VUYA;
-  priv->format_table[n_formats].resource_format[0] = DXGI_FORMAT_R8G8B8A8_UNORM;
-  if (can_support_format (self, DXGI_FORMAT_AYUV,
-          D3D11_FORMAT_SUPPORT_RENDER_TARGET |
-          D3D11_FORMAT_SUPPORT_SHADER_SAMPLE))
-    priv->format_table[n_formats].dxgi_format = DXGI_FORMAT_AYUV;
-  else
-    priv->format_table[n_formats].dxgi_format = DXGI_FORMAT_UNKNOWN;
-  n_formats++;
+            support[j] = check_format_support (self, iter->resource_format[j]);
+            if (support[j] == 0) {
+              supported = FALSE;
+              break;
+            }
+          }
+
+          if (!supported) {
+            GST_INFO_OBJECT (self, "%s is not supported",
+                gst_video_format_to_string (iter->format));
+            continue;
+          }
+        }
+        break;
+      }
+        /* non-DXGI native formats */
+      case GST_VIDEO_FORMAT_NV21:
+      case GST_VIDEO_FORMAT_I420:
+      case GST_VIDEO_FORMAT_YV12:
+      case GST_VIDEO_FORMAT_I420_10LE:
+      case GST_VIDEO_FORMAT_I420_12LE:
+      case GST_VIDEO_FORMAT_Y42B:
+      case GST_VIDEO_FORMAT_I422_10LE:
+      case GST_VIDEO_FORMAT_I422_12LE:
+      case GST_VIDEO_FORMAT_Y444:
+      case GST_VIDEO_FORMAT_Y444_10LE:
+      case GST_VIDEO_FORMAT_Y444_12LE:
+      case GST_VIDEO_FORMAT_Y444_16LE:
+      case GST_VIDEO_FORMAT_AYUV:
+      case GST_VIDEO_FORMAT_AYUV64:
+        /* RGB planar formats */
+      case GST_VIDEO_FORMAT_RGBP:
+      case GST_VIDEO_FORMAT_BGRP:
+      case GST_VIDEO_FORMAT_GBR:
+      case GST_VIDEO_FORMAT_GBR_10LE:
+      case GST_VIDEO_FORMAT_GBR_12LE:
+      case GST_VIDEO_FORMAT_GBRA:
+      case GST_VIDEO_FORMAT_GBRA_10LE:
+      case GST_VIDEO_FORMAT_GBRA_12LE:
+      {
+        gboolean supported = TRUE;
+
+        native = FALSE;
+        for (guint j = 0; j < GST_VIDEO_MAX_PLANES; j++) {
+          if (iter->resource_format[j] == DXGI_FORMAT_UNKNOWN)
+            break;
+
+          support[j] = check_format_support (self, iter->resource_format[j]);
+          if (support[j] == 0) {
+            supported = FALSE;
+            break;
+          }
+        }
+
+        if (!supported) {
+          GST_INFO_OBJECT (self, "%s is not supported",
+              gst_video_format_to_string (iter->format));
+          continue;
+        }
+        break;
+      }
+      default:
+        g_assert_not_reached ();
+        return;
+    }
+
+    format = *iter;
+
+    if (!native)
+      format.dxgi_format = DXGI_FORMAT_UNKNOWN;
+
+    for (guint j = 0; j < GST_VIDEO_MAX_PLANES; j++)
+      format.format_support[j] = support[j];
+
+    if (gst_debug_category_get_threshold (GST_CAT_DEFAULT) >= GST_LEVEL_LOG)
+      dump_format (self, &format);
+
+    g_array_append_val (priv->format_table, format);
+  }
 
   /* FIXME: d3d11 sampler doesn't support packed-and-subsampled formats
    * very well (and it's really poorly documented).
@@ -592,153 +662,6 @@ gst_d3d11_device_setup_format_table (GstD3D11Device * self)
     priv->format_table[n_formats].dxgi_format = DXGI_FORMAT_UNKNOWN;
   n_formats++;
 #endif
-
-  priv->format_table[n_formats].format = GST_VIDEO_FORMAT_Y410;
-  priv->format_table[n_formats].resource_format[0] =
-      DXGI_FORMAT_R10G10B10A2_UNORM;
-  if (can_support_format (self, DXGI_FORMAT_Y410,
-          D3D11_FORMAT_SUPPORT_SHADER_SAMPLE))
-    priv->format_table[n_formats].dxgi_format = DXGI_FORMAT_Y410;
-  else
-    priv->format_table[n_formats].dxgi_format = DXGI_FORMAT_UNKNOWN;
-  n_formats++;
-
-  /* YUV semi-planar */
-  priv->format_table[n_formats].format = GST_VIDEO_FORMAT_NV12;
-  priv->format_table[n_formats].resource_format[0] = DXGI_FORMAT_R8_UNORM;
-  priv->format_table[n_formats].resource_format[1] = DXGI_FORMAT_R8G8_UNORM;
-  if (can_support_format (self, DXGI_FORMAT_NV12,
-          D3D11_FORMAT_SUPPORT_RENDER_TARGET |
-          D3D11_FORMAT_SUPPORT_SHADER_SAMPLE))
-    priv->format_table[n_formats].dxgi_format = DXGI_FORMAT_NV12;
-  else
-    priv->format_table[n_formats].dxgi_format = DXGI_FORMAT_UNKNOWN;
-  n_formats++;
-
-  /* no native format for NV21 */
-  priv->format_table[n_formats].format = GST_VIDEO_FORMAT_NV21;
-  priv->format_table[n_formats].resource_format[0] = DXGI_FORMAT_R8_UNORM;
-  priv->format_table[n_formats].resource_format[1] = DXGI_FORMAT_R8G8_UNORM;
-  priv->format_table[n_formats].dxgi_format = DXGI_FORMAT_UNKNOWN;
-  n_formats++;
-
-  priv->format_table[n_formats].format = GST_VIDEO_FORMAT_P010_10LE;
-  priv->format_table[n_formats].resource_format[0] = DXGI_FORMAT_R16_UNORM;
-  priv->format_table[n_formats].resource_format[1] = DXGI_FORMAT_R16G16_UNORM;
-  if (can_support_format (self, DXGI_FORMAT_P010,
-          D3D11_FORMAT_SUPPORT_RENDER_TARGET |
-          D3D11_FORMAT_SUPPORT_SHADER_SAMPLE))
-    priv->format_table[n_formats].dxgi_format = DXGI_FORMAT_P010;
-  else
-    priv->format_table[n_formats].dxgi_format = DXGI_FORMAT_UNKNOWN;
-  n_formats++;
-
-  /* P012 is identical to P016 from runtime point of view */
-  priv->format_table[n_formats].format = GST_VIDEO_FORMAT_P012_LE;
-  priv->format_table[n_formats].resource_format[0] = DXGI_FORMAT_R16_UNORM;
-  priv->format_table[n_formats].resource_format[1] = DXGI_FORMAT_R16G16_UNORM;
-  if (can_support_format (self, DXGI_FORMAT_P016,
-          D3D11_FORMAT_SUPPORT_RENDER_TARGET |
-          D3D11_FORMAT_SUPPORT_SHADER_SAMPLE))
-    priv->format_table[n_formats].dxgi_format = DXGI_FORMAT_P016;
-  else
-    priv->format_table[n_formats].dxgi_format = DXGI_FORMAT_UNKNOWN;
-  n_formats++;
-
-  priv->format_table[n_formats].format = GST_VIDEO_FORMAT_P016_LE;
-  priv->format_table[n_formats].resource_format[0] = DXGI_FORMAT_R16_UNORM;
-  priv->format_table[n_formats].resource_format[1] = DXGI_FORMAT_R16G16_UNORM;
-  if (can_support_format (self, DXGI_FORMAT_P016,
-          D3D11_FORMAT_SUPPORT_RENDER_TARGET |
-          D3D11_FORMAT_SUPPORT_SHADER_SAMPLE))
-    priv->format_table[n_formats].dxgi_format = DXGI_FORMAT_P016;
-  else
-    priv->format_table[n_formats].dxgi_format = DXGI_FORMAT_UNKNOWN;
-  n_formats++;
-
-  /* YUV planar */
-  priv->format_table[n_formats].format = GST_VIDEO_FORMAT_I420;
-  priv->format_table[n_formats].resource_format[0] = DXGI_FORMAT_R8_UNORM;
-  priv->format_table[n_formats].resource_format[1] = DXGI_FORMAT_R8_UNORM;
-  priv->format_table[n_formats].resource_format[2] = DXGI_FORMAT_R8_UNORM;
-  n_formats++;
-
-  priv->format_table[n_formats].format = GST_VIDEO_FORMAT_YV12;
-  priv->format_table[n_formats].resource_format[0] = DXGI_FORMAT_R8_UNORM;
-  priv->format_table[n_formats].resource_format[1] = DXGI_FORMAT_R8_UNORM;
-  priv->format_table[n_formats].resource_format[2] = DXGI_FORMAT_R8_UNORM;
-  n_formats++;
-
-  priv->format_table[n_formats].format = GST_VIDEO_FORMAT_I420_10LE;
-  priv->format_table[n_formats].resource_format[0] = DXGI_FORMAT_R16_UNORM;
-  priv->format_table[n_formats].resource_format[1] = DXGI_FORMAT_R16_UNORM;
-  priv->format_table[n_formats].resource_format[2] = DXGI_FORMAT_R16_UNORM;
-  n_formats++;
-
-  priv->format_table[n_formats].format = GST_VIDEO_FORMAT_I420_12LE;
-  priv->format_table[n_formats].resource_format[0] = DXGI_FORMAT_R16_UNORM;
-  priv->format_table[n_formats].resource_format[1] = DXGI_FORMAT_R16_UNORM;
-  priv->format_table[n_formats].resource_format[2] = DXGI_FORMAT_R16_UNORM;
-  n_formats++;
-
-  priv->format_table[n_formats].format = GST_VIDEO_FORMAT_Y42B;
-  priv->format_table[n_formats].resource_format[0] = DXGI_FORMAT_R8_UNORM;
-  priv->format_table[n_formats].resource_format[1] = DXGI_FORMAT_R8_UNORM;
-  priv->format_table[n_formats].resource_format[2] = DXGI_FORMAT_R8_UNORM;
-  n_formats++;
-
-  priv->format_table[n_formats].format = GST_VIDEO_FORMAT_I422_10LE;
-  priv->format_table[n_formats].resource_format[0] = DXGI_FORMAT_R16_UNORM;
-  priv->format_table[n_formats].resource_format[1] = DXGI_FORMAT_R16_UNORM;
-  priv->format_table[n_formats].resource_format[2] = DXGI_FORMAT_R16_UNORM;
-  n_formats++;
-
-  priv->format_table[n_formats].format = GST_VIDEO_FORMAT_I422_12LE;
-  priv->format_table[n_formats].resource_format[0] = DXGI_FORMAT_R16_UNORM;
-  priv->format_table[n_formats].resource_format[1] = DXGI_FORMAT_R16_UNORM;
-  priv->format_table[n_formats].resource_format[2] = DXGI_FORMAT_R16_UNORM;
-  n_formats++;
-
-  priv->format_table[n_formats].format = GST_VIDEO_FORMAT_Y444;
-  priv->format_table[n_formats].resource_format[0] = DXGI_FORMAT_R8_UNORM;
-  priv->format_table[n_formats].resource_format[1] = DXGI_FORMAT_R8_UNORM;
-  priv->format_table[n_formats].resource_format[2] = DXGI_FORMAT_R8_UNORM;
-  n_formats++;
-
-  priv->format_table[n_formats].format = GST_VIDEO_FORMAT_Y444_10LE;
-  priv->format_table[n_formats].resource_format[0] = DXGI_FORMAT_R16_UNORM;
-  priv->format_table[n_formats].resource_format[1] = DXGI_FORMAT_R16_UNORM;
-  priv->format_table[n_formats].resource_format[2] = DXGI_FORMAT_R16_UNORM;
-  n_formats++;
-
-  priv->format_table[n_formats].format = GST_VIDEO_FORMAT_Y444_12LE;
-  priv->format_table[n_formats].resource_format[0] = DXGI_FORMAT_R16_UNORM;
-  priv->format_table[n_formats].resource_format[1] = DXGI_FORMAT_R16_UNORM;
-  priv->format_table[n_formats].resource_format[2] = DXGI_FORMAT_R16_UNORM;
-  n_formats++;
-
-  priv->format_table[n_formats].format = GST_VIDEO_FORMAT_Y444_16LE;
-  priv->format_table[n_formats].resource_format[0] = DXGI_FORMAT_R16_UNORM;
-  priv->format_table[n_formats].resource_format[1] = DXGI_FORMAT_R16_UNORM;
-  priv->format_table[n_formats].resource_format[2] = DXGI_FORMAT_R16_UNORM;
-  n_formats++;
-
-  /* GRAY */
-  /* NOTE: To support conversion by using video processor,
-   * mark DXGI_FORMAT_{R8,R16}_UNORM formats as known dxgi_format.
-   * Otherwise, d3d11 elements will not try to use video processor for
-   * those formats */
-  priv->format_table[n_formats].format = GST_VIDEO_FORMAT_GRAY8;
-  priv->format_table[n_formats].resource_format[0] = DXGI_FORMAT_R8_UNORM;
-  priv->format_table[n_formats].dxgi_format = DXGI_FORMAT_R8_UNORM;
-  n_formats++;
-
-  priv->format_table[n_formats].format = GST_VIDEO_FORMAT_GRAY16_LE;
-  priv->format_table[n_formats].resource_format[0] = DXGI_FORMAT_R16_UNORM;
-  priv->format_table[n_formats].dxgi_format = DXGI_FORMAT_R16_UNORM;
-  n_formats++;
-
-  g_assert (n_formats == GST_D3D11_N_FORMATS);
 }
 
 static void
@@ -781,6 +704,8 @@ gst_d3d11_device_dispose (GObject * object)
 
   GST_LOG_OBJECT (self, "dispose");
 
+  GST_D3D11_CLEAR_COM (priv->device5);
+  GST_D3D11_CLEAR_COM (priv->device_context4);
   GST_D3D11_CLEAR_COM (priv->video_device);
   GST_D3D11_CLEAR_COM (priv->video_context);
   GST_D3D11_CLEAR_COM (priv->device);
@@ -823,8 +748,8 @@ gst_d3d11_device_finalize (GObject * object)
 
   GST_LOG_OBJECT (self, "finalize");
 
-  g_rec_mutex_clear (&priv->extern_lock);
-  g_mutex_clear (&priv->resource_lock);
+  g_array_unref (priv->format_table);
+  DeleteCriticalSection (&priv->extern_lock);
   g_free (priv->description);
 
   G_OBJECT_CLASS (parent_class)->finalize (object);
@@ -1028,7 +953,9 @@ gst_d3d11_device_new_internal (const GstD3D11DeviceConstructData * data)
   ComPtr < IDXGIAdapter1 > adapter;
   ComPtr < IDXGIFactory1 > factory;
   ComPtr < ID3D11Device > device;
+  ComPtr < ID3D11Device5 > device5;
   ComPtr < ID3D11DeviceContext > device_context;
+  ComPtr < ID3D11DeviceContext4 > device_context4;
   HRESULT hr;
   UINT create_flags;
   guint adapter_index = 0;
@@ -1048,7 +975,7 @@ gst_d3d11_device_new_internal (const GstD3D11DeviceConstructData * data)
 
   hr = CreateDXGIFactory1 (IID_PPV_ARGS (&factory));
   if (!gst_d3d11_result (hr, NULL)) {
-    GST_ERROR ("cannot create dxgi factory, hr: 0x%x", (guint) hr);
+    GST_WARNING ("cannot create dxgi factory, hr: 0x%x", (guint) hr);
     return nullptr;
   }
 
@@ -1077,7 +1004,7 @@ gst_d3d11_device_new_internal (const GstD3D11DeviceConstructData * data)
 
     hr = external_device->QueryInterface (IID_PPV_ARGS (&device));
     if (FAILED (hr)) {
-      GST_ERROR ("Not a valid external ID3D11Device handle");
+      GST_WARNING ("Not a valid external ID3D11Device handle");
       return nullptr;
     }
 
@@ -1134,7 +1061,7 @@ gst_d3d11_device_new_internal (const GstD3D11DeviceConstructData * data)
       }
       case DEVICE_CONSTRUCT_FOR_ADAPTER_LUID:
       {
-        GST_ERROR ("Failed to create d3d11 device for adapter luid %"
+        GST_WARNING ("Failed to create d3d11 device for adapter luid %"
             G_GINT64_FORMAT " with flags 0x%x, hr: 0x%x",
             data->data.adapter_luid, create_flags, (guint) hr);
         return nullptr;
@@ -1153,6 +1080,14 @@ gst_d3d11_device_new_internal (const GstD3D11DeviceConstructData * data)
   gst_object_ref_sink (self);
 
   priv = self->priv;
+
+  hr = device.As (&device5);
+  if (SUCCEEDED (hr))
+    hr = device_context.As (&device_context4);
+  if (SUCCEEDED (hr)) {
+    priv->device5 = device5.Detach ();
+    priv->device_context4 = device_context4.Detach ();
+  }
 
   priv->adapter = adapter_index;
   priv->device = device.Detach ();
@@ -1176,6 +1111,9 @@ gst_d3d11_device_new_internal (const GstD3D11DeviceConstructData * data)
   gst_d3d11_device_setup_format_table (self);
   gst_d3d11_device_setup_debug_layer (self);
 
+  BOOL ret = QueryPerformanceFrequency (&priv->frequency);
+  g_assert (ret);
+
   return self;
 }
 
@@ -1187,7 +1125,7 @@ gst_d3d11_device_new_internal (const GstD3D11DeviceConstructData * data)
  * Returns: (transfer full) (nullable): a new #GstD3D11Device for @adapter_index
  * or %NULL when failed to create D3D11 device with given adapter index.
  *
- * Since: 1.20
+ * Since: 1.22
  */
 GstD3D11Device *
 gst_d3d11_device_new (guint adapter_index, guint flags)
@@ -1209,7 +1147,7 @@ gst_d3d11_device_new (guint adapter_index, guint flags)
  * Returns: (transfer full) (nullable): a new #GstD3D11Device for @adapter_luid
  * or %NULL when failed to create D3D11 device with given adapter luid.
  *
- * Since: 1.20
+ * Since: 1.22
  */
 GstD3D11Device *
 gst_d3d11_device_new_for_adapter_luid (gint64 adapter_luid, guint flags)
@@ -1230,7 +1168,7 @@ gst_d3d11_device_new_for_adapter_luid (gint64 adapter_luid, guint flags)
  * Returns: (transfer full) (nullable): a new #GstD3D11Device for @device
  * or %NULL if an error occurred
  *
- * Since: 1.20
+ * Since: 1.22
  */
 GstD3D11Device *
 gst_d3d11_device_new_wrapped (ID3D11Device * device)
@@ -1255,7 +1193,7 @@ gst_d3d11_device_new_wrapped (ID3D11Device * device)
  *
  * Returns: (transfer none): the ID3D11Device handle
  *
- * Since: 1.20
+ * Since: 1.22
  */
 ID3D11Device *
 gst_d3d11_device_get_device_handle (GstD3D11Device * device)
@@ -1275,7 +1213,7 @@ gst_d3d11_device_get_device_handle (GstD3D11Device * device)
  *
  * Returns: (transfer none): the immeidate ID3D11DeviceContext handle
  *
- * Since: 1.20
+ * Since: 1.22
  */
 ID3D11DeviceContext *
 gst_d3d11_device_get_device_context_handle (GstD3D11Device * device)
@@ -1294,7 +1232,7 @@ gst_d3d11_device_get_device_context_handle (GstD3D11Device * device)
  *
  * Returns: (transfer none): the IDXGIFactory1 handle
  *
- * Since: 1.20
+ * Since: 1.22
  */
 IDXGIFactory1 *
 gst_d3d11_device_get_dxgi_factory_handle (GstD3D11Device * device)
@@ -1314,7 +1252,7 @@ gst_d3d11_device_get_dxgi_factory_handle (GstD3D11Device * device)
  * Returns: (nullable) (transfer none) : the ID3D11VideoDevice handle or %NULL
  * if ID3D11VideoDevice is unavailable.
  *
- * Since: 1.20
+ * Since: 1.22
  */
 ID3D11VideoDevice *
 gst_d3d11_device_get_video_device_handle (GstD3D11Device * device)
@@ -1324,7 +1262,7 @@ gst_d3d11_device_get_video_device_handle (GstD3D11Device * device)
   g_return_val_if_fail (GST_IS_D3D11_DEVICE (device), NULL);
 
   priv = device->priv;
-  g_mutex_lock (&priv->resource_lock);
+  GstD3D11SRWLockGuard lk (&priv->resource_lock);
   if (!priv->video_device) {
     HRESULT hr;
     ID3D11VideoDevice *video_device = NULL;
@@ -1333,7 +1271,6 @@ gst_d3d11_device_get_video_device_handle (GstD3D11Device * device)
     if (gst_d3d11_result (hr, device))
       priv->video_device = video_device;
   }
-  g_mutex_unlock (&priv->resource_lock);
 
   return priv->video_device;
 }
@@ -1348,7 +1285,7 @@ gst_d3d11_device_get_video_device_handle (GstD3D11Device * device)
  * Returns: (nullable) (transfer none): the ID3D11VideoContext handle or %NULL
  * if ID3D11VideoContext is unavailable.
  *
- * Since: 1.20
+ * Since: 1.22
  */
 ID3D11VideoContext *
 gst_d3d11_device_get_video_context_handle (GstD3D11Device * device)
@@ -1358,7 +1295,7 @@ gst_d3d11_device_get_video_context_handle (GstD3D11Device * device)
   g_return_val_if_fail (GST_IS_D3D11_DEVICE (device), NULL);
 
   priv = device->priv;
-  g_mutex_lock (&priv->resource_lock);
+  GstD3D11SRWLockGuard lk (&priv->resource_lock);
   if (!priv->video_context) {
     HRESULT hr;
     ID3D11VideoContext *video_context = NULL;
@@ -1367,7 +1304,6 @@ gst_d3d11_device_get_video_context_handle (GstD3D11Device * device)
     if (gst_d3d11_result (hr, device))
       priv->video_context = video_context;
   }
-  g_mutex_unlock (&priv->resource_lock);
 
   return priv->video_context;
 }
@@ -1380,7 +1316,7 @@ gst_d3d11_device_get_video_context_handle (GstD3D11Device * device)
  * protected by this method. This call must be paired with
  * gst_d3d11_device_unlock()
  *
- * Since: 1.20
+ * Since: 1.22
  */
 void
 gst_d3d11_device_lock (GstD3D11Device * device)
@@ -1392,7 +1328,7 @@ gst_d3d11_device_lock (GstD3D11Device * device)
   priv = device->priv;
 
   GST_TRACE_OBJECT (device, "device locking");
-  g_rec_mutex_lock (&priv->extern_lock);
+  EnterCriticalSection (&priv->extern_lock);
   GST_TRACE_OBJECT (device, "device locked");
 }
 
@@ -1403,7 +1339,7 @@ gst_d3d11_device_lock (GstD3D11Device * device)
  * Release lock for @device. This call must be paired with
  * gst_d3d11_device_lock()
  *
- * Since: 1.20
+ * Since: 1.22
  */
 void
 gst_d3d11_device_unlock (GstD3D11Device * device)
@@ -1414,35 +1350,303 @@ gst_d3d11_device_unlock (GstD3D11Device * device)
 
   priv = device->priv;
 
-  g_rec_mutex_unlock (&priv->extern_lock);
+  LeaveCriticalSection (&priv->extern_lock);
   GST_TRACE_OBJECT (device, "device unlocked");
 }
 
 /**
- * gst_d3d11_device_format_from_gst:
+ * gst_d3d11_device_get_format:
  * @device: a #GstD3D11Device
  * @format: a #GstVideoFormat
+ * @device_format: (out caller-allocates) (nullable): a #GstD3D11Format
  *
- * Returns: (transfer none) (nullable): a pointer to #GstD3D11Format
- * or %NULL if @format is not supported by @device
+ * Converts @format to #GstD3D11Format if the @format is supported
+ * by device
  *
- * Since: 1.20
+ * Returns: %TRUE if @format is supported by @device
+ *
+ * Since: 1.22
  */
-const GstD3D11Format *
-gst_d3d11_device_format_from_gst (GstD3D11Device * device,
-    GstVideoFormat format)
+gboolean
+gst_d3d11_device_get_format (GstD3D11Device * device, GstVideoFormat format,
+    GstD3D11Format * device_format)
 {
   GstD3D11DevicePrivate *priv;
-  guint i;
 
-  g_return_val_if_fail (GST_IS_D3D11_DEVICE (device), NULL);
+  g_return_val_if_fail (GST_IS_D3D11_DEVICE (device), FALSE);
 
   priv = device->priv;
 
-  for (i = 0; i < G_N_ELEMENTS (priv->format_table); i++) {
-    if (priv->format_table[i].format == format)
-      return &priv->format_table[i];
+  for (guint i = 0; i < priv->format_table->len; i++) {
+    const GstD3D11Format *d3d11_fmt =
+        &g_array_index (priv->format_table, GstD3D11Format, i);
+
+    if (d3d11_fmt->format != format)
+      continue;
+
+    if (device_format)
+      *device_format = *d3d11_fmt;
+
+    return TRUE;
   }
 
-  return NULL;
+  if (device_format)
+    gst_d3d11_format_init (device_format);
+
+  return FALSE;
+}
+
+GST_DEFINE_MINI_OBJECT_TYPE (GstD3D11Fence, gst_d3d11_fence);
+
+struct _GstD3D11FencePrivate
+{
+  UINT64 fence_value;
+  ID3D11Fence *fence;
+  ID3D11Query *query;
+  HANDLE event_handle;
+  gboolean signalled;
+  gboolean synced;
+};
+
+static void
+_gst_d3d11_fence_free (GstD3D11Fence * fence)
+{
+  GstD3D11FencePrivate *priv = fence->priv;
+
+  GST_D3D11_CLEAR_COM (priv->fence);
+  GST_D3D11_CLEAR_COM (priv->query);
+  if (priv->event_handle)
+    CloseHandle (priv->event_handle);
+
+  gst_clear_object (&fence->device);
+
+  g_free (priv);
+  g_free (fence);
+}
+
+/**
+ * gst_d3d11_device_create_fence:
+ * @device: a #GstD3D11Device
+ *
+ * Creates fence object (i.e., ID3D11Fence) if available, otherwise
+ * ID3D11Query with D3D11_QUERY_EVENT is created.
+ *
+ * Returns: a #GstD3D11Fence object
+ *
+ * Since: 1.22
+ */
+GstD3D11Fence *
+gst_d3d11_device_create_fence (GstD3D11Device * device)
+{
+  GstD3D11DevicePrivate *priv;
+  ID3D11Fence *fence = nullptr;
+  HRESULT hr = S_OK;
+  GstD3D11Fence *self;
+
+  g_return_val_if_fail (GST_IS_D3D11_DEVICE (device), nullptr);
+
+  priv = device->priv;
+
+  if (priv->device5 && priv->device_context4) {
+    hr = priv->device5->CreateFence (0, D3D11_FENCE_FLAG_NONE,
+        IID_PPV_ARGS (&fence));
+
+    if (!gst_d3d11_result (hr, device))
+      GST_WARNING_OBJECT (device, "Failed to create fence object");
+  }
+
+  self = g_new0 (GstD3D11Fence, 1);
+  self->device = (GstD3D11Device *) gst_object_ref (device);
+  self->priv = g_new0 (GstD3D11FencePrivate, 1);
+  self->priv->fence = fence;
+  if (fence) {
+    self->priv->event_handle = CreateEventEx (nullptr, nullptr,
+        0, EVENT_ALL_ACCESS);
+  }
+
+  gst_mini_object_init (GST_MINI_OBJECT_CAST (self), 0,
+      GST_TYPE_D3D11_FENCE, nullptr, nullptr,
+      (GstMiniObjectFreeFunction) _gst_d3d11_fence_free);
+
+  return self;
+}
+
+/**
+ * gst_d3d11_fence_signal:
+ * @fence: a #GstD3D11Fence
+ *
+ * Sets sync point to fence for waiting.
+ * Must be called with gst_d3d11_device_lock() held
+ *
+ * Returns: %TRUE if successful
+ *
+ * Since: 1.22
+ */
+gboolean
+gst_d3d11_fence_signal (GstD3D11Fence * fence)
+{
+  HRESULT hr = S_OK;
+  GstD3D11Device *device;
+  GstD3D11DevicePrivate *device_priv;
+  GstD3D11FencePrivate *priv;
+
+  g_return_val_if_fail (GST_IS_D3D11_FENCE (fence), FALSE);
+
+  device = fence->device;
+  device_priv = device->priv;
+  priv = fence->priv;
+
+  priv->signalled = FALSE;
+  priv->synced = FALSE;
+
+  if (priv->fence) {
+    priv->fence_value++;
+
+    GST_LOG_OBJECT (device, "Signals with fence value %" G_GUINT64_FORMAT,
+        priv->fence_value);
+
+    hr = device_priv->device_context4->Signal (priv->fence, priv->fence_value);
+    if (!gst_d3d11_result (hr, device)) {
+      GST_ERROR_OBJECT (device, "Failed to signal fence value %"
+          G_GUINT64_FORMAT, fence->priv->fence_value);
+      return FALSE;
+    }
+  } else {
+    D3D11_QUERY_DESC desc;
+
+    GST_D3D11_CLEAR_COM (priv->query);
+
+    desc.Query = D3D11_QUERY_EVENT;
+    desc.MiscFlags = 0;
+
+    GST_LOG_OBJECT (device, "Creating query object");
+
+    hr = device_priv->device->CreateQuery (&desc, &priv->query);
+    if (!gst_d3d11_result (hr, device)) {
+      GST_ERROR_OBJECT (device, "Failed to create query object");
+      return FALSE;
+    }
+
+    device_priv->device_context->End (priv->query);
+  }
+
+  priv->signalled = TRUE;
+
+  return TRUE;
+}
+
+/**
+ * gst_d3d11_fence_wait:
+ * @fence: a #GstD3D11Fence
+ *
+ * Waits until previously issued GPU commands have been completed
+ * Must be called with gst_d3d11_device_lock() held
+ *
+ * Returns: %TRUE if successful
+ *
+ * Since: 1.22
+ */
+gboolean
+gst_d3d11_fence_wait (GstD3D11Fence * fence)
+{
+  HRESULT hr = S_OK;
+  GstD3D11Device *device;
+  GstD3D11DevicePrivate *device_priv;
+  GstD3D11FencePrivate *priv;
+  BOOL timer_ret;
+  LARGE_INTEGER current_time, now;
+
+  g_return_val_if_fail (GST_IS_D3D11_FENCE (fence), FALSE);
+
+  device = fence->device;
+  device_priv = device->priv;
+  priv = fence->priv;
+
+  if (!priv->signalled) {
+    GST_DEBUG_OBJECT (device, "Fence is not signalled, nothing to wait");
+    return TRUE;
+  }
+
+  if (priv->synced) {
+    GST_DEBUG_OBJECT (device, "Already synced");
+    return TRUE;
+  }
+
+  timer_ret = QueryPerformanceCounter (&current_time);
+  g_assert (timer_ret);
+
+  now = current_time;
+
+  if (priv->fence) {
+    GST_LOG_OBJECT (device, "Waiting fence value %" G_GUINT64_FORMAT,
+        priv->fence_value);
+
+    if (fence->priv->fence->GetCompletedValue () < fence->priv->fence_value) {
+      hr = fence->priv->fence->SetEventOnCompletion (fence->priv->fence_value,
+          fence->priv->event_handle);
+      if (!gst_d3d11_result (hr, device)) {
+        GST_WARNING_OBJECT (device, "Failed set event handle");
+        return FALSE;
+      }
+
+      /* 20 seconds should be sufficient time */
+      DWORD ret = WaitForSingleObject (priv->event_handle, 20000);
+      if (ret != WAIT_OBJECT_0) {
+        GST_WARNING_OBJECT (device,
+            "Failed to wait object, ret 0x%x", (guint) ret);
+        return FALSE;
+      }
+    }
+  } else {
+    LONGLONG timeout;
+    BOOL sync_done = FALSE;
+
+    g_assert (priv->query != nullptr);
+
+    /* 20 sec timeout */
+    timeout = now.QuadPart + 20 * device_priv->frequency.QuadPart;
+
+    GST_LOG_OBJECT (device, "Waiting event");
+
+    while (now.QuadPart < timeout && !sync_done) {
+      hr = device_priv->device_context->GetData (priv->query,
+          &sync_done, sizeof (BOOL), 0);
+      if (FAILED (hr)) {
+        GST_WARNING_OBJECT (device, "Failed to get event data");
+        return FALSE;
+      }
+
+      if (sync_done)
+        break;
+
+      g_thread_yield ();
+      timer_ret = QueryPerformanceCounter (&now);
+      g_assert (timer_ret);
+    }
+
+    if (!sync_done) {
+      GST_WARNING_OBJECT (device, "Timeout");
+      return FALSE;
+    }
+
+    GST_D3D11_CLEAR_COM (priv->query);
+  }
+
+#ifndef GST_DISABLE_GST_DEBUG
+  if (gst_debug_category_get_threshold (GST_CAT_DEFAULT) >= GST_LEVEL_LOG) {
+    GstClockTime elapsed;
+
+    QueryPerformanceCounter (&now);
+    elapsed = gst_util_uint64_scale (now.QuadPart - current_time.QuadPart,
+        GST_SECOND, device_priv->frequency.QuadPart);
+
+    GST_LOG_OBJECT (device, "Wait done, elapsed %" GST_TIME_FORMAT,
+        GST_TIME_ARGS (elapsed));
+  }
+#endif
+
+  priv->signalled = FALSE;
+  priv->synced = TRUE;
+
+  return TRUE;
 }
