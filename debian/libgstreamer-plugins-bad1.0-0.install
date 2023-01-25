@@ -12,5 +12,6 @@ usr/lib/*/libgsturidownloader-1.0.so.*
 usr/lib/*/libgstisoff-1.0.so.*
 usr/lib/*/libgstsctp-1.0.so.*
 usr/lib/*/libgstwebrtc-1.0.so.*
+usr/lib/*/libgstwebrtcnice-1.0.so.*
 usr/lib/*/libgsttranscoder-1.0.so.*
 usr/share/gstreamer-1.0/encoding-profiles
