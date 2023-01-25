@@ -31,6 +31,33 @@ endif
 
 conf_flags = -Dpackage-name=$(GST_PACKAGE_NAME) -Dpackage-origin=$(GST_PACKAGE_ORIGIN)
 conf_flags += -Dauto_features=enabled -Ddoc=disabled -Dgpl=enabled
+# Not available in Debian yet
+conf_flags += -Davtp=disabled -Dfaac=disabled -Dgs=disabled -Diqa=disabled -Disac=disabled -Dmagicleap=disabled
+conf_flags += -Dmicrodns=disabled -Donnx=disabled -Dopensles=disabled -Dsvthevcenc=disabled -Dtinyalsa=disabled
+# Only available on Windows
+conf_flags += -Damfcodec=disabled -Ddirectshow=disabled -Dwasapi=disabled -Dwasapi2=disabled
+# In non-free currently
+conf_flags += -Dfdkaac=disabled
+
+ifeq (,$(filter $(DEB_HOST_ARCH),amd64 arm64 armel armhf i386 mips64el mipsel ppc64el s390x alpha hppa hurd-i386 m68k powerpc ppc64 riscv64))
+conf_flags += -Dopencv=disabled
+endif
+
+ifeq (,$(filter $(DEB_HOST_ARCH),s390x hppa m68k powerpc ppc64 sparc64))
+conf_flags += -Dldac=disabled
+endif
+
+ifneq ($(DEB_HOST_ARCH),amd64)
+conf_flags += -Dmsdk=disabled
+endif
+
+ifneq ($(DEB_HOST_ARCH_OS),linux)
+conf_flags += -Dbluez=disabled -Ddc1394=disabled -Dfbdev=disabled -Dsbc=disabled -Dqsv=disabled -Dva=disabled -Dv4l2codecs=disabled  -Duvch264=disabled
+endif
+
+ifeq ($(DEB_HOST_ARCH_OS),hurd)
+conf_flags += -Dresindvd=disabled
+endif
 
 %:
 	dh $@
@@ -62,11 +89,13 @@ ifeq ($(DEB_HOST_ARCH_OS),linux)
 	dh_install -pgstreamer1.0-plugins-bad debian/tmp/usr/lib/$(DEB_HOST_MULTIARCH)/gstreamer-1.0/libgstuvch264.so
 	dh_install -pgstreamer1.0-plugins-bad debian/tmp/usr/lib/$(DEB_HOST_MULTIARCH)/gstreamer-1.0/libgstbluez.so
 	dh_install -pgstreamer1.0-plugins-bad debian/tmp/usr/lib/$(DEB_HOST_MULTIARCH)/gstreamer-1.0/libgstsbc.so
+	dh_install -pgstreamer1.0-plugins-bad debian/tmp/usr/lib/$(DEB_HOST_MULTIARCH)/gstreamer-1.0/libgstqsv.so
 	dh_install -pgstreamer1.0-plugins-bad debian/tmp/usr/lib/$(DEB_HOST_MULTIARCH)/gstreamer-1.0/libgstwaylandsink.so
 	dh_install -plibgstreamer-plugins-bad1.0-0 debian/tmp/usr/lib/$(DEB_HOST_MULTIARCH)/libgstwayland-1.0.so.* usr/lib/$(DEB_HOST_MULTIARCH)
 	dh_install -pgstreamer1.0-plugins-bad debian/tmp/usr/lib/$(DEB_HOST_MULTIARCH)/gstreamer-1.0/libgstkms.so
-	# Disabled until glslc is available in Debian
-	# dh_install -pgstreamer1.0-plugins-bad debian/tmp/usr/lib/$(DEB_HOST_MULTIARCH)/gstreamer-1.0/libgstvulkan.so
+	dh_install -plibgstreamer-plugins-bad1.0-0 debian/tmp/usr/lib/$(DEB_HOST_MULTIARCH)/libgstcuda-1.0.so.* usr/lib/$(DEB_HOST_MULTIARCH)
+	dh_install -pgstreamer1.0-plugins-bad debian/tmp/usr/lib/$(DEB_HOST_MULTIARCH)/gstreamer-1.0/libgstvulkan.so
+	dh_install -plibgstreamer-plugins-bad1.0-0 debian/tmp/usr/lib/$(DEB_HOST_MULTIARCH)/libgstvulkan-1.0.so.* usr/lib/$(DEB_HOST_MULTIARCH)
 	dh_install -pgstreamer1.0-plugins-bad debian/tmp/usr/lib/$(DEB_HOST_MULTIARCH)/gstreamer-1.0/libgstva.so
 	dh_install -plibgstreamer-plugins-bad1.0-0 debian/tmp/usr/lib/$(DEB_HOST_MULTIARCH)/libgstva-1.0.so.* usr/lib/$(DEB_HOST_MULTIARCH)
 	dh_install -pgstreamer1.0-plugins-bad debian/tmp/usr/lib/$(DEB_HOST_MULTIARCH)/gstreamer-1.0/libgstv4l2codecs.so
