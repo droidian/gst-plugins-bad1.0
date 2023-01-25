@@ -67,10 +67,6 @@
  * should call gst_av1_parser_reference_frame_update() to update the parser's inside
  * state(such as reference information, global segmentation information, etc).
  *
- * Note: If the frame is actived by show_existing_frame in #GST_AV1_OBU_FRAME_HEADER,
- * the function of gst_av1_parser_reference_frame_loading() should be called before
- * really showing that frame.
- *
  * @since: 1.18.00
  */
 
@@ -803,8 +799,7 @@ gst_av1_parser_identify_one_obu (GstAV1Parser * parser, const guint8 * data,
 
     if (obu_length == 0) {
       /* An empty obu? let continue to the next */
-      ret = GST_AV1_PARSER_DROP;
-      goto error;
+      return GST_AV1_PARSER_DROP;
     }
   }
 
@@ -885,8 +880,7 @@ gst_av1_parser_identify_one_obu (GstAV1Parser * parser, const guint8 * data,
         (parser->state.operating_point_idc >> (obu->header.obu_spatial_id +
             8)) & 1;
     if (!inTemporalLayer || !inSpatialLayer) {
-      ret = GST_AV1_PARSER_DROP;
-      goto error;
+      return GST_AV1_PARSER_DROP;
     }
   }
 
@@ -1239,7 +1233,7 @@ gst_av1_parser_parse_sequence_header_obu (GstAV1Parser * parser,
       seq_header->operating_points[i].idc = AV1_READ_BITS (br, 12);
       seq_header->operating_points[i].seq_level_idx = AV1_READ_BITS (br, 5);
       if (!av1_seq_level_idx_is_valid
-          (seq_header->operating_points[0].seq_level_idx)) {
+          (seq_header->operating_points[i].seq_level_idx)) {
         GST_INFO ("The seq_level_idx is unsupported");
         retval = GST_AV1_PARSER_BITSTREAM_ERROR;
         goto error;
@@ -1453,9 +1447,7 @@ gst_av1_parser_parse_sequence_header_obu (GstAV1Parser * parser,
   gst_av1_parse_reset_state (parser, FALSE);
 
   /* choose_operating_point() set the operating_point */
-  if (parser->state.operating_point < 0 ||
-      parser->state.operating_point >
-      seq_header->operating_points_cnt_minus_1) {
+  if (parser->state.operating_point > seq_header->operating_points_cnt_minus_1) {
     GST_WARNING ("Invalid operating_point %d set by user, just use 0",
         parser->state.operating_point);
     parser->state.operating_point_idc = seq_header->operating_points[0].idc;
@@ -3496,6 +3488,64 @@ gst_av1_set_frame_refs (GstAV1Parser * parser,
       frame_header->ref_frame_idx[i] = ref;
 }
 
+/* 7.21 */
+static void
+gst_av1_parser_reference_frame_loading (GstAV1Parser * parser,
+    GstAV1FrameHeaderOBU * frame_header)
+{
+  GstAV1ReferenceFrameInfo *ref_info = &(parser->state.ref_info);
+  gint idx = frame_header->frame_to_show_map_idx;
+  GstAV1TileInfo *ref_tile_info = &ref_info->entry[idx].ref_tile_info;
+  const gint all_frames = (1 << GST_AV1_NUM_REF_FRAMES) - 1;
+
+  /* copy the relevant frame information as these will be needed by
+   * all subclasses. */
+  frame_header->frame_type = ref_info->entry[idx].ref_frame_type;
+  frame_header->upscaled_width = ref_info->entry[idx].ref_upscaled_width;
+  frame_header->frame_width = ref_info->entry[idx].ref_frame_width;
+  frame_header->frame_height = ref_info->entry[idx].ref_frame_height;
+  frame_header->render_width = ref_info->entry[idx].ref_render_width;
+  frame_header->render_height = ref_info->entry[idx].ref_render_height;
+
+  if (parser->seq_header->film_grain_params_present)
+    frame_header->film_grain_params =
+        ref_info->entry[idx].ref_film_grain_params;
+
+  /* the remaining is only relevant to ensure proper state update and only
+   * keyframe updates the state. */
+  if (frame_header->frame_type != GST_AV1_KEY_FRAME)
+    return;
+
+  frame_header->refresh_frame_flags = all_frames;
+  frame_header->current_frame_id = ref_info->entry[idx].ref_frame_id;
+  frame_header->order_hint = ref_info->entry[idx].ref_order_hint;
+  frame_header->segmentation_params =
+      ref_info->entry[idx].ref_segmentation_params;
+  frame_header->global_motion_params =
+      ref_info->entry[idx].ref_global_motion_params;
+  frame_header->loop_filter_params = ref_info->entry[idx].ref_lf_params;
+  frame_header->tile_info = *ref_tile_info;
+
+  parser->state.current_frame_id = ref_info->entry[idx].ref_frame_id;
+  parser->state.upscaled_width = ref_info->entry[idx].ref_upscaled_width;
+  parser->state.frame_width = ref_info->entry[idx].ref_frame_width;
+  parser->state.frame_height = ref_info->entry[idx].ref_frame_height;
+  parser->state.render_width = ref_info->entry[idx].ref_render_width;
+  parser->state.render_height = ref_info->entry[idx].ref_render_height;
+  parser->state.mi_cols = ref_info->entry[idx].ref_mi_cols;
+  parser->state.mi_rows = ref_info->entry[idx].ref_mi_rows;
+
+  memcpy (parser->state.mi_col_starts, ref_tile_info->mi_col_starts,
+      sizeof (guint32) * (GST_AV1_MAX_TILE_COLS + 1));
+  memcpy (parser->state.mi_row_starts, ref_tile_info->mi_row_starts,
+      sizeof (guint32) * (GST_AV1_MAX_TILE_ROWS + 1));
+  parser->state.tile_cols_log2 = ref_tile_info->tile_cols_log2;
+  parser->state.tile_cols = ref_tile_info->tile_cols;
+  parser->state.tile_rows_log2 = ref_tile_info->tile_rows_log2;
+  parser->state.tile_rows = ref_tile_info->tile_rows;
+  parser->state.tile_size_bytes = ref_tile_info->tile_size_bytes;
+}
+
 /* 5.9.2 */
 static GstAV1ParserResult
 gst_av1_parse_uncompressed_frame_header (GstAV1Parser * parser, GstAV1OBU * obu,
@@ -3581,16 +3631,7 @@ gst_av1_parse_uncompressed_frame_header (GstAV1Parser * parser, GstAV1OBU * obu,
         }
       }
 
-      frame_header->frame_type =
-          ref_info->entry[frame_header->frame_to_show_map_idx].ref_frame_type;
-      if (frame_header->frame_type == GST_AV1_KEY_FRAME) {
-        frame_header->refresh_frame_flags = all_frames;
-      }
-
-      /* just use the frame_to_show's grain_params
-       * if (seq_header->film_grain_params_present)
-       *     load_grain_params () */
-
+      gst_av1_parser_reference_frame_loading (parser, frame_header);
       goto success;
     }
 
@@ -4172,74 +4213,6 @@ success:
 error:
   GST_WARNING ("parse uncompressed frame header error %d", retval);
   return retval;
-}
-
-/* 7.21 */
-/**
- * gst_av1_parser_reference_frame_loading:
- * @parser: the #GstAV1Parser
- * @frame_header: a #GstAV1FrameHeaderOBU to load
- *
- * Load the context of @frame_header to parser's state. This function is
- * used when we want to show already parsed frames before.
- *
- * Returns: The #GstAV1ParserResult.
- *
- * Since: 1.18
- */
-GstAV1ParserResult
-gst_av1_parser_reference_frame_loading (GstAV1Parser * parser,
-    GstAV1FrameHeaderOBU * frame_header)
-{
-  GstAV1ReferenceFrameInfo *ref_info;
-  GstAV1TileInfo *ref_tile_info;
-
-  g_return_val_if_fail (parser != NULL, GST_AV1_PARSER_INVALID_OPERATION);
-  g_return_val_if_fail (frame_header != NULL, GST_AV1_PARSER_INVALID_OPERATION);
-
-  if (!parser->seq_header) {
-    GST_WARNING ("Missing OBU Reference: seq_header");
-    return GST_AV1_PARSER_MISSING_OBU_REFERENCE;
-  }
-
-  ref_info = &(parser->state.ref_info);
-
-  if (frame_header->frame_to_show_map_idx > GST_AV1_NUM_REF_FRAMES - 1)
-    return GST_AV1_PARSER_BITSTREAM_ERROR;
-
-  g_assert (ref_info->entry[frame_header->frame_to_show_map_idx].ref_valid);
-
-  parser->state.current_frame_id =
-      ref_info->entry[frame_header->frame_to_show_map_idx].ref_frame_id;
-  parser->state.upscaled_width =
-      ref_info->entry[frame_header->frame_to_show_map_idx].ref_upscaled_width;
-  parser->state.frame_width =
-      ref_info->entry[frame_header->frame_to_show_map_idx].ref_frame_width;
-  parser->state.frame_height =
-      ref_info->entry[frame_header->frame_to_show_map_idx].ref_frame_height;
-  parser->state.render_width =
-      ref_info->entry[frame_header->frame_to_show_map_idx].ref_render_width;
-  parser->state.render_height =
-      ref_info->entry[frame_header->frame_to_show_map_idx].ref_render_height;
-  parser->state.mi_cols =
-      ref_info->entry[frame_header->frame_to_show_map_idx].ref_mi_cols;
-  parser->state.mi_rows =
-      ref_info->entry[frame_header->frame_to_show_map_idx].ref_mi_rows;
-
-  ref_tile_info =
-      &ref_info->entry[frame_header->frame_to_show_map_idx].ref_tile_info;
-
-  memcpy (parser->state.mi_col_starts, ref_tile_info->mi_col_starts,
-      sizeof (guint32) * (GST_AV1_MAX_TILE_COLS + 1));
-  memcpy (parser->state.mi_row_starts, ref_tile_info->mi_row_starts,
-      sizeof (guint32) * (GST_AV1_MAX_TILE_ROWS + 1));
-  parser->state.tile_cols_log2 = ref_tile_info->tile_cols_log2;
-  parser->state.tile_cols = ref_tile_info->tile_cols;
-  parser->state.tile_rows_log2 = ref_tile_info->tile_rows_log2;
-  parser->state.tile_rows = ref_tile_info->tile_rows;
-  parser->state.tile_size_bytes = ref_tile_info->tile_size_bytes;
-
-  return GST_AV1_PARSER_OK;
 }
 
 /**

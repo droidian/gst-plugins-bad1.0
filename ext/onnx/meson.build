@@ -3,7 +3,7 @@ if get_option('onnx').disabled()
 endif
 
 
-onnxrt_dep = dependency('libonnxruntime',required : get_option('onnx'))
+onnxrt_dep = dependency('libonnxruntime', version : '>= 1.13.1', required : get_option('onnx'))
 
 if onnxrt_dep.found()
 	onnxrt_include_root = onnxrt_dep.get_variable('includedir')
@@ -27,6 +27,5 @@ if onnxrt_dep.found()
     install : true,
     install_dir : plugins_install_dir,
   )
-  pkgconfig.generate(gstonnx, install_dir : plugins_pkgconfig_install_dir)
   plugins += [gstonnx]
  endif

@@ -37,7 +37,7 @@
 
 #include <glib.h>
 
-#include <gst/gst-i18n-plugin.h>
+#include <glib/gi18n-lib.h>
 #include "mpegtsbase.h"
 #include "gstmpegdesc.h"
 
@@ -502,13 +502,7 @@ mpegts_base_steal_program (MpegTSBase * base, gint program_number)
   for (i = 0; i < base->programs->len; i++) {
     MpegTSBaseProgram *program = g_ptr_array_index (base->programs, i);
     if (program->program_number == program_number) {
-#if GLIB_CHECK_VERSION(2, 58, 0)
       return g_ptr_array_steal_index (base->programs, i);
-#else
-      program->recycle = TRUE;
-      g_ptr_array_remove_index (base->programs, i);
-      return program;
-#endif
     }
   }
 
@@ -771,6 +765,7 @@ mpegts_base_update_program (MpegTSBase * base, MpegTSBaseProgram * program,
     MpegTSBaseStream *stream = (MpegTSBaseStream *) tmp->data;
     mpegts_base_program_remove_stream (base, program, stream->pid);
   }
+  g_list_free (toremove);
   return TRUE;
 }
 

@@ -20,7 +20,7 @@
 
 #pragma once
 
-#include <gst/va/gstvadisplay.h>
+#include <gst/va/gstva.h>
 #include <va/va.h>
 
 G_BEGIN_DECLS
@@ -37,6 +37,10 @@ VASurfaceAttrib *     gst_va_get_surface_attribs          (GstVaDisplay * displa
 
 GstCaps *             gst_va_create_raw_caps_from_config  (GstVaDisplay * display,
                                                            VAConfigID config);
+GstCaps *             gst_va_create_coded_caps            (GstVaDisplay * display,
+                                                           VAProfile profile,
+                                                           VAEntrypoint entrypoint,
+                                                           guint32 * rt_formats_ptr);
 
 gboolean              gst_caps_set_format_array           (GstCaps * caps,
 							   GArray * formats);

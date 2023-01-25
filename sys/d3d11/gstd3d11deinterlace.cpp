@@ -80,22 +80,6 @@ using namespace Microsoft::WRL;
  *   D3D11_VIDEO_PROCESSOR_STREAM::ppFutureSurfaces
  */
 
-/* g_queue_clear_full is available since 2.60 */
-#if !GLIB_CHECK_VERSION(2,60,0)
-#define g_queue_clear_full gst_d3d11_deinterlace_g_queue_clear_full
-static void
-gst_d3d11_deinterlace_g_queue_clear_full (GQueue * queue,
-    GDestroyNotify free_func)
-{
-  g_return_if_fail (queue != NULL);
-
-  if (free_func != NULL)
-    g_queue_foreach (queue, (GFunc) free_func, NULL);
-
-  g_queue_clear (queue);
-}
-#endif
-
 typedef enum
 {
   GST_D3D11_DEINTERLACE_METHOD_BLEND =
@@ -110,6 +94,14 @@ typedef enum
   /* TODO: INVERSE_TELECINE */
 } GstD3D11DeinterlaceMethod;
 
+DEFINE_ENUM_FLAG_OPERATORS (GstD3D11DeinterlaceMethod);
+
+#define DEINTERLACE_METHOD_ALL \
+    ((GstD3D11DeinterlaceMethod) (GST_D3D11_DEINTERLACE_METHOD_BLEND | \
+        GST_D3D11_DEINTERLACE_METHOD_BOB | \
+        GST_D3D11_DEINTERLACE_METHOD_ADAPTVIE | \
+        GST_D3D11_DEINTERLACE_METHOD_MOTION_COMPENSATION))
+
 /**
  * GstD3D11DeinterlaceMethod:
  *
@@ -122,9 +114,9 @@ typedef enum
 static GType
 gst_d3d11_deinterlace_method_type (void)
 {
-  static gsize method_type = 0;
+  static GType method_type = 0;
 
-  if (g_once_init_enter (&method_type)) {
+  GST_D3D11_CALL_ONCE_BEGIN {
     static const GFlagsValue method_types[] = {
       {GST_D3D11_DEINTERLACE_METHOD_BLEND,
           "Blend: Blending top/bottom field pictures into one frame. "
@@ -139,14 +131,14 @@ gst_d3d11_deinterlace_method_type (void)
       {GST_D3D11_DEINTERLACE_METHOD_MOTION_COMPENSATION,
           "Motion Compensation: Recreating missing lines by using motion vector. "
             "Framerate will be doubled (e,g, 60i -> 60p)", "mocomp"},
-      {0, NULL, NULL},
+      {0, nullptr, nullptr},
     };
-    GType tmp = g_flags_register_static ("GstD3D11DeinterlaceMethod",
-        method_types);
-    g_once_init_leave (&method_type, tmp);
-  }
 
-  return (GType) method_type;
+    method_type = g_flags_register_static ("GstD3D11DeinterlaceMethod",
+        method_types);
+  } GST_D3D11_CALL_ONCE_END;
+
+  return method_type;
 }
 
 typedef struct
@@ -220,6 +212,13 @@ enum
 /* hardcoded maximum queue size for each past/future frame queue */
 #define MAX_NUM_REFERENCES 2
 
+#define DOC_CAPS \
+    "video/x-raw(memory:D3D11Memory), format = (string) { NV12, P010_10LE}, " \
+    "width = (int) [ 1, 16384 ], height = (int) [ 1, 16384 ]; " \
+    "video/x-raw(memory:D3D11Memory, meta:GstVideoOverlayComposition), " \
+    "format = (string) { NV12, P010_10LE}, " \
+    "width = (int) [ 1, 16384 ], height = (int) [ 1, 16384 ]"
+
 typedef struct _GstD3D11Deinterlace
 {
   GstBaseTransform parent;
@@ -238,7 +237,7 @@ typedef struct _GstD3D11Deinterlace
 
   GstD3D11DeinterlaceMethod method;
 
-  GRecMutex lock;
+  CRITICAL_SECTION lock;
   GQueue past_frame_queue;
   GQueue future_frame_queue;
   GstBuffer *to_process;
@@ -275,10 +274,6 @@ static GstElementClass *parent_class = NULL;
 #define GST_D3D11_DEINTERLACE_GET_CLASS(object) \
     (G_TYPE_INSTANCE_GET_CLASS ((object),G_TYPE_FROM_INSTANCE (object), \
     GstD3D11DeinterlaceClass))
-#define GST_D3D11_DEINTERLACE_LOCK(self) \
-    g_rec_mutex_lock (&GST_D3D11_DEINTERLACE (self)->lock);
-#define GST_D3D11_DEINTERLACE_UNLOCK(self) \
-    g_rec_mutex_unlock (&GST_D3D11_DEINTERLACE (self)->lock);
 
 static gboolean
 gst_d3d11_deinterlace_update_method (GstD3D11Deinterlace * self);
@@ -336,6 +331,8 @@ gst_d3d11_deinterlace_class_init (GstD3D11DeinterlaceClass * klass,
   GstBaseTransformClass *trans_class = GST_BASE_TRANSFORM_CLASS (klass);
   GstD3D11DeinterlaceClassData *cdata = (GstD3D11DeinterlaceClassData *) data;
   gchar *long_name;
+  GstPadTemplate *pad_templ;
+  GstCaps *doc_caps;
 
   parent_class = (GstElementClass *) g_type_class_peek_parent (klass);
 
@@ -346,31 +343,35 @@ gst_d3d11_deinterlace_class_init (GstD3D11DeinterlaceClass * klass,
   g_object_class_install_property (gobject_class, PROP_ADAPTER,
       g_param_spec_uint ("adapter", "Adapter",
           "DXGI Adapter index for creating device",
-          0, G_MAXUINT32, cdata->adapter,
-          (GParamFlags) (G_PARAM_READABLE | G_PARAM_STATIC_STRINGS)));
+          0, G_MAXUINT32, 0,
+          (GParamFlags) (GST_PARAM_DOC_SHOW_DEFAULT |
+              G_PARAM_READABLE | G_PARAM_STATIC_STRINGS)));
   g_object_class_install_property (gobject_class, PROP_DEVICE_ID,
       g_param_spec_uint ("device-id", "Device Id",
           "DXGI Device ID", 0, G_MAXUINT32, 0,
-          (GParamFlags) (G_PARAM_READABLE | G_PARAM_STATIC_STRINGS)));
+          (GParamFlags) (GST_PARAM_DOC_SHOW_DEFAULT |
+              G_PARAM_READABLE | G_PARAM_STATIC_STRINGS)));
   g_object_class_install_property (gobject_class, PROP_VENDOR_ID,
       g_param_spec_uint ("vendor-id", "Vendor Id",
           "DXGI Vendor ID", 0, G_MAXUINT32, 0,
-          (GParamFlags) (G_PARAM_READABLE | G_PARAM_STATIC_STRINGS)));
+          (GParamFlags) (GST_PARAM_DOC_SHOW_DEFAULT |
+              G_PARAM_READABLE | G_PARAM_STATIC_STRINGS)));
   g_object_class_install_property (gobject_class, PROP_METHOD,
       g_param_spec_flags ("method", "Method",
           "Deinterlace Method. Use can set multiple methods as a flagset "
           "and element will select one of method automatically. "
           "If deinterlacing device failed to deinterlace with given mode, "
           "fallback might happen by the device",
-          GST_TYPE_D3D11_DEINTERLACE_METHOD, cdata->device_caps.default_method,
-          (GParamFlags) (G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS |
+          GST_TYPE_D3D11_DEINTERLACE_METHOD, DEINTERLACE_METHOD_ALL,
+          (GParamFlags) (GST_PARAM_DOC_SHOW_DEFAULT |
+              G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS |
               GST_PARAM_MUTABLE_READY)));
   g_object_class_install_property (gobject_class, PROP_SUPPORTED_METHODS,
       g_param_spec_flags ("supported-methods", "Supported Methods",
           "Set of supported deinterlace methods by device",
-          GST_TYPE_D3D11_DEINTERLACE_METHOD,
-          cdata->device_caps.supported_methods,
-          (GParamFlags) (G_PARAM_READABLE | G_PARAM_STATIC_STRINGS)));
+          GST_TYPE_D3D11_DEINTERLACE_METHOD, DEINTERLACE_METHOD_ALL,
+          (GParamFlags) (GST_PARAM_DOC_SHOW_DEFAULT |
+              G_PARAM_READABLE | G_PARAM_STATIC_STRINGS)));
 
   element_class->set_context =
       GST_DEBUG_FUNCPTR (gst_d3d11_deinterlace_set_context);
@@ -383,12 +384,17 @@ gst_d3d11_deinterlace_class_init (GstD3D11DeinterlaceClass * klass,
       "Seungha Yang <seungha@centricular.com>");
   g_free (long_name);
 
-  gst_element_class_add_pad_template (element_class,
-      gst_pad_template_new ("sink", GST_PAD_SINK, GST_PAD_ALWAYS,
-          cdata->sink_caps));
-  gst_element_class_add_pad_template (element_class,
-      gst_pad_template_new ("src", GST_PAD_SRC, GST_PAD_ALWAYS,
-          cdata->src_caps));
+  doc_caps = gst_caps_from_string (DOC_CAPS);
+  pad_templ = gst_pad_template_new ("sink",
+      GST_PAD_SINK, GST_PAD_ALWAYS, cdata->sink_caps);
+  gst_pad_template_set_documentation_caps (pad_templ, doc_caps);
+  gst_element_class_add_pad_template (element_class, pad_templ);
+
+  pad_templ = gst_pad_template_new ("src",
+      GST_PAD_SRC, GST_PAD_ALWAYS, cdata->src_caps);
+  gst_pad_template_set_documentation_caps (pad_templ, doc_caps);
+  gst_element_class_add_pad_template (element_class, pad_templ);
+  gst_caps_unref (doc_caps);
 
   trans_class->passthrough_on_same_caps = TRUE;
 
@@ -436,7 +442,7 @@ gst_d3d11_deinterlace_init (GstD3D11Deinterlace * self)
 
   g_queue_init (&self->past_frame_queue);
   g_queue_init (&self->future_frame_queue);
-  g_rec_mutex_init (&self->lock);
+  InitializeCriticalSection (&self->lock);
 }
 
 static void
@@ -583,7 +589,7 @@ gst_d3d11_deinterlace_finalize (GObject * object)
 {
   GstD3D11Deinterlace *self = GST_D3D11_DEINTERLACE (object);
 
-  g_rec_mutex_clear (&self->lock);
+  DeleteCriticalSection (&self->lock);
 
   G_OBJECT_CLASS (parent_class)->finalize (object);
 }
@@ -646,7 +652,8 @@ gst_d3d11_deinterlace_reset_history (GstD3D11Deinterlace * self)
 static void
 gst_d3d11_deinterlace_reset (GstD3D11Deinterlace * self)
 {
-  GST_D3D11_DEINTERLACE_LOCK (self);
+  GstD3D11CSLockGuard lk (&self->lock);
+
   if (self->fallback_in_pool) {
     gst_buffer_pool_set_active (self->fallback_in_pool, FALSE);
     gst_object_unref (self->fallback_in_pool);
@@ -664,8 +671,6 @@ gst_d3d11_deinterlace_reset (GstD3D11Deinterlace * self)
 
   gst_d3d11_deinterlace_reset_history (self);
   self->default_buffer_duration = GST_CLOCK_TIME_NONE;
-
-  GST_D3D11_DEINTERLACE_UNLOCK (self);
 }
 
 static void
@@ -907,7 +912,7 @@ gst_d3d11_deinterlace_propose_allocation (GstBaseTransform * trans,
   d3d11_params = gst_buffer_pool_config_get_d3d11_allocation_params (config);
   if (!d3d11_params) {
     d3d11_params = gst_d3d11_allocation_params_new (self->device, &info,
-        (GstD3D11AllocationFlags) 0, D3D11_BIND_RENDER_TARGET);
+        GST_D3D11_ALLOCATION_FLAG_DEFAULT, D3D11_BIND_RENDER_TARGET, 0);
   } else {
     d3d11_params->desc[0].BindFlags |= D3D11_BIND_RENDER_TARGET;
   }
@@ -1012,7 +1017,7 @@ gst_d3d11_deinterlace_decide_allocation (GstBaseTransform * trans,
   d3d11_params = gst_buffer_pool_config_get_d3d11_allocation_params (config);
   if (!d3d11_params) {
     d3d11_params = gst_d3d11_allocation_params_new (self->device, &info,
-        (GstD3D11AllocationFlags) 0, D3D11_BIND_RENDER_TARGET);
+        GST_D3D11_ALLOCATION_FLAG_DEFAULT, D3D11_BIND_RENDER_TARGET, 0);
   } else {
     d3d11_params->desc[0].BindFlags |= D3D11_BIND_RENDER_TARGET;
   }
@@ -1068,7 +1073,7 @@ gst_d3d11_deinterlace_prepare_fallback_pool (GstD3D11Deinterlace * self,
 
   /* Empty bind flag is allowed for video processor input */
   d3d11_params = gst_d3d11_allocation_params_new (self->device, in_info,
-      (GstD3D11AllocationFlags) 0, 0);
+      GST_D3D11_ALLOCATION_FLAG_DEFAULT, 0, 0);
   self->fallback_in_pool = gst_d3d11_buffer_pool_new_with_options (self->device,
       in_caps, d3d11_params, 0, 0);
   gst_d3d11_allocation_params_free (d3d11_params);
@@ -1080,7 +1085,7 @@ gst_d3d11_deinterlace_prepare_fallback_pool (GstD3D11Deinterlace * self,
 
   /* For processor output, render target bind flag is required */
   d3d11_params = gst_d3d11_allocation_params_new (self->device, out_info,
-      (GstD3D11AllocationFlags) 0, D3D11_BIND_RENDER_TARGET);
+      GST_D3D11_ALLOCATION_FLAG_DEFAULT, D3D11_BIND_RENDER_TARGET, 0);
   self->fallback_out_pool =
       gst_d3d11_buffer_pool_new_with_options (self->device,
       out_caps, d3d11_params, 0, 0);
@@ -1226,7 +1231,7 @@ gst_d3d11_deinterlace_set_caps (GstBaseTransform * trans,
   if (self->method == GST_D3D11_DEINTERLACE_METHOD_BLEND)
     output_rate = D3D11_VIDEO_PROCESSOR_OUTPUT_RATE_HALF;
 
-  gst_d3d11_device_lock (self->device);
+  GstD3D11DeviceLockGuard lk (self->device);
   self->video_context->VideoProcessorSetStreamSourceRect (self->video_proc,
       0, TRUE, &rect);
   self->video_context->VideoProcessorSetStreamDestRect (self->video_proc,
@@ -1237,7 +1242,6 @@ gst_d3d11_deinterlace_set_caps (GstBaseTransform * trans,
       VideoProcessorSetStreamAutoProcessingMode (self->video_proc, 0, FALSE);
   self->video_context->VideoProcessorSetStreamOutputRate (self->video_proc, 0,
       output_rate, TRUE, NULL);
-  gst_d3d11_device_unlock (self->device);
 
   return TRUE;
 }
@@ -1322,7 +1326,7 @@ gst_d3d11_deinterlace_ensure_input_buffer (GstD3D11Deinterlace * self,
     return NULL;
   }
 
-  /* copy metadata, default implemenation of baseclass will copy everything
+  /* copy metadata, default implementation of baseclass will copy everything
    * what we need */
   GST_BASE_TRANSFORM_CLASS (parent_class)->copy_metadata
       (GST_BASE_TRANSFORM_CAST (self), input, new_buf);
@@ -1521,7 +1525,7 @@ gst_d3d11_deinterlace_ensure_output_buffer (GstD3D11Deinterlace * self,
     return NULL;
   }
 
-  /* copy metadata, default implemenation of baseclass will copy everything
+  /* copy metadata, default implementation of baseclass will copy everything
    * what we need */
   GST_BASE_TRANSFORM_CLASS (parent_class)->copy_metadata
       (GST_BASE_TRANSFORM_CAST (self), output, new_buf);
@@ -1771,13 +1775,12 @@ gst_d3d11_deinterlace_transform (GstBaseTransform * trans, GstBuffer * inbuf,
     proc_stream.ppPastSurfaces = past_surfaces;
   }
 
-  gst_d3d11_device_lock (self->device);
+  GstD3D11DeviceLockGuard lk (self->device);
   self->video_context->VideoProcessorSetStreamFrameFormat (self->video_proc, 0,
       frame_foramt);
 
   hr = self->video_context->VideoProcessorBlt (self->video_proc, pov, 0,
       1, &proc_stream);
-  gst_d3d11_device_unlock (self->device);
 
   if (!gst_d3d11_result (hr, self->device)) {
     GST_ERROR_OBJECT (self, "Failed to perform deinterlacing");
@@ -1827,9 +1830,9 @@ gst_d3d11_deinterlace_sink_event (GstBaseTransform * trans, GstEvent * event)
       gst_d3d11_deinterlace_drain (self);
       break;
     case GST_EVENT_FLUSH_STOP:
-      GST_D3D11_DEINTERLACE_LOCK (self);
+      EnterCriticalSection (&self->lock);
       gst_d3d11_deinterlace_reset_history (self);
-      GST_D3D11_DEINTERLACE_UNLOCK (self);
+      LeaveCriticalSection (&self->lock);
       break;
     default:
       break;
@@ -1908,7 +1911,8 @@ gst_d3d11_deinterlace_drain (GstD3D11Deinterlace * self)
   GstFlowReturn ret = GST_FLOW_OK;
   GstBuffer *outbuf = NULL;
 
-  GST_D3D11_DEINTERLACE_LOCK (self);
+  EnterCriticalSection (&self->lock);
+
   if (gst_base_transform_is_passthrough (trans)) {
     /* If we were passthrough, nothing to do */
     goto done;
@@ -1928,16 +1932,16 @@ gst_d3d11_deinterlace_drain (GstD3D11Deinterlace * self)
       ret = gst_d3d11_deinterlace_generate_output (trans, &outbuf);
       if (outbuf != NULL) {
         /* Release lock during push buffer */
-        GST_D3D11_DEINTERLACE_UNLOCK (self);
+        LeaveCriticalSection (&self->lock);
         ret = gst_pad_push (trans->srcpad, outbuf);
-        GST_D3D11_DEINTERLACE_LOCK (self);
+        EnterCriticalSection (&self->lock);
       }
     } while (ret == GST_FLOW_OK && outbuf != NULL);
   }
 
 done:
   gst_d3d11_deinterlace_reset_history (self);
-  GST_D3D11_DEINTERLACE_UNLOCK (self);
+  LeaveCriticalSection (&self->lock);
 
   return ret;
 }
@@ -2004,14 +2008,14 @@ static GstElementClass *bin_parent_class = NULL;
 #define GST_D3D11_DEINTERLACE_BIN_CAPS_MAKE(format) \
     "video/x-raw, " \
     "format = (string) " format ", "  \
-    "width = (int) [1, 8192], " \
-    "height = (int) [1, 8192] "
+    "width = (int) [1, 16384], " \
+    "height = (int) [1, 16384] "
 
 #define GST_D3D11_DEINTERLACE_BIN_CAPS_MAKE_WITH_FEATURES(features,format) \
     "video/x-raw(" features "), " \
     "format = (string) " format ", "  \
-    "width = (int) [1, 8192], " \
-    "height = (int) [1, 8192] "
+    "width = (int) [1, 16384], " \
+    "height = (int) [1, 16384] "
 
 static GstStaticPadTemplate bin_sink_template_caps =
     GST_STATIC_PAD_TEMPLATE ("sink",
@@ -2075,31 +2079,35 @@ gst_d3d11_deinterlace_bin_class_init (GstD3D11DeinterlaceBinClass * klass,
   g_object_class_install_property (gobject_class, PROP_BIN_ADAPTER,
       g_param_spec_uint ("adapter", "Adapter",
           "DXGI Adapter index for creating device",
-          0, G_MAXUINT32, cdata->adapter,
-          (GParamFlags) (G_PARAM_READABLE | G_PARAM_STATIC_STRINGS)));
+          0, G_MAXUINT32, 0,
+          (GParamFlags) (GST_PARAM_DOC_SHOW_DEFAULT |
+              G_PARAM_READABLE | G_PARAM_STATIC_STRINGS)));
   g_object_class_install_property (gobject_class, PROP_BIN_DEVICE_ID,
       g_param_spec_uint ("device-id", "Device Id",
           "DXGI Device ID", 0, G_MAXUINT32, 0,
-          (GParamFlags) (G_PARAM_READABLE | G_PARAM_STATIC_STRINGS)));
+          (GParamFlags) (GST_PARAM_DOC_SHOW_DEFAULT |
+              G_PARAM_READABLE | G_PARAM_STATIC_STRINGS)));
   g_object_class_install_property (gobject_class, PROP_BIN_VENDOR_ID,
       g_param_spec_uint ("vendor-id", "Vendor Id",
           "DXGI Vendor ID", 0, G_MAXUINT32, 0,
-          (GParamFlags) (G_PARAM_READABLE | G_PARAM_STATIC_STRINGS)));
+          (GParamFlags) (GST_PARAM_DOC_SHOW_DEFAULT |
+              G_PARAM_READABLE | G_PARAM_STATIC_STRINGS)));
   g_object_class_install_property (gobject_class, PROP_BIN_METHOD,
       g_param_spec_flags ("method", "Method",
           "Deinterlace Method. Use can set multiple methods as a flagset "
           "and element will select one of method automatically. "
           "If deinterlacing device failed to deinterlace with given mode, "
           "fallback might happen by the device",
-          GST_TYPE_D3D11_DEINTERLACE_METHOD, cdata->device_caps.default_method,
-          (GParamFlags) (G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS |
+          GST_TYPE_D3D11_DEINTERLACE_METHOD, DEINTERLACE_METHOD_ALL,
+          (GParamFlags) (GST_PARAM_DOC_SHOW_DEFAULT |
+              G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS |
               GST_PARAM_MUTABLE_READY)));
   g_object_class_install_property (gobject_class, PROP_BIN_SUPPORTED_METHODS,
       g_param_spec_flags ("supported-methods", "Supported Methods",
           "Set of supported deinterlace methods by device",
-          GST_TYPE_D3D11_DEINTERLACE_METHOD,
-          cdata->device_caps.supported_methods,
-          (GParamFlags) (G_PARAM_READABLE | G_PARAM_STATIC_STRINGS)));
+          GST_TYPE_D3D11_DEINTERLACE_METHOD, DEINTERLACE_METHOD_ALL,
+          (GParamFlags) (GST_PARAM_DOC_SHOW_DEFAULT |
+              G_PARAM_READABLE | G_PARAM_STATIC_STRINGS)));
 
   long_name = g_strdup_printf ("Direct3D11 %s Deinterlacer Bin",
       cdata->description);
@@ -2393,8 +2401,8 @@ gst_d3d11_deinterlace_register (GstPlugin * plugin, GstD3D11Device * device,
   /* FIXME: Check supported resolution, it would be different from
    * supported max texture dimension */
   gst_caps_set_simple (caps,
-      "width", GST_TYPE_INT_RANGE, 1, 8192,
-      "height", GST_TYPE_INT_RANGE, 1, 8192, NULL);
+      "width", GST_TYPE_INT_RANGE, 1, 16384,
+      "height", GST_TYPE_INT_RANGE, 1, 16384, NULL);
   gst_caps_set_value (caps, "format", supported_formats);
   g_value_unset (supported_formats);
   g_free (supported_formats);

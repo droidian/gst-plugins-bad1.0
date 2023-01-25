@@ -21,12 +21,11 @@
 #include "config.h"
 #endif
 
+#include <gst/cuda/gstcudaloader.h>
+#include <gst/cuda/gstcudanvrtc.h>
+
 #include "gstcudafilter.h"
-#include "gstcudaloader.h"
-#include "gstnvrtcloader.h"
-#include "gstcudanvrtc.h"
-#include "gstcudaconvert.h"
-#include "gstcudascale.h"
+#include "gstcudaconvertscale.h"
 
 /* *INDENT-OFF* */
 const gchar *nvrtc_test_source =
@@ -39,7 +38,7 @@ gst_cuda_filter_plugin_init (GstPlugin * plugin)
 {
   gchar *test_ptx = NULL;
 
-  if (!gst_nvrtc_load_library ())
+  if (!gst_cuda_nvrtc_load_library ())
     return;
 
   test_ptx = gst_cuda_nvrtc_compile (nvrtc_test_source);
@@ -53,4 +52,6 @@ gst_cuda_filter_plugin_init (GstPlugin * plugin)
       GST_TYPE_CUDA_CONVERT);
   gst_element_register (plugin, "cudascale", GST_RANK_NONE,
       GST_TYPE_CUDA_SCALE);
+  gst_element_register (plugin, "cudaconvertscale", GST_RANK_NONE,
+      GST_TYPE_CUDA_CONVERT_SCALE);
 }

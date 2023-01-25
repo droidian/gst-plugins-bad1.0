@@ -95,6 +95,8 @@ typedef struct _GstD3D11H264DecInner
   std::vector<DXVA_Slice_H264_Short> slice_list;
   std::vector<guint8> bitstream_buffer;
 
+  gint crop_x = 0;
+  gint crop_y = 0;
   gint width = 0;
   gint height = 0;
   gint coded_width = 0;
@@ -146,8 +148,9 @@ static GstFlowReturn gst_d3d11_h264_dec_new_sequence (GstH264Decoder * decoder,
     const GstH264SPS * sps, gint max_dpb_size);
 static GstFlowReturn gst_d3d11_h264_dec_new_picture (GstH264Decoder * decoder,
     GstVideoCodecFrame * frame, GstH264Picture * picture);
-static GstFlowReturn gst_d3d11_h264_dec_new_field_picture (GstH264Decoder *
-    decoder, const GstH264Picture * first_field, GstH264Picture * second_field);
+static GstFlowReturn
+gst_d3d11_h264_dec_new_field_picture (GstH264Decoder * decoder,
+    GstH264Picture * first_field, GstH264Picture * second_field);
 static GstFlowReturn gst_d3d11_h264_dec_start_picture (GstH264Decoder * decoder,
     GstH264Picture * picture, GstH264Slice * slice, GstH264Dpb * dpb);
 static GstFlowReturn gst_d3d11_h264_dec_decode_slice (GstH264Decoder * decoder,
@@ -388,9 +391,12 @@ gst_d3d11_h264_dec_new_sequence (GstH264Decoder * decoder,
   }
 
   if (inner->width != crop_width || inner->height != crop_height ||
-      inner->coded_width != sps->width || inner->coded_height != sps->height) {
+      inner->coded_width != sps->width || inner->coded_height != sps->height ||
+      inner->crop_x != sps->crop_rect_x || inner->crop_y != sps->crop_rect_y) {
     GST_INFO_OBJECT (self, "resolution changed %dx%d (%dx%d)",
         crop_width, crop_height, sps->width, sps->height);
+    inner->crop_x = sps->crop_rect_x;
+    inner->crop_y = sps->crop_rect_y;
     inner->width = crop_width;
     inner->height = crop_height;
     inner->coded_width = sps->width;
@@ -453,16 +459,14 @@ gst_d3d11_h264_dec_new_sequence (GstH264Decoder * decoder,
      */
     inner->max_dpb_size = max_dpb_size;
     if (!gst_d3d11_decoder_configure (inner->d3d11_decoder,
-            decoder->input_state, &info,
-            inner->coded_width, inner->coded_height,
-            /* Additional 4 views margin for zero-copy rendering */
-            max_dpb_size + 4)) {
+            decoder->input_state, &info, inner->crop_x, inner->crop_y,
+            inner->coded_width, inner->coded_height, max_dpb_size)) {
       GST_ERROR_OBJECT (self, "Failed to create decoder");
       return GST_FLOW_NOT_NEGOTIATED;
     }
 
     if (!gst_video_decoder_negotiate (GST_VIDEO_DECODER (self))) {
-      GST_ERROR_OBJECT (self, "Failed to negotiate with downstream");
+      GST_WARNING_OBJECT (self, "Failed to negotiate with downstream");
       return GST_FLOW_NOT_NEGOTIATED;
     }
   }
@@ -497,13 +501,12 @@ gst_d3d11_h264_dec_new_picture (GstH264Decoder * decoder,
 
 static GstFlowReturn
 gst_d3d11_h264_dec_new_field_picture (GstH264Decoder * decoder,
-    const GstH264Picture * first_field, GstH264Picture * second_field)
+    GstH264Picture * first_field, GstH264Picture * second_field)
 {
   GstD3D11H264Dec *self = GST_D3D11_H264_DEC (decoder);
   GstBuffer *view_buffer;
 
-  view_buffer = (GstBuffer *) gst_h264_picture_get_user_data ((GstH264Picture *)
-      first_field);
+  view_buffer = (GstBuffer *) gst_h264_picture_get_user_data (first_field);
 
   if (!view_buffer) {
     GST_WARNING_OBJECT (self, "First picture does not have output view buffer");
@@ -858,10 +861,8 @@ gst_d3d11_h264_dec_end_picture (GstH264Decoder * decoder,
   input_args.inverse_quantization_matrix = &inner->iq_matrix;
   input_args.inverse_quantization_matrix_size = sizeof (DXVA_Qmatrix_H264);
 
-  if (!gst_d3d11_decoder_decode_frame (inner->d3d11_decoder, view, &input_args))
-    return GST_FLOW_ERROR;
-
-  return GST_FLOW_OK;
+  return gst_d3d11_decoder_decode_frame (inner->d3d11_decoder,
+      view, &input_args);
 }
 
 static GstFlowReturn
@@ -884,7 +885,8 @@ gst_d3d11_h264_dec_output_picture (GstH264Decoder * decoder,
   }
 
   if (!gst_d3d11_decoder_process_output (inner->d3d11_decoder, vdec,
-          inner->width, inner->height, view_buffer, &frame->output_buffer)) {
+          picture->discont_state, inner->width, inner->height, view_buffer,
+          &frame->output_buffer)) {
     GST_ERROR_OBJECT (self, "Failed to copy buffer");
     goto error;
   }
@@ -991,16 +993,10 @@ gst_d3d11_h264_dec_register (GstPlugin * plugin, GstD3D11Device * device,
 
   /* To cover both landscape and portrait, select max value */
   resolution = MAX (max_width, max_height);
-  gst_caps_set_simple (sink_caps,
-      "width", GST_TYPE_INT_RANGE, 1, resolution,
-      "height", GST_TYPE_INT_RANGE, 1, resolution, NULL);
-  gst_caps_set_simple (src_caps,
-      "width", GST_TYPE_INT_RANGE, 1, resolution,
-      "height", GST_TYPE_INT_RANGE, 1, resolution, NULL);
 
   type_info.class_data =
       gst_d3d11_decoder_class_data_new (device, GST_DXVA_CODEC_H264,
-      sink_caps, src_caps);
+      sink_caps, src_caps, resolution);
 
   type_name = g_strdup ("GstD3D11H264Dec");
   feature_name = g_strdup ("d3d11h264dec");

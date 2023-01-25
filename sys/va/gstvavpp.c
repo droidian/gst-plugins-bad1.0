@@ -56,28 +56,20 @@
  *
  */
 
-/* ToDo:
- *
- * + HDR tone mapping
- */
-
 #ifdef HAVE_CONFIG_H
 #include "config.h"
 #endif
 
 #include "gstvavpp.h"
 
+#include <gst/va/gstva.h>
 #include <gst/video/video.h>
-
 #include <va/va_drmcommon.h>
 
-#include "gstvaallocator.h"
 #include "gstvabasetransform.h"
 #include "gstvacaps.h"
 #include "gstvadisplay_priv.h"
 #include "gstvafilter.h"
-#include "gstvapool.h"
-#include "gstvautils.h"
 
 GST_DEBUG_CATEGORY_STATIC (gst_va_vpp_debug);
 #define GST_CAT_DEFAULT gst_va_vpp_debug
@@ -121,6 +113,11 @@ struct _GstVaVpp
   gboolean add_borders;
   gint borders_h;
   gint borders_w;
+  guint32 scale_method;
+
+  gboolean hdr_mapping;
+  gboolean has_hdr_meta;
+  VAHdrMetaDataHDR10 hdr_meta;
 
   GList *channels;
 };
@@ -132,6 +129,18 @@ struct CData
   gchar *render_device_path;
   gchar *description;
 };
+
+enum
+{
+  PROP_DISABLE_PASSTHROUGH = GST_VA_FILTER_PROP_LAST + 1,
+  PROP_ADD_BORDERS,
+  PROP_SCALE_METHOD,
+  N_PROPERTIES
+};
+
+static GParamSpec *properties[N_PROPERTIES - GST_VA_FILTER_PROP_LAST];
+
+#define PROPERTIES(idx) properties[idx - GST_VA_FILTER_PROP_LAST]
 
 /* convertions that disable passthrough */
 enum
@@ -234,6 +243,9 @@ _update_properties_unlocked (GstVaVpp * self)
   } else {
     self->op_flags &= ~VPP_CONVERT_DIRECTION;
   }
+
+  if (!gst_va_filter_set_scale_method (btrans->filter, self->scale_method))
+    GST_WARNING_OBJECT (self, "could not set the filter scale method.");
 }
 
 static void
@@ -294,7 +306,11 @@ gst_va_vpp_set_property (GObject * object, guint prop_id,
       self->auto_contrast = g_value_get_boolean (value);
       g_atomic_int_set (&self->rebuild_filters, TRUE);
       break;
-    case GST_VA_FILTER_PROP_DISABLE_PASSTHROUGH:{
+    case GST_VA_FILTER_PROP_HDR:
+      self->hdr_mapping = g_value_get_boolean (value);
+      g_atomic_int_set (&self->rebuild_filters, TRUE);
+      break;
+    case PROP_DISABLE_PASSTHROUGH:{
       gboolean disable_passthrough = g_value_get_boolean (value);
       if (disable_passthrough)
         self->op_flags |= VPP_CONVERT_DUMMY;
@@ -302,8 +318,11 @@ gst_va_vpp_set_property (GObject * object, guint prop_id,
         self->op_flags &= ~VPP_CONVERT_DUMMY;
       break;
     }
-    case GST_VA_FILTER_PROP_ADD_BORDERS:
+    case PROP_ADD_BORDERS:
       self->add_borders = g_value_get_boolean (value);
+      break;
+    case PROP_SCALE_METHOD:
+      self->scale_method = g_value_get_enum (value);
       break;
     default:
       G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
@@ -360,11 +379,17 @@ gst_va_vpp_get_property (GObject * object, guint prop_id, GValue * value,
     case GST_VA_FILTER_PROP_AUTO_CONTRAST:
       g_value_set_boolean (value, self->auto_contrast);
       break;
-    case GST_VA_FILTER_PROP_DISABLE_PASSTHROUGH:
+    case GST_VA_FILTER_PROP_HDR:
+      g_value_set_boolean (value, self->hdr_mapping);
+      break;
+    case PROP_DISABLE_PASSTHROUGH:
       g_value_set_boolean (value, (self->op_flags & VPP_CONVERT_DUMMY));
       break;
-    case GST_VA_FILTER_PROP_ADD_BORDERS:
+    case PROP_ADD_BORDERS:
       g_value_set_boolean (value, self->add_borders);
+      break;
+    case PROP_SCALE_METHOD:
+      g_value_set_enum (value, self->scale_method);
       break;
     default:
       G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
@@ -392,6 +417,47 @@ gst_va_vpp_update_properties (GstVaBaseTransform * btrans)
 
   gst_va_vpp_rebuild_filters (self);
   _update_properties_unlocked (self);
+}
+
+static void
+_set_hdr_metadata (GstVaVpp * self, GstCaps * caps)
+{
+  GstVideoMasteringDisplayInfo mdinfo;
+  GstVideoContentLightLevel llevel;
+
+  self->has_hdr_meta = FALSE;
+
+  if (gst_video_mastering_display_info_from_caps (&mdinfo, caps)) {
+    self->hdr_meta.display_primaries_x[0] = mdinfo.display_primaries[1].x;
+    self->hdr_meta.display_primaries_x[1] = mdinfo.display_primaries[2].x;
+    self->hdr_meta.display_primaries_x[2] = mdinfo.display_primaries[0].x;
+
+    self->hdr_meta.display_primaries_y[0] = mdinfo.display_primaries[1].y;
+    self->hdr_meta.display_primaries_y[1] = mdinfo.display_primaries[2].y;
+    self->hdr_meta.display_primaries_y[2] = mdinfo.display_primaries[0].y;
+
+    self->hdr_meta.white_point_x = mdinfo.white_point.x;
+    self->hdr_meta.white_point_y = mdinfo.white_point.y;
+
+    self->hdr_meta.max_display_mastering_luminance =
+        mdinfo.max_display_mastering_luminance;
+    self->hdr_meta.min_display_mastering_luminance =
+        mdinfo.min_display_mastering_luminance;
+
+    self->has_hdr_meta = TRUE;
+  }
+
+
+  if (gst_video_content_light_level_from_caps (&llevel, caps)) {
+    self->hdr_meta.max_content_light_level = llevel.max_content_light_level;
+    self->hdr_meta.max_pic_average_light_level =
+        llevel.max_frame_average_light_level;
+
+    self->has_hdr_meta = TRUE;
+  };
+
+  /* rebuild filters only if hdr mapping is enabled */
+  g_atomic_int_set (&self->rebuild_filters, self->hdr_mapping);
 }
 
 static gboolean
@@ -461,8 +527,14 @@ gst_va_vpp_set_info (GstVaBaseTransform * btrans, GstCaps * incaps,
     }
   }
 
-  if (!gst_video_info_is_equal (in_info, out_info)) {
-    if (GST_VIDEO_INFO_FORMAT (in_info) != GST_VIDEO_INFO_FORMAT (out_info))
+  if (gst_video_info_is_equal (in_info, out_info)) {
+    self->op_flags &= ~VPP_CONVERT_FORMAT & ~VPP_CONVERT_SIZE;
+  } else {
+    if ((GST_VIDEO_INFO_FORMAT (in_info) != GST_VIDEO_INFO_FORMAT (out_info))
+        || !gst_video_colorimetry_is_equivalent (&GST_VIDEO_INFO_COLORIMETRY
+            (in_info), GST_VIDEO_INFO_COMP_DEPTH (in_info, 0),
+            &GST_VIDEO_INFO_COLORIMETRY (out_info),
+            GST_VIDEO_INFO_COMP_DEPTH (out_info, 0)))
       self->op_flags |= VPP_CONVERT_FORMAT;
     else
       self->op_flags &= ~VPP_CONVERT_FORMAT;
@@ -473,8 +545,6 @@ gst_va_vpp_set_info (GstVaBaseTransform * btrans, GstCaps * incaps,
       self->op_flags |= VPP_CONVERT_SIZE;
     else
       self->op_flags &= ~VPP_CONVERT_SIZE;
-  } else {
-    self->op_flags &= ~VPP_CONVERT_FORMAT & ~VPP_CONVERT_SIZE;
   }
 
   infeat = gst_caps_get_features (incaps, 0);
@@ -485,6 +555,7 @@ gst_va_vpp_set_info (GstVaBaseTransform * btrans, GstCaps * incaps,
     self->op_flags &= ~VPP_CONVERT_FEATURE;
 
   if (gst_va_filter_set_video_info (btrans->filter, in_info, out_info)) {
+    _set_hdr_metadata (self, incaps);
     gst_va_vpp_update_passthrough (self, FALSE);
     return TRUE;
   }
@@ -612,13 +683,51 @@ _add_filter_cb_buffer (GstVaVpp * self,
   return FALSE;
 }
 
+static inline gboolean
+_add_filter_hdr_buffer (GstVaVpp * self,
+    const VAProcFilterCapHighDynamicRange * caps)
+{
+  GstVaBaseTransform *btrans = GST_VA_BASE_TRANSFORM (self);
+  /* *INDENT-OFF* */
+  VAProcFilterParameterBufferHDRToneMapping params = {
+    .type = VAProcFilterHighDynamicRangeToneMapping,
+    .data = {
+      .metadata_type = VAProcHighDynamicRangeMetadataHDR10,
+      .metadata = &self->hdr_meta,
+      .metadata_size = sizeof (self->hdr_meta),
+    },
+  };
+  /* *INDENT-ON* */
+
+  /* if not has hdr meta, it may try later again */
+  if (!(self->has_hdr_meta && self->hdr_mapping))
+    return FALSE;
+
+  if (!(caps && caps->metadata_type == VAProcHighDynamicRangeMetadataHDR10
+          && (caps->caps_flag & VA_TONE_MAPPING_HDR_TO_SDR)))
+    goto bail;
+
+  if (self->op_flags & VPP_CONVERT_FORMAT) {
+    GST_WARNING_OBJECT (self, "Cannot apply HDR with color conversion");
+    goto bail;
+  }
+
+  return gst_va_filter_add_filter_buffer (btrans->filter, &params,
+      sizeof (params), 1);
+
+bail:
+  self->hdr_mapping = FALSE;
+  g_object_notify (G_OBJECT (self), "hdr-tone-mapping");
+  return FALSE;
+}
+
 static void
 _build_filters (GstVaVpp * self)
 {
   GstVaBaseTransform *btrans = GST_VA_BASE_TRANSFORM (self);
   static const VAProcFilterType filter_types[] = { VAProcFilterNoiseReduction,
     VAProcFilterSharpening, VAProcFilterSkinToneEnhancement,
-    VAProcFilterColorBalance,
+    VAProcFilterColorBalance, VAProcFilterHighDynamicRangeToneMapping,
   };
   guint i, num_caps;
   gboolean apply = FALSE;
@@ -642,6 +751,8 @@ _build_filters (GstVaVpp * self)
       case VAProcFilterColorBalance:
         apply |= _add_filter_cb_buffer (self, caps, num_caps);
         break;
+      case VAProcFilterHighDynamicRangeToneMapping:
+        apply |= _add_filter_hdr_buffer (self, caps);
       default:
         break;
     }
@@ -734,6 +845,7 @@ gst_va_vpp_transform (GstBaseTransform * trans, GstBuffer * inbuf,
 
   if (!gst_va_filter_process (btrans->filter, &src, &dst)) {
     gst_buffer_set_flags (outbuf, GST_BUFFER_FLAG_CORRUPTED);
+    res = GST_BASE_TRANSFORM_FLOW_DROPPED;
   }
 
   gst_buffer_unref (buf);
@@ -1715,6 +1827,30 @@ copy_misc_fields_from_input (GstCaps * in_caps, GstCaps * out_caps)
   }
 }
 
+static void
+update_hdr_fields (GstVaVpp * self, GstCaps * result)
+{
+  GstStructure *s = gst_caps_get_structure (result, 0);
+  GstVideoInfo out_info;
+  gboolean have_colorimetry;
+
+  gst_structure_remove_fields (s, "mastering-display-info",
+      "content-light-level", "hdr-format", NULL);
+
+  have_colorimetry = gst_structure_has_field (s, "colorimetry");
+  if (!have_colorimetry) {
+    if (gst_video_info_from_caps (&out_info, result)) {
+      gchar *colorimetry_str =
+          gst_video_colorimetry_to_string (&out_info.colorimetry);
+      gst_caps_set_simple (result, "colorimetry", G_TYPE_STRING,
+          colorimetry_str, NULL);
+      g_free (colorimetry_str);
+    } else {
+      GST_WARNING_OBJECT (self, "Failed to convert src pad caps to video info");
+    }
+  }
+}
+
 static GstCaps *
 gst_va_vpp_fixate_caps (GstBaseTransform * trans, GstPadDirection direction,
     GstCaps * caps, GstCaps * othercaps)
@@ -1742,12 +1878,14 @@ gst_va_vpp_fixate_caps (GstBaseTransform * trans, GstPadDirection direction,
   result = gst_caps_fixate (result);
 
   if (direction == GST_PAD_SINK) {
-    if (gst_caps_is_subset (caps, result)) {
+    if (self->hdr_mapping)
+      update_hdr_fields (self, result);
+
+    /* Try and preserve input colorimetry / chroma information */
+    transfer_colorimetry_from_input (self, caps, result);
+
+    if (gst_caps_is_subset (caps, result))
       gst_caps_replace (&result, caps);
-    } else {
-      /* Try and preserve input colorimetry / chroma information */
-      transfer_colorimetry_from_input (self, caps, result);
-    }
   }
 
   GST_DEBUG_OBJECT (self, "fixated othercaps to %" GST_PTR_FORMAT, result);
@@ -1759,10 +1897,10 @@ static void
 _get_scale_factor (GstVaVpp * self, gdouble * w_factor, gdouble * h_factor)
 {
   GstVaBaseTransform *btrans = GST_VA_BASE_TRANSFORM (self);
-  gdouble w = GST_VIDEO_INFO_WIDTH (&btrans->in_info);
-  gdouble h = GST_VIDEO_INFO_HEIGHT (&btrans->in_info);
+  gdouble w = GST_VIDEO_INFO_WIDTH (&btrans->out_info);
+  gdouble h = GST_VIDEO_INFO_HEIGHT (&btrans->out_info);
 
-  switch (self->direction) {
+  switch (gst_va_filter_get_orientation (btrans->filter)) {
     case GST_VIDEO_ORIENTATION_90R:
     case GST_VIDEO_ORIENTATION_90L:
     case GST_VIDEO_ORIENTATION_UR_LL:
@@ -1776,10 +1914,10 @@ _get_scale_factor (GstVaVpp * self, gdouble * w_factor, gdouble * h_factor)
       break;
   }
 
-  *w_factor = GST_VIDEO_INFO_WIDTH (&btrans->out_info);
+  *w_factor = GST_VIDEO_INFO_WIDTH (&btrans->in_info);
   *w_factor /= w;
 
-  *h_factor = GST_VIDEO_INFO_HEIGHT (&btrans->out_info);
+  *h_factor = GST_VIDEO_INFO_HEIGHT (&btrans->in_info);
   *h_factor /= h;
 }
 
@@ -1788,7 +1926,6 @@ gst_va_vpp_src_event (GstBaseTransform * trans, GstEvent * event)
 {
   GstVaVpp *self = GST_VA_VPP (trans);
   GstVaBaseTransform *btrans = GST_VA_BASE_TRANSFORM (trans);
-  GstStructure *structure;
   const GstVideoInfo *in_info = &btrans->in_info, *out_info = &btrans->out_info;
   gdouble new_x = 0, new_y = 0, x = 0, y = 0, w_factor = 1, h_factor = 1;
   gboolean ret;
@@ -1802,44 +1939,41 @@ gst_va_vpp_src_event (GstBaseTransform * trans, GstEvent * event)
           || gst_va_filter_get_orientation (btrans->filter) !=
           GST_VIDEO_ORIENTATION_IDENTITY) {
 
-        event =
-            GST_EVENT (gst_mini_object_make_writable (GST_MINI_OBJECT (event)));
-
-        structure = (GstStructure *) gst_event_get_structure (event);
-        if (!gst_structure_get_double (structure, "pointer_x", &x)
-            || !gst_structure_get_double (structure, "pointer_y", &y))
+        if (!gst_navigation_event_get_coordinates (event, &x, &y))
           break;
 
+        event = gst_event_make_writable (event);
+
         /* video-direction compensation */
-        switch (self->direction) {
+        switch (gst_va_filter_get_orientation (btrans->filter)) {
           case GST_VIDEO_ORIENTATION_90R:
             new_x = y;
-            new_y = GST_VIDEO_INFO_WIDTH (in_info) - 1 - x;
+            new_y = GST_VIDEO_INFO_WIDTH (out_info) - 1 - x;
             break;
           case GST_VIDEO_ORIENTATION_90L:
-            new_x = GST_VIDEO_INFO_HEIGHT (in_info) - 1 - y;
+            new_x = GST_VIDEO_INFO_HEIGHT (out_info) - 1 - y;
             new_y = x;
-            break;
-          case GST_VIDEO_ORIENTATION_UR_LL:
-            new_x = GST_VIDEO_INFO_HEIGHT (in_info) - 1 - y;
-            new_y = GST_VIDEO_INFO_WIDTH (in_info) - 1 - x;
             break;
           case GST_VIDEO_ORIENTATION_UL_LR:
             new_x = y;
             new_y = x;
             break;
+          case GST_VIDEO_ORIENTATION_UR_LL:
+            new_x = GST_VIDEO_INFO_HEIGHT (out_info) - 1 - y;
+            new_y = GST_VIDEO_INFO_WIDTH (out_info) - 1 - x;
+            break;
           case GST_VIDEO_ORIENTATION_180:
             /* FIXME: is this correct? */
-            new_x = GST_VIDEO_INFO_WIDTH (in_info) - 1 - x;
-            new_y = GST_VIDEO_INFO_HEIGHT (in_info) - 1 - y;
+            new_x = GST_VIDEO_INFO_WIDTH (out_info) - 1 - x;
+            new_y = GST_VIDEO_INFO_HEIGHT (out_info) - 1 - y;
             break;
           case GST_VIDEO_ORIENTATION_HORIZ:
-            new_x = GST_VIDEO_INFO_WIDTH (in_info) - 1 - x;
+            new_x = GST_VIDEO_INFO_WIDTH (out_info) - 1 - x;
             new_y = y;
             break;
           case GST_VIDEO_ORIENTATION_VERT:
             new_x = x;
-            new_y = GST_VIDEO_INFO_HEIGHT (in_info) - 1 - y;
+            new_y = GST_VIDEO_INFO_HEIGHT (out_info) - 1 - y;
             break;
           default:
             new_x = x;
@@ -1855,8 +1989,7 @@ gst_va_vpp_src_event (GstBaseTransform * trans, GstEvent * event)
         /* crop compensation is done by videocrop */
 
         GST_TRACE_OBJECT (self, "from %fx%f to %fx%f", x, y, new_x, new_y);
-        gst_structure_set (structure, "pointer_x", G_TYPE_DOUBLE, new_x,
-            "pointer_y", G_TYPE_DOUBLE, new_y, NULL);
+        gst_navigation_event_set_coordinates (event, new_x, new_y);
       }
       break;
     default:
@@ -1873,38 +2006,20 @@ gst_va_vpp_sink_event (GstBaseTransform * trans, GstEvent * event)
 {
   GstVaVpp *self = GST_VA_VPP (trans);
   GstTagList *taglist;
-  gchar *orientation;
+  GstVideoOrientationMethod method;
 
   switch (GST_EVENT_TYPE (event)) {
     case GST_EVENT_TAG:
       gst_event_parse_tag (event, &taglist);
 
-      if (!gst_tag_list_get_string (taglist, "image-orientation", &orientation))
-        break;
-
       if (self->direction != GST_VIDEO_ORIENTATION_AUTO)
         break;
 
-      GST_DEBUG_OBJECT (self, "tag orientation %s", orientation);
+      if (!gst_video_orientation_from_tag (taglist, &method))
+        break;
 
       GST_OBJECT_LOCK (self);
-      if (!g_strcmp0 ("rotate-0", orientation))
-        self->tag_direction = GST_VIDEO_ORIENTATION_IDENTITY;
-      else if (!g_strcmp0 ("rotate-90", orientation))
-        self->tag_direction = GST_VIDEO_ORIENTATION_90R;
-      else if (!g_strcmp0 ("rotate-180", orientation))
-        self->tag_direction = GST_VIDEO_ORIENTATION_180;
-      else if (!g_strcmp0 ("rotate-270", orientation))
-        self->tag_direction = GST_VIDEO_ORIENTATION_90L;
-      else if (!g_strcmp0 ("flip-rotate-0", orientation))
-        self->tag_direction = GST_VIDEO_ORIENTATION_HORIZ;
-      else if (!g_strcmp0 ("flip-rotate-90", orientation))
-        self->tag_direction = GST_VIDEO_ORIENTATION_UL_LR;
-      else if (!g_strcmp0 ("flip-rotate-180", orientation))
-        self->tag_direction = GST_VIDEO_ORIENTATION_VERT;
-      else if (!g_strcmp0 ("flip-rotate-270", orientation))
-        self->tag_direction = GST_VIDEO_ORIENTATION_UR_LL;
-
+      self->tag_direction = method;
       _update_properties_unlocked (self);
       GST_OBJECT_UNLOCK (self);
 
@@ -1916,6 +2031,55 @@ gst_va_vpp_sink_event (GstBaseTransform * trans, GstEvent * event)
   }
 
   return GST_BASE_TRANSFORM_CLASS (parent_class)->sink_event (trans, event);
+}
+
+static void
+_install_static_properties (GObjectClass * klass)
+{
+  /**
+   * GstVaPostProc:disable-passthrough:
+   *
+   * If set to %TRUE the filter will not enable passthrough mode, thus
+   * each frame will be processed. It's useful for cropping, for
+   * example.
+   *
+   * Since: 1.20
+   */
+  PROPERTIES (PROP_DISABLE_PASSTHROUGH) =
+      g_param_spec_boolean ("disable-passthrough", "Disable Passthrough",
+      "Forces passing buffers through the postprocessor", FALSE,
+      G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS | GST_PARAM_MUTABLE_READY);
+  g_object_class_install_property (klass, PROP_DISABLE_PASSTHROUGH,
+      PROPERTIES (PROP_DISABLE_PASSTHROUGH));
+
+  /**
+   * GstVaPostProc:add-borders:
+   *
+   * If set to %TRUE the filter will add black borders if necessary to
+   * keep the display aspect ratio.
+   *
+   * Since: 1.20
+   */
+  PROPERTIES (PROP_ADD_BORDERS) = g_param_spec_boolean ("add-borders",
+      "Add Borders",
+      "Add black borders if necessary to keep the display aspect ratio", FALSE,
+      G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS | GST_PARAM_MUTABLE_PLAYING);
+  g_object_class_install_property (klass, PROP_ADD_BORDERS,
+      PROPERTIES (PROP_ADD_BORDERS));
+
+  /**
+   * GstVaPostProc:scale-method
+   *
+   * Sets the scale method algorithm to use when resizing.
+   *
+   * Since: 1.22
+   */
+  PROPERTIES (PROP_SCALE_METHOD) = g_param_spec_enum ("scale-method",
+      "Scale Method", "Scale method to use", GST_TYPE_VA_SCALE_METHOD,
+      VA_FILTER_SCALING_DEFAULT, G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS
+      | GST_PARAM_MUTABLE_PLAYING);
+  g_object_class_install_property (klass, PROP_SCALE_METHOD,
+      PROPERTIES (PROP_SCALE_METHOD));
 }
 
 static void
@@ -1931,6 +2095,7 @@ gst_va_vpp_class_init (gpointer g_class, gpointer class_data)
   GstVaFilter *filter;
   struct CData *cdata = class_data;
   gchar *long_name;
+  GString *klass;
 
   parent_class = g_type_class_peek_parent (g_class);
 
@@ -1943,10 +2108,7 @@ gst_va_vpp_class_init (gpointer g_class, gpointer class_data)
     long_name = g_strdup ("VA-API Video Postprocessor");
   }
 
-  gst_element_class_set_metadata (element_class, long_name,
-      "Filter/Converter/Video/Scaler/Hardware",
-      "VA-API based video postprocessor",
-      "Víctor Jáquez <vjaquez@igalia.com>");
+  klass = g_string_new ("Converter/Filter/Colorspace/Scaler/Video/Hardware");
 
   display = gst_va_display_drm_new_from_path (btrans_class->render_device_path);
   filter = gst_va_filter_new (display);
@@ -1960,9 +2122,31 @@ gst_va_vpp_class_init (gpointer g_class, gpointer class_data)
       gst_caps_set_features_simple (any_caps, gst_caps_features_new_any ());
       caps = gst_caps_merge (caps, any_caps);
     }
+
+    /* add converter klass */
+    {
+      int i;
+      VAProcFilterType types[] = { VAProcFilterColorBalance,
+        VAProcFilterSkinToneEnhancement, VAProcFilterSharpening,
+        VAProcFilterNoiseReduction
+      };
+
+      for (i = 0; i < G_N_ELEMENTS (types); i++) {
+        if (gst_va_filter_has_filter (filter, types[i])) {
+          g_string_prepend (klass, "Effect/");
+          break;
+        }
+      }
+    }
   } else {
     caps = gst_caps_from_string (caps_str);
   }
+
+  gst_element_class_set_metadata (element_class, long_name, klass->str,
+      "VA-API based video postprocessor",
+      "Víctor Jáquez <vjaquez@igalia.com>");
+
+  g_string_free (klass, TRUE);
 
   doc_caps = gst_caps_from_string (caps_str);
 
@@ -2003,6 +2187,8 @@ gst_va_vpp_class_init (gpointer g_class, gpointer class_data)
       GST_DEBUG_FUNCPTR (gst_va_vpp_update_properties);
 
   gst_va_filter_install_properties (filter, object_class);
+
+  _install_static_properties (object_class);
 
   g_free (long_name);
   g_free (cdata->description);
@@ -2074,6 +2260,13 @@ gst_va_vpp_init (GTypeInstance * instance, gpointer g_class)
     self->saturation =
         g_value_get_float (g_param_spec_get_default_value (pspec));
     _create_colorbalance_channel (self, "SATURATION");
+  }
+
+  /* HDR tone mapping */
+  pspec = g_object_class_find_property (g_class, "hdr-tone-mapping");
+  if (pspec) {
+    self->hdr_mapping =
+        g_value_get_boolean (g_param_spec_get_default_value (pspec));
   }
 
   /* enable QoS */

@@ -1,6 +1,6 @@
 project('gst-plugins-bad', 'c', 'cpp',
-  version : '1.20.5',
-  meson_version : '>= 0.59',
+  version : '1.22.0',
+  meson_version : '>= 0.62',
   default_options : [ 'warning_level=1',
                       'buildtype=debugoptimized' ])
 
@@ -17,7 +17,7 @@ endif
 gst_version_is_stable = gst_version_minor.is_even()
 gst_version_is_dev = gst_version_minor.is_odd() and gst_version_micro < 90
 
-glib_req = '>= 2.56.0'
+glib_req = '>= 2.62.0'
 orc_req = '>= 0.4.17'
 
 if gst_version_is_stable
@@ -37,7 +37,7 @@ osxversion = curversion + 1
 plugins_install_dir = join_paths(get_option('libdir'), 'gstreamer-1.0')
 static_build = get_option('default_library') == 'static'
 plugins = []
-libraries = []
+gst_libraries = []
 
 cc = meson.get_compiler('c')
 cxx = meson.get_compiler('cpp')
@@ -52,6 +52,7 @@ else
 endif
 
 cdata = configuration_data()
+cdata.set('ENABLE_NLS', 1)
 
 if cc.get_id() == 'msvc'
   msvc_args = [
@@ -63,13 +64,29 @@ if cc.get_id() == 'msvc'
       '/wd4146', # unary minus on unsigned (beware INT_MIN)
       '/wd4244', # lossy type conversion (e.g. double -> int)
       '/wd4305', # truncating type conversion (e.g. double -> float)
+      '/wd5051', # attribute 'attribute-name' requires at least 'standard-level'; ignored
       cc.get_supported_arguments(['/utf-8']), # set the input encoding to utf-8
-
-      # Enable some warnings on MSVC to match GCC/Clang behaviour
-      '/w14062', # enumerator 'identifier' in switch of enum 'enumeration' is not handled
-      '/w14101', # 'identifier' : unreferenced local variable
-      '/w14189', # 'identifier' : local variable is initialized but not referenced
   ]
+
+  if gst_version_is_dev
+    # Enable some warnings on MSVC to match GCC/Clang behaviour
+    msvc_args += cc.get_supported_arguments([
+      '/we4002', # too many actual parameters for macro 'identifier'
+      '/we4003', # not enough actual parameters for macro 'identifier'
+      '/we4013', # 'function' undefined; assuming extern returning int
+      '/we4020', # 'function' : too many actual parameters
+      '/we4027', # function declared without formal parameter list
+      '/we4029', # declared formal parameter list different from definition
+      '/we4033', # 'function' must return a value
+      '/we4045', # 'array' : array bounds overflow
+      '/we4047', # 'operator' : 'identifier1' differs in levels of indirection from 'identifier2'
+      '/we4053', # one void operand for '?:'
+      '/we4062', # enumerator 'identifier' in switch of enum 'enumeration' is not handled
+      '/we4098', # 'function' : void function returning a value
+      '/we4101', # 'identifier' : unreferenced local variable
+      '/we4189', # 'identifier' : local variable is initialized but not referenced
+    ])
+  endif
   add_project_arguments(msvc_args, language: ['c', 'cpp'])
   # Disable SAFESEH with MSVC for plugins and libs that use external deps that
   # are built with MinGW
@@ -86,22 +103,23 @@ if cc.has_link_argument('-Wl,-Bsymbolic-functions')
   add_project_link_arguments('-Wl,-Bsymbolic-functions', language : 'c')
 endif
 
+# glib doesn't support unloading, which means that unloading and reloading
+# any library that registers static types will fail
+if cc.has_link_argument('-Wl,-z,nodelete')
+  add_project_link_arguments('-Wl,-z,nodelete', language: 'c')
+endif
+if cxx.has_link_argument('-Wl,-z,nodelete')
+  add_project_link_arguments('-Wl,-z,nodelete', language: 'cpp')
+endif
+
 # Symbol visibility
-if cc.get_id() == 'msvc'
-  export_define = '__declspec(dllexport) extern'
-elif cc.has_argument('-fvisibility=hidden')
+if cc.has_argument('-fvisibility=hidden')
   add_project_arguments('-fvisibility=hidden', language: 'c')
   add_project_arguments('-fvisibility=hidden', language: 'cpp')
   if have_objc
     add_project_arguments('-fvisibility=hidden', language: 'objc')
   endif
-  export_define = 'extern __attribute__ ((visibility ("default")))'
-else
-  export_define = 'extern'
 endif
-
-# Passing this through the command line would be too messy
-cdata.set('GST_API_EXPORT', export_define)
 
 # Disable strict aliasing
 if cc.has_argument('-fno-strict-aliasing')
@@ -365,9 +383,8 @@ if gstgl_dep.found()
 endif
 
 libm = cc.find_library('m', required : false)
-glib_dep = dependency('glib-2.0', version : glib_req, fallback: ['glib', 'libglib_dep'])
-gmodule_dep = dependency('gmodule-2.0', fallback: ['glib', 'libgmodule_dep'])
-gio_dep = dependency('gio-2.0', fallback: ['glib', 'libgio_dep'])
+gio_dep = dependency('gio-2.0', version: glib_req)
+gmodule_dep = dependency('gmodule-no-export-2.0')
 # gio-unix-2.0 is used by sys/bluez
 
 # Optional dep of ext/gl and gst/librfb
@@ -392,6 +409,23 @@ endif
 
 if host_machine.system() == 'windows'
   winsock2 = [cc.find_library('ws2_32')]
+
+  building_for_win7 = cc.compiles('''#include <windows.h>
+      #ifndef WINVER
+      #error "unknown minimum supported OS version"
+      #endif
+      #if (WINVER < _WIN32_WINNT_WIN7)
+      #error "Windows 7 API is not guaranteed"
+      #endif
+      ''',
+      name: 'building for Windows 7')
+
+  if not building_for_win7
+    add_project_arguments([
+      '-D_WIN32_WINNT=_WIN32_WINNT_WIN7',
+      '-DWINVER=_WIN32_WINNT_WIN7',
+    ], language: ['c', 'cpp'])
+  endif
 else
   winsock2 = []
 endif
@@ -491,7 +525,6 @@ pkgconfig_variables = ['exec_prefix=${prefix}',
     'toolsdir=${exec_prefix}/bin',
     'pluginsdir=${libdir}/gstreamer-1.0',
     'datarootdir=${prefix}/share',
-    'datadir=${datarootdir}',
     'girdir=${datadir}/gir-1.0',
     'typelibdir=${libdir}/girepository-1.0']
 
@@ -540,7 +573,6 @@ endif
 
 # xgettext is optional (on Windows for instance)
 if find_program('xgettext', required : get_option('nls')).found()
-  cdata.set('ENABLE_NLS', 1)
   subdir('po')
 endif
 
@@ -555,16 +587,23 @@ if gst_version_nano == 0
   message('Package release date: ' + release_date)
 endif
 
-if glib_dep.version().version_compare('< 2.67.4')
+if gio_dep.version().version_compare('< 2.67.4')
   cdata.set('g_memdup2(ptr,sz)', '(G_LIKELY(((guint64)(sz)) < G_MAXUINT)) ? g_memdup(ptr,sz) : (g_abort(),NULL)')
 endif
 
 configure_file(output : 'config.h', configuration : cdata)
 
+meson.add_dist_script('scripts/gen-changelog.py', meson.project_name(), '1.20.0', meson.project_version())
+
 subdir('docs')
 
 plugin_names = []
+gst_plugins = []
 foreach plugin: plugins
+  pkgconfig.generate(plugin, install_dir: plugins_pkgconfig_install_dir)
+  dep = declare_dependency(link_with: plugin, variables: {'full_path': plugin.full_path()})
+  meson.override_dependency(plugin.name(), dep)
+  gst_plugins += [dep]
   if plugin.name().startswith('gst')
     plugin_names += [plugin.name().substring(3)]
   else

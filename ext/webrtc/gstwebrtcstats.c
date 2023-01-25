@@ -58,7 +58,7 @@ static void
 _set_base_stats (GstStructure * s, GstWebRTCStatsType type, double ts,
     const char *id)
 {
-  gchar *name = _enum_value_to_string (GST_TYPE_WEBRTC_STATS_TYPE,
+  const gchar *name = _enum_value_to_string (GST_TYPE_WEBRTC_STATS_TYPE,
       type);
 
   g_return_if_fail (name != NULL);
@@ -66,8 +66,6 @@ _set_base_stats (GstStructure * s, GstWebRTCStatsType type, double ts,
   gst_structure_set_name (s, name);
   gst_structure_set (s, "type", GST_TYPE_WEBRTC_STATS_TYPE, type, "timestamp",
       G_TYPE_DOUBLE, ts, "id", G_TYPE_STRING, id, NULL);
-
-  g_free (name);
 }
 
 static GstStructure *
@@ -107,7 +105,7 @@ _gst_structure_take_structure (GstStructure * s, const char *fieldname,
 static gboolean
 _get_stats_from_remote_rtp_source_stats (GstWebRTCBin * webrtc,
     TransportStream * stream, const GstStructure * source_stats,
-    guint ssrc, guint clock_rate, const gchar * codec_id,
+    guint ssrc, guint clock_rate, const gchar * codec_id, const gchar * kind,
     const gchar * transport_id, GstStructure * s)
 {
   gboolean have_rb = FALSE, internal = FALSE;
@@ -137,12 +135,13 @@ _get_stats_from_remote_rtp_source_stats (GstWebRTCBin * webrtc,
   gst_structure_set (r_in, "ssrc", G_TYPE_UINT, ssrc, NULL);
   gst_structure_set (r_in, "codec-id", G_TYPE_STRING, codec_id, NULL);
   gst_structure_set (r_in, "transport-id", G_TYPE_STRING, transport_id, NULL);
-  /* To be added: kind */
+  if (kind)
+    gst_structure_set (r_in, "kind", G_TYPE_STRING, kind, NULL);
 
   /* RTCReceivedRtpStreamStats */
 
   if (gst_structure_get_int (source_stats, "rb-packetslost", &lost))
-    gst_structure_set (r_in, "packets-lost", G_TYPE_INT, lost, NULL);
+    gst_structure_set (r_in, "packets-lost", G_TYPE_INT64, (gint64) lost, NULL);
 
   if (clock_rate && gst_structure_get_uint (source_stats, "rb-jitter", &jitter))
     gst_structure_set (r_in, "jitter", G_TYPE_DOUBLE,
@@ -207,7 +206,8 @@ _get_stats_from_remote_rtp_source_stats (GstWebRTCBin * webrtc,
 static void
 _get_stats_from_rtp_source_stats (GstWebRTCBin * webrtc,
     TransportStream * stream, const GstStructure * source_stats,
-    const gchar * codec_id, const gchar * transport_id, GstStructure * s)
+    const gchar * codec_id, const gchar * kind, const gchar * transport_id,
+    GstStructure * s)
 {
   guint ssrc, fir, pli, nack, jitter;
   int clock_rate;
@@ -232,8 +232,8 @@ _get_stats_from_rtp_source_stats (GstWebRTCBin * webrtc,
     gst_structure_set (out, "ssrc", G_TYPE_UINT, ssrc, NULL);
     gst_structure_set (out, "codec-id", G_TYPE_STRING, codec_id, NULL);
     gst_structure_set (out, "transport-id", G_TYPE_STRING, transport_id, NULL);
-    /* To be added: kind */
-
+    if (kind)
+      gst_structure_set (out, "kind", G_TYPE_STRING, kind, NULL);
 
     /* RTCSentRtpStreamStats  */
     if (gst_structure_get_uint64 (source_stats, "octets-sent", &bytes))
@@ -321,10 +321,11 @@ _get_stats_from_rtp_source_stats (GstWebRTCBin * webrtc,
 
     gst_structure_get (source_stats, "have-sr", G_TYPE_BOOLEAN, &have_sr, NULL);
 
-    for (i = 0; i < stream->remote_ssrcmap->len; i++) {
-      SsrcMapItem *item = g_ptr_array_index (stream->remote_ssrcmap, i);
+    for (i = 0; i < stream->ssrcmap->len; i++) {
+      SsrcMapItem *item = g_ptr_array_index (stream->ssrcmap, i);
 
-      if (item->ssrc == ssrc) {
+      if (item->direction == GST_WEBRTC_RTP_TRANSCEIVER_DIRECTION_RECVONLY
+          && item->ssrc == ssrc) {
         GObject *jb = g_weak_ref_get (&item->rtpjitterbuffer);
 
         if (jb) {
@@ -351,15 +352,18 @@ _get_stats_from_rtp_source_stats (GstWebRTCBin * webrtc,
     gst_structure_set (in, "ssrc", G_TYPE_UINT, ssrc, NULL);
     gst_structure_set (in, "codec-id", G_TYPE_STRING, codec_id, NULL);
     gst_structure_set (in, "transport-id", G_TYPE_STRING, transport_id, NULL);
-    /* To be added: kind */
-
+    if (kind)
+      gst_structure_set (in, "kind", G_TYPE_STRING, kind, NULL);
 
     /* RTCReceivedRtpStreamStats */
 
     if (gst_structure_get_uint64 (source_stats, "packets-received", &packets))
       gst_structure_set (in, "packets-received", G_TYPE_UINT64, packets, NULL);
-    if (jb_stats)
-      gst_structure_set (in, "packets-lost", G_TYPE_UINT64, jb_lost, NULL);
+    if (jb_stats) {
+      gint64 packets_lost = jb_lost > G_MAXINT64 ?
+          G_MAXINT64 : (gint64) jb_lost;
+      gst_structure_set (in, "packets-lost", G_TYPE_INT64, packets_lost, NULL);
+    }
     if (gst_structure_get_uint (source_stats, "jitter", &jitter))
       gst_structure_set (in, "jitter", G_TYPE_DOUBLE,
           CLOCK_RATE_VALUE_TO_SECONDS (jitter, clock_rate), NULL);
@@ -560,67 +564,138 @@ _get_stats_from_rtp_source_stats (GstWebRTCBin * webrtc,
   }
 }
 
-/* https://www.w3.org/TR/webrtc-stats/#candidatepair-dict* */
+/* https://www.w3.org/TR/webrtc-stats/#icecandidate-dict* */
 static gchar *
-_get_stats_from_ice_transport (GstWebRTCBin * webrtc,
-    GstWebRTCICETransport * transport, const GstStructure * twcc_stats,
-    GstStructure * s)
+_get_stats_from_ice_candidates (GstWebRTCBin * webrtc,
+    GstWebRTCICECandidateStats * can, const gchar * transport_id,
+    const gchar * candidate_tag, GstStructure * s)
 {
   GstStructure *stats;
+  GstWebRTCStatsType type;
   gchar *id;
   double ts;
 
   gst_structure_get_double (s, "timestamp", &ts);
 
+  id = g_strdup_printf ("ice-candidate-%s_%u_%s_%u", candidate_tag,
+      can->stream_id, can->ipaddr, can->port);
+  stats = gst_structure_new_empty (id);
+
+  if (strcmp (candidate_tag, "local")) {
+    type = GST_WEBRTC_STATS_LOCAL_CANDIDATE;
+  } else if (strcmp (candidate_tag, "remote")) {
+    type = GST_WEBRTC_STATS_REMOTE_CANDIDATE;
+  } else {
+    GST_WARNING_OBJECT (webrtc, "Invalid ice candidate tag: %s", candidate_tag);
+    return NULL;
+  }
+  _set_base_stats (stats, type, ts, id);
+
+  /* RTCIceCandidateStats
+     DOMString           transportId;
+     DOMString           address;
+     long                port;
+     DOMString           protocol;
+     RTCIceCandidateType candidateType;
+     long                priority;
+     DOMString           url;
+     DOMString           relayProtocol;
+   */
+
+  if (transport_id)
+    gst_structure_set (stats, "transport-id", G_TYPE_STRING, transport_id,
+        NULL);
+  gst_structure_set (stats, "address", G_TYPE_STRING, can->ipaddr, NULL);
+  gst_structure_set (stats, "port", G_TYPE_UINT, can->port, NULL);
+  gst_structure_set (stats, "candidate-type", G_TYPE_STRING, can->type, NULL);
+  gst_structure_set (stats, "priority", G_TYPE_UINT, can->prio, NULL);
+  gst_structure_set (stats, "protocol", G_TYPE_STRING, can->proto, NULL);
+  if (can->relay_proto)
+    gst_structure_set (stats, "relay-protocol", G_TYPE_STRING, can->relay_proto,
+        NULL);
+  if (can->url)
+    gst_structure_set (stats, "url", G_TYPE_STRING, can->url, NULL);
+
+  gst_structure_set (s, id, GST_TYPE_STRUCTURE, stats, NULL);
+  gst_structure_free (stats);
+
+  return id;
+}
+
+/* https://www.w3.org/TR/webrtc-stats/#candidatepair-dict* */
+static gchar *
+_get_stats_from_ice_transport (GstWebRTCBin * webrtc,
+    GstWebRTCICETransport * transport, GstWebRTCICEStream * stream,
+    const GstStructure * twcc_stats, const gchar * transport_id,
+    GstStructure * s)
+{
+  GstStructure *stats;
+  gchar *id;
+  gchar *local_cand_id = NULL, *remote_cand_id = NULL;
+  double ts;
+  GstWebRTCICECandidateStats *local_cand = NULL, *remote_cand = NULL;
+
+  gst_structure_get_double (s, "timestamp", &ts);
+
   id = g_strdup_printf ("ice-candidate-pair_%s", GST_OBJECT_NAME (transport));
   stats = gst_structure_new_empty (id);
-  _set_base_stats (stats, GST_WEBRTC_STATS_TRANSPORT, ts, id);
+  _set_base_stats (stats, GST_WEBRTC_STATS_CANDIDATE_PAIR, ts, id);
 
-/* XXX: RTCIceCandidatePairStats
-    DOMString                     transportId;
-    DOMString                     localCandidateId;
-    DOMString                     remoteCandidateId;
-    RTCStatsIceCandidatePairState state;
-    unsigned long long            priority;
-    boolean                       nominated;
-    unsigned long                 packetsSent;
-    unsigned long                 packetsReceived;
-    unsigned long long            bytesSent;
-    unsigned long long            bytesReceived;
-    DOMHighResTimeStamp           lastPacketSentTimestamp;
-    DOMHighResTimeStamp           lastPacketReceivedTimestamp;
-    DOMHighResTimeStamp           firstRequestTimestamp;
-    DOMHighResTimeStamp           lastRequestTimestamp;
-    DOMHighResTimeStamp           lastResponseTimestamp;
-    double                        totalRoundTripTime;
-    double                        currentRoundTripTime;
-    double                        availableOutgoingBitrate;
-    double                        availableIncomingBitrate;
-    unsigned long                 circuitBreakerTriggerCount;
-    unsigned long long            requestsReceived;
-    unsigned long long            requestsSent;
-    unsigned long long            responsesReceived;
-    unsigned long long            responsesSent;
-    unsigned long long            retransmissionsReceived;
-    unsigned long long            retransmissionsSent;
-    unsigned long long            consentRequestsSent;
-    DOMHighResTimeStamp           consentExpiredTimestamp;
-*/
+  /* RTCIceCandidatePairStats
+     DOMString                     transportId;
+     DOMString                     localCandidateId;
+     DOMString                     remoteCandidateId;
 
-/* XXX: RTCIceCandidateStats
-    DOMString           transportId;
-    boolean             isRemote;
-    RTCNetworkType      networkType;
-    DOMString           ip;
-    long                port;
-    DOMString           protocol;
-    RTCIceCandidateType candidateType;
-    long                priority;
-    DOMString           url;
-    DOMString           relayProtocol;
-    boolean             deleted = false;
-};
-*/
+     XXX: To be added:
+
+     RTCStatsIceCandidatePairState state;
+     boolean                       nominated;
+     unsigned long                 packetsSent;
+     unsigned long                 packetsReceived;
+     unsigned long long            bytesSent;
+     unsigned long long            bytesReceived;
+     DOMHighResTimeStamp           lastPacketSentTimestamp;
+     DOMHighResTimeStamp           lastPacketReceivedTimestamp;
+     DOMHighResTimeStamp           firstRequestTimestamp;
+     DOMHighResTimeStamp           lastRequestTimestamp;
+     DOMHighResTimeStamp           lastResponseTimestamp;
+     double                        totalRoundTripTime;
+     double                        currentRoundTripTime;
+     double                        availableOutgoingBitrate;
+     double                        availableIncomingBitrate;
+     unsigned long                 circuitBreakerTriggerCount;
+     unsigned long long            requestsReceived;
+     unsigned long long            requestsSent;
+     unsigned long long            responsesReceived;
+     unsigned long long            responsesSent;
+     unsigned long long            retransmissionsReceived;
+     unsigned long long            retransmissionsSent;
+     unsigned long long            consentRequestsSent;
+     DOMHighResTimeStamp           consentExpiredTimestamp;
+     unsigned long                 packetsDiscardedOnSend;
+     unsigned long long            bytesDiscardedOnSend;
+     unsigned long long            requestBytesSent;
+     unsigned long long            consentRequestBytesSent;
+     unsigned long long            responseBytesSent;
+   */
+
+  if (gst_webrtc_ice_get_selected_pair (webrtc->priv->ice, stream,
+          &local_cand, &remote_cand)) {
+    local_cand_id =
+        _get_stats_from_ice_candidates (webrtc, local_cand, transport_id,
+        "local", s);
+    remote_cand_id =
+        _get_stats_from_ice_candidates (webrtc, remote_cand, transport_id,
+        "remote", s);
+
+    gst_structure_set (stats, "local-candidate-id", G_TYPE_STRING,
+        local_cand_id, NULL);
+    gst_structure_set (stats, "remote-candidate-id", G_TYPE_STRING,
+        remote_cand_id, NULL);
+  } else
+    GST_INFO_OBJECT (webrtc,
+        "No selected ICE candidate pair was found for transport %s",
+        GST_OBJECT_NAME (transport));
 
   /* XXX: these stats are at the rtp session level but there isn't a specific
    * stats structure for that. The RTCIceCandidatePairStats is the closest with
@@ -631,6 +706,13 @@ _get_stats_from_ice_transport (GstWebRTCBin * webrtc,
         NULL);
 
   gst_structure_set (s, id, GST_TYPE_STRUCTURE, stats, NULL);
+
+  g_free (local_cand_id);
+  g_free (remote_cand_id);
+
+  gst_webrtc_ice_candidate_stats_free (local_cand);
+  gst_webrtc_ice_candidate_stats_free (remote_cand);
+
   gst_structure_free (stats);
 
   return id;
@@ -639,8 +721,8 @@ _get_stats_from_ice_transport (GstWebRTCBin * webrtc,
 /* https://www.w3.org/TR/webrtc-stats/#dom-rtctransportstats */
 static gchar *
 _get_stats_from_dtls_transport (GstWebRTCBin * webrtc,
-    GstWebRTCDTLSTransport * transport, const GstStructure * twcc_stats,
-    GstStructure * s)
+    GstWebRTCDTLSTransport * transport, GstWebRTCICEStream * stream,
+    const GstStructure * twcc_stats, GstStructure * s)
 {
   GstStructure *stats;
   gchar *id;
@@ -673,93 +755,19 @@ _get_stats_from_dtls_transport (GstWebRTCBin * webrtc,
     DOMString issuerCertificateId;
 */
 
-/* XXX: RTCIceCandidateStats
-    DOMString           transportId;
-    boolean             isRemote;
-    DOMString           ip;
-    long                port;
-    DOMString           protocol;
-    RTCIceCandidateType candidateType;
-    long                priority;
-    DOMString           url;
-    boolean             deleted = false;
-*/
+  ice_id =
+      _get_stats_from_ice_transport (webrtc, transport->transport, stream,
+      twcc_stats, id, s);
+  if (ice_id) {
+    gst_structure_set (stats, "selected-candidate-pair-id", G_TYPE_STRING,
+        ice_id, NULL);
+    g_free (ice_id);
+  }
 
   gst_structure_set (s, id, GST_TYPE_STRUCTURE, stats, NULL);
   gst_structure_free (stats);
 
-  ice_id =
-      _get_stats_from_ice_transport (webrtc, transport->transport, twcc_stats,
-      s);
-  g_free (ice_id);
-
   return id;
-}
-
-static void
-_get_stats_from_transport_channel (GstWebRTCBin * webrtc,
-    TransportStream * stream, const gchar * codec_id, guint ssrc,
-    guint clock_rate, GstStructure * s)
-{
-  GstWebRTCDTLSTransport *transport;
-  GObject *rtp_session;
-  GObject *gst_rtp_session;
-  GstStructure *rtp_stats, *twcc_stats;
-  GValueArray *source_stats;
-  gchar *transport_id;
-  double ts;
-  int i;
-
-  gst_structure_get_double (s, "timestamp", &ts);
-
-  transport = stream->transport;
-  if (!transport)
-    return;
-
-  g_signal_emit_by_name (webrtc->rtpbin, "get-internal-session",
-      stream->session_id, &rtp_session);
-  g_object_get (rtp_session, "stats", &rtp_stats, NULL);
-  g_signal_emit_by_name (webrtc->rtpbin, "get-session",
-      stream->session_id, &gst_rtp_session);
-  g_object_get (gst_rtp_session, "twcc-stats", &twcc_stats, NULL);
-
-  gst_structure_get (rtp_stats, "source-stats", G_TYPE_VALUE_ARRAY,
-      &source_stats, NULL);
-
-  GST_DEBUG_OBJECT (webrtc, "retrieving rtp stream stats from transport %"
-      GST_PTR_FORMAT " rtp session %" GST_PTR_FORMAT " with %u rtp sources, "
-      "transport %" GST_PTR_FORMAT, stream, rtp_session, source_stats->n_values,
-      transport);
-
-  transport_id =
-      _get_stats_from_dtls_transport (webrtc, transport, twcc_stats, s);
-
-  /* construct stats objects */
-  for (i = 0; i < source_stats->n_values; i++) {
-    const GstStructure *stats;
-    const GValue *val = g_value_array_get_nth (source_stats, i);
-    guint stats_ssrc = 0;
-
-    stats = gst_value_get_structure (val);
-
-    /* skip foreign sources */
-    if (gst_structure_get_uint (stats, "ssrc", &stats_ssrc) &&
-        ssrc == stats_ssrc)
-      _get_stats_from_rtp_source_stats (webrtc, stream, stats, codec_id,
-          transport_id, s);
-    else if (gst_structure_get_uint (stats, "rb-ssrc", &stats_ssrc) &&
-        ssrc == stats_ssrc)
-      _get_stats_from_remote_rtp_source_stats (webrtc, stream, stats, ssrc,
-          clock_rate, codec_id, transport_id, s);
-  }
-
-  g_object_unref (rtp_session);
-  g_object_unref (gst_rtp_session);
-  gst_structure_free (rtp_stats);
-  if (twcc_stats)
-    gst_structure_free (twcc_stats);
-  g_value_array_free (source_stats);
-  g_free (transport_id);
 }
 
 /* https://www.w3.org/TR/webrtc-stats/#codec-dict* */
@@ -859,33 +867,127 @@ _get_codec_stats_from_pad (GstWebRTCBin * webrtc, GstPad * pad,
   return has_caps_ssrc;
 }
 
+struct transport_stream_stats
+{
+  GstWebRTCBin *webrtc;
+  TransportStream *stream;
+  char *transport_id;
+  char *codec_id;
+  const char *kind;
+  guint clock_rate;
+  GValueArray *source_stats;
+  GstStructure *s;
+};
+
+static gboolean
+webrtc_stats_get_from_transport (SsrcMapItem * entry,
+    struct transport_stream_stats *ts_stats)
+{
+  double ts;
+  int i;
+
+  gst_structure_get_double (ts_stats->s, "timestamp", &ts);
+
+  /* construct stats objects */
+  for (i = 0; i < ts_stats->source_stats->n_values; i++) {
+    const GstStructure *stats;
+    const GValue *val = g_value_array_get_nth (ts_stats->source_stats, i);
+    guint stats_ssrc = 0;
+
+    stats = gst_value_get_structure (val);
+
+    /* skip foreign sources */
+    if (gst_structure_get_uint (stats, "ssrc", &stats_ssrc) &&
+        entry->ssrc == stats_ssrc)
+      _get_stats_from_rtp_source_stats (ts_stats->webrtc, ts_stats->stream,
+          stats, ts_stats->codec_id, ts_stats->kind, ts_stats->transport_id,
+          ts_stats->s);
+    else if (gst_structure_get_uint (stats, "rb-ssrc", &stats_ssrc)
+        && entry->ssrc == stats_ssrc)
+      _get_stats_from_remote_rtp_source_stats (ts_stats->webrtc,
+          ts_stats->stream, stats, entry->ssrc, ts_stats->clock_rate,
+          ts_stats->codec_id, ts_stats->kind, ts_stats->transport_id,
+          ts_stats->s);
+  }
+
+  /* we want to look at all the entries */
+  return FALSE;
+}
+
 static gboolean
 _get_stats_from_pad (GstWebRTCBin * webrtc, GstPad * pad, GstStructure * s)
 {
   GstWebRTCBinPad *wpad = GST_WEBRTC_BIN_PAD (pad);
-  TransportStream *stream;
-  gchar *codec_id;
+  struct transport_stream_stats ts_stats = { NULL, };
   guint ssrc, clock_rate;
-  gboolean has_caps_ssrc;
+  GObject *rtp_session;
+  GObject *gst_rtp_session;
+  GstStructure *rtp_stats, *twcc_stats;
+  GstWebRTCKind kind;
 
-  has_caps_ssrc = _get_codec_stats_from_pad (webrtc, pad, s, &codec_id, &ssrc,
+  _get_codec_stats_from_pad (webrtc, pad, s, &ts_stats.codec_id, &ssrc,
       &clock_rate);
 
   if (!wpad->trans)
     goto out;
 
-  stream = WEBRTC_TRANSCEIVER (wpad->trans)->stream;
-  if (!stream)
+  g_object_get (wpad->trans, "kind", &kind, NULL);
+  switch (kind) {
+    case GST_WEBRTC_KIND_AUDIO:
+      ts_stats.kind = "audio";
+      break;
+    case GST_WEBRTC_KIND_VIDEO:
+      ts_stats.kind = "video";
+      break;
+    case GST_WEBRTC_KIND_UNKNOWN:
+      ts_stats.kind = NULL;
+      break;
+  };
+
+  ts_stats.stream = WEBRTC_TRANSCEIVER (wpad->trans)->stream;
+  if (!ts_stats.stream)
     goto out;
 
-  if (!has_caps_ssrc)
-    ssrc = wpad->last_ssrc;
+  if (wpad->trans->mline == G_MAXUINT)
+    goto out;
 
-  _get_stats_from_transport_channel (webrtc, stream, codec_id, ssrc,
-      clock_rate, s);
+  if (!ts_stats.stream->transport)
+    goto out;
+
+  g_signal_emit_by_name (webrtc->rtpbin, "get-internal-session",
+      ts_stats.stream->session_id, &rtp_session);
+  g_object_get (rtp_session, "stats", &rtp_stats, NULL);
+  g_signal_emit_by_name (webrtc->rtpbin, "get-session",
+      ts_stats.stream->session_id, &gst_rtp_session);
+  g_object_get (gst_rtp_session, "twcc-stats", &twcc_stats, NULL);
+
+  gst_structure_get (rtp_stats, "source-stats", G_TYPE_VALUE_ARRAY,
+      &ts_stats.source_stats, NULL);
+
+  ts_stats.transport_id =
+      _get_stats_from_dtls_transport (webrtc, ts_stats.stream->transport,
+      GST_WEBRTC_ICE_STREAM (ts_stats.stream->stream), twcc_stats, s);
+
+  GST_DEBUG_OBJECT (webrtc, "retrieving rtp stream stats from transport %"
+      GST_PTR_FORMAT " rtp session %" GST_PTR_FORMAT " with %u rtp sources, "
+      "transport %" GST_PTR_FORMAT, ts_stats.stream, rtp_session,
+      ts_stats.source_stats->n_values, ts_stats.stream->transport);
+
+  ts_stats.s = s;
+
+  transport_stream_find_ssrc_map_item (ts_stats.stream, &ts_stats,
+      (FindSsrcMapFunc) webrtc_stats_get_from_transport);
+
+  g_clear_object (&rtp_session);
+  g_clear_object (&gst_rtp_session);
+  gst_clear_structure (&rtp_stats);
+  gst_clear_structure (&twcc_stats);
+  g_value_array_free (ts_stats.source_stats);
+  ts_stats.source_stats = NULL;
+  g_clear_pointer (&ts_stats.transport_id, g_free);
 
 out:
-  g_free (codec_id);
+  g_clear_pointer (&ts_stats.codec_id, g_free);
   return TRUE;
 }
 

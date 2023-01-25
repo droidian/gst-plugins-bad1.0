@@ -21,6 +21,7 @@
 #define __TRANSPORT_STREAM_H__
 
 #include "fwd.h"
+#include <gst/rtp/rtp.h>
 #include <gst/webrtc/rtptransceiver.h>
 
 G_BEGIN_DECLS
@@ -40,13 +41,13 @@ typedef struct
 
 typedef struct
 {
+  GstWebRTCRTPTransceiverDirection direction;
   guint32 ssrc;
   guint media_idx;
+  char *mid;
+  char *rid;
   GWeakRef rtpjitterbuffer; /* for stats */
 } SsrcMapItem;
-
-SsrcMapItem *           ssrcmap_item_new            (guint32 ssrc,
-                                                     guint media_idx);
 
 struct _TransportStream
 {
@@ -62,11 +63,20 @@ struct _TransportStream
   GstWebRTCDTLSTransport   *transport;
 
   GArray                   *ptmap;                  /* array of PtMapItem's */
-  GPtrArray                *remote_ssrcmap;         /* array of SsrcMapItem's */
+  GPtrArray                *ssrcmap;                /* array of SsrcMapItem's */
   gboolean                  output_connected;       /* whether receive bin is connected to rtpbin */
 
+  guint                     rtphdrext_id_stream_id;
+  guint                     rtphdrext_id_repaired_stream_id;
   GstElement               *rtxsend;
+  GstRTPHeaderExtension    *rtxsend_stream_id;
+  GstRTPHeaderExtension    *rtxsend_repaired_stream_id;
   GstElement               *rtxreceive;
+  GstRTPHeaderExtension    *rtxreceive_stream_id;
+  GstRTPHeaderExtension    *rtxreceive_repaired_stream_id;
+
+  GstElement               *reddec;
+  GList                    *fecdecs;
 };
 
 struct _TransportStreamClass
@@ -84,6 +94,21 @@ int *                   transport_stream_get_all_pt (TransportStream * stream,
                                                      gsize * pt_len);
 GstCaps *               transport_stream_get_caps_for_pt    (TransportStream * stream,
                                                              guint pt);
+
+typedef gboolean (*FindSsrcMapFunc) (SsrcMapItem * e1, gconstpointer data);
+
+SsrcMapItem *           transport_stream_find_ssrc_map_item (TransportStream * stream,
+                                                      gconstpointer data,
+                                                      FindSsrcMapFunc func);
+
+void                    transport_stream_filter_ssrc_map_item (TransportStream * stream,
+                                                      gconstpointer data,
+                                                      FindSsrcMapFunc func);
+
+SsrcMapItem *           transport_stream_add_ssrc_map_item (TransportStream * stream,
+                                                      GstWebRTCRTPTransceiverDirection direction,
+                                                      guint32 ssrc,
+                                                      guint media_idx);
 
 G_END_DECLS
 

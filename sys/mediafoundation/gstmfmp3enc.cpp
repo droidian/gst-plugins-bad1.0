@@ -36,7 +36,7 @@
 
 #include <gst/gst.h>
 #include <gst/pbutils/pbutils.h>
-#include "gstmfaudioenc.h"
+#include "gstmfaudioencoder.h"
 #include "gstmfmp3enc.h"
 #include <wrl.h>
 #include <set>
@@ -60,7 +60,7 @@ enum
 
 typedef struct _GstMFMp3Enc
 {
-  GstMFAudioEnc parent;
+  GstMFAudioEncoder parent;
 
   /* properties */
   guint bitrate;
@@ -68,7 +68,7 @@ typedef struct _GstMFMp3Enc
 
 typedef struct _GstMFMp3EncClass
 {
-  GstMFAudioEncClass parent_class;
+  GstMFAudioEncoderClass parent_class;
 
 } GstMFMp3EncClass;
 
@@ -84,17 +84,17 @@ typedef struct
 } GstMFMp3EncClassData;
 /* *INDENT-ON* */
 
-static GstElementClass *parent_class = NULL;
+static GstElementClass *parent_class = nullptr;
 
 static void gst_mf_mp3_enc_get_property (GObject * object, guint prop_id,
     GValue * value, GParamSpec * pspec);
 static void gst_mf_mp3_enc_set_property (GObject * object, guint prop_id,
     const GValue * value, GParamSpec * pspec);
-static gboolean gst_mf_mp3_enc_get_output_type (GstMFAudioEnc * mfenc,
+static gboolean gst_mf_mp3_enc_get_output_type (GstMFAudioEncoder * encoder,
     GstAudioInfo * info, IMFMediaType ** output_type);
-static gboolean gst_mf_mp3_enc_get_input_type (GstMFAudioEnc * mfenc,
+static gboolean gst_mf_mp3_enc_get_input_type (GstMFAudioEncoder * encoder,
     GstAudioInfo * info, IMFMediaType ** input_type);
-static gboolean gst_mf_mp3_enc_set_src_caps (GstMFAudioEnc * mfenc,
+static gboolean gst_mf_mp3_enc_set_src_caps (GstMFAudioEncoder * encoder,
     GstAudioInfo * info);
 
 static void
@@ -102,7 +102,7 @@ gst_mf_mp3_enc_class_init (GstMFMp3EncClass * klass, gpointer data)
 {
   GObjectClass *gobject_class = G_OBJECT_CLASS (klass);
   GstElementClass *element_class = GST_ELEMENT_CLASS (klass);
-  GstMFAudioEncClass *mfenc_class = GST_MF_AUDIO_ENC_CLASS (klass);
+  GstMFAudioEncoderClass *encoder_class = GST_MF_AUDIO_ENCODER_CLASS (klass);
   GstMFMp3EncClassData *cdata = (GstMFMp3EncClassData *) data;
   gchar *long_name;
   gchar *classification;
@@ -149,16 +149,16 @@ gst_mf_mp3_enc_class_init (GstMFMp3EncClass * klass, gpointer data)
       gst_pad_template_new ("src", GST_PAD_SRC, GST_PAD_ALWAYS,
           cdata->src_caps));
 
-  mfenc_class->get_output_type =
+  encoder_class->get_output_type =
       GST_DEBUG_FUNCPTR (gst_mf_mp3_enc_get_output_type);
-  mfenc_class->get_input_type =
+  encoder_class->get_input_type =
       GST_DEBUG_FUNCPTR (gst_mf_mp3_enc_get_input_type);
-  mfenc_class->set_src_caps = GST_DEBUG_FUNCPTR (gst_mf_mp3_enc_set_src_caps);
+  encoder_class->set_src_caps = GST_DEBUG_FUNCPTR (gst_mf_mp3_enc_set_src_caps);
 
-  mfenc_class->codec_id = MFAudioFormat_MP3;
-  mfenc_class->enum_flags = cdata->enum_flags;
-  mfenc_class->device_index = cdata->device_index;
-  mfenc_class->frame_samples = 1152;
+  encoder_class->codec_id = MFAudioFormat_MP3;
+  encoder_class->enum_flags = cdata->enum_flags;
+  encoder_class->device_index = cdata->device_index;
+  encoder_class->frame_samples = 1152;
 
   g_free (cdata->device_name);
   gst_caps_unref (cdata->sink_caps);
@@ -205,12 +205,12 @@ gst_mf_mp3_enc_set_property (GObject * object, guint prop_id,
 }
 
 static gboolean
-gst_mf_mp3_enc_get_output_type (GstMFAudioEnc * mfenc, GstAudioInfo * info,
-    IMFMediaType ** output_type)
+gst_mf_mp3_enc_get_output_type (GstMFAudioEncoder * encoder,
+    GstAudioInfo * info, IMFMediaType ** output_type)
 {
-  GstMFMp3Enc *self = (GstMFMp3Enc *) mfenc;
-  GstMFTransform *transform = mfenc->transform;
-  GList *output_list = NULL;
+  GstMFMp3Enc *self = (GstMFMp3Enc *) encoder;
+  GstMFTransform *transform = encoder->transform;
+  GList *output_list = nullptr;
   GList *iter;
   ComPtr < IMFMediaType > target_output;
   std::vector < ComPtr < IMFMediaType >> filtered_types;
@@ -339,12 +339,12 @@ gst_mf_mp3_enc_get_output_type (GstMFAudioEnc * mfenc, GstAudioInfo * info,
 }
 
 static gboolean
-gst_mf_mp3_enc_get_input_type (GstMFAudioEnc * mfenc, GstAudioInfo * info,
+gst_mf_mp3_enc_get_input_type (GstMFAudioEncoder * encoder, GstAudioInfo * info,
     IMFMediaType ** input_type)
 {
-  GstMFMp3Enc *self = (GstMFMp3Enc *) mfenc;
-  GstMFTransform *transform = mfenc->transform;
-  GList *input_list = NULL;
+  GstMFMp3Enc *self = (GstMFMp3Enc *) encoder;
+  GstMFTransform *transform = encoder->transform;
+  GList *input_list = nullptr;
   GList *iter;
   ComPtr < IMFMediaType > target_input;
   std::vector < ComPtr < IMFMediaType >> filtered_types;
@@ -416,15 +416,15 @@ gst_mf_mp3_enc_get_input_type (GstMFAudioEnc * mfenc, GstAudioInfo * info,
 }
 
 static gboolean
-gst_mf_mp3_enc_set_src_caps (GstMFAudioEnc * mfenc, GstAudioInfo * info)
+gst_mf_mp3_enc_set_src_caps (GstMFAudioEncoder * encoder, GstAudioInfo * info)
 {
-  GstMFMp3Enc *self = (GstMFMp3Enc *) mfenc;
+  GstMFMp3Enc *self = (GstMFMp3Enc *) encoder;
   GstCaps *src_caps;
   gboolean ret;
   ComPtr < IMFMediaType > output_type;
   gint version = 1;
 
-  if (!gst_mf_transform_get_output_current_type (mfenc->transform,
+  if (!gst_mf_transform_get_output_current_type (encoder->transform,
           &output_type)) {
     GST_ERROR_OBJECT (self, "Couldn't get current output type");
     return FALSE;
@@ -442,7 +442,7 @@ gst_mf_mp3_enc_set_src_caps (GstMFAudioEnc * mfenc, GstAudioInfo * info)
       "mpegaudioversion", G_TYPE_INT, version,
       "layer", G_TYPE_INT, 3,
       "channels", G_TYPE_INT, GST_AUDIO_INFO_CHANNELS (info),
-      "rate", G_TYPE_INT, GST_AUDIO_INFO_RATE (info), NULL);
+      "rate", G_TYPE_INT, GST_AUDIO_INFO_RATE (info), nullptr);
 
   ret =
       gst_audio_encoder_set_output_format (GST_AUDIO_ENCODER (self), src_caps);
@@ -469,11 +469,11 @@ gst_mf_mp3_enc_register (GstPlugin * plugin, guint rank,
   gboolean is_default = TRUE;
   GTypeInfo type_info = {
     sizeof (GstMFMp3EncClass),
-    NULL,
-    NULL,
+    nullptr,
+    nullptr,
     (GClassInitFunc) gst_mf_mp3_enc_class_init,
-    NULL,
-    NULL,
+    nullptr,
+    nullptr,
     sizeof (GstMFMp3Enc),
     0,
     (GInstanceInitFunc) gst_mf_mp3_enc_init,
@@ -502,7 +502,7 @@ gst_mf_mp3_enc_register (GstPlugin * plugin, guint rank,
   }
 
   type =
-      g_type_register_static (GST_TYPE_MF_AUDIO_ENC, type_name, &type_info,
+      g_type_register_static (GST_TYPE_MF_AUDIO_ENCODER, type_name, &type_info,
       (GTypeFlags) 0);
 
   /* make lower rank than default device */
@@ -520,8 +520,8 @@ static gboolean
 gst_mf_mp3_enc_create_template_caps (const std::set < UINT32 > &rate_list,
     gint channels, GstCaps ** sink_caps, GstCaps ** src_caps)
 {
-  GstCaps *sink = NULL;
-  GstCaps *src = NULL;
+  GstCaps *sink = nullptr;
+  GstCaps *src = nullptr;
   GValue rate_value = G_VALUE_INIT;
 
   if (rate_list.empty ()) {
@@ -538,8 +538,8 @@ gst_mf_mp3_enc_create_template_caps (const std::set < UINT32 > &rate_list,
         gst_caps_from_string ("audio/mpeg, mpegversion = (int) 1,"
         "layer = (int) 3");
 
-    gst_caps_set_simple (sink, "channels", G_TYPE_INT, channels, NULL);
-    gst_caps_set_simple (src, "channels", G_TYPE_INT, channels, NULL);
+    gst_caps_set_simple (sink, "channels", G_TYPE_INT, channels, nullptr);
+    gst_caps_set_simple (src, "channels", G_TYPE_INT, channels, nullptr);
   } else {
     sink =
         gst_caps_from_string ("audio/x-raw, "
@@ -567,12 +567,12 @@ gst_mf_mp3_enc_create_template_caps (const std::set < UINT32 > &rate_list,
 
   g_value_unset (&rate_value);
 
-  if (*sink_caps == NULL)
+  if (*sink_caps == nullptr)
     *sink_caps = sink;
   else
     *sink_caps = gst_caps_merge (*sink_caps, sink);
 
-  if (*src_caps == NULL)
+  if (*src_caps == nullptr)
     *src_caps = src;
   else
     *src_caps = gst_caps_merge (*src_caps, src);
@@ -586,10 +586,10 @@ gst_mf_mp3_enc_plugin_init_internal (GstPlugin * plugin, guint rank,
 {
   HRESULT hr;
   gint i;
-  GstCaps *src_caps = NULL;
-  GstCaps *sink_caps = NULL;
-  gchar *device_name = NULL;
-  GList *output_list = NULL;
+  GstCaps *src_caps = nullptr;
+  GstCaps *sink_caps = nullptr;
+  gchar *device_name = nullptr;
+  GList *output_list = nullptr;
   GList *iter;
   std::set < UINT32 > mono_rate_list;
   std::set < UINT32 > stereo_rate_list;
@@ -599,7 +599,7 @@ gst_mf_mp3_enc_plugin_init_internal (GstPlugin * plugin, guint rank,
   if (!gst_mf_transform_open (transform))
     return;
 
-  g_object_get (transform, "device-name", &device_name, NULL);
+  g_object_get (transform, "device-name", &device_name, nullptr);
   if (!device_name) {
     GST_WARNING_OBJECT (transform, "Unknown device name");
     return;

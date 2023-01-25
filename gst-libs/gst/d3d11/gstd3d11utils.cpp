@@ -23,10 +23,23 @@
 
 #include "gstd3d11utils.h"
 #include "gstd3d11device.h"
-#include "gstd3d11_private.h"
+#include "gstd3d11-private.h"
 
 #include <windows.h>
 #include <versionhelpers.h>
+#include <mutex>
+
+/**
+ * SECTION:gstd3d11utils
+ * @title: GstD3D11Utils
+ * @short_description: Direct3D11 specific utility methods
+ *
+ * Since: 1.22
+ */
+
+/* *INDENT-OFF* */
+static std::recursive_mutex _context_lock;
+/* *INDENT-ON* */
 
 GST_DEBUG_CATEGORY_STATIC (GST_CAT_CONTEXT);
 #ifndef GST_DISABLE_GST_DEBUG
@@ -34,18 +47,13 @@ GST_DEBUG_CATEGORY_STATIC (GST_CAT_CONTEXT);
 static GstDebugCategory *
 ensure_debug_category (void)
 {
-  static gsize cat_gonce = 0;
+  static GstDebugCategory *cat = nullptr;
 
-  if (g_once_init_enter (&cat_gonce)) {
-    gsize cat_done;
+  GST_D3D11_CALL_ONCE_BEGIN {
+    cat = _gst_debug_category_new ("d3d11utils", 0, "d3d11 utility functions");
+  } GST_D3D11_CALL_ONCE_END;
 
-    cat_done = (gsize) _gst_debug_category_new ("d3d11utils", 0,
-        "d3d11 utility functions");
-
-    g_once_init_leave (&cat_gonce, cat_done);
-  }
-
-  return (GstDebugCategory *) cat_gonce;
+  return cat;
 }
 #else
 #define ensure_debug_category() /* NOOP */
@@ -54,12 +62,9 @@ ensure_debug_category (void)
 static void
 _init_context_debug (void)
 {
-  static gsize _init = 0;
-
-  if (g_once_init_enter (&_init)) {
+  GST_D3D11_CALL_ONCE_BEGIN {
     GST_DEBUG_CATEGORY_GET (GST_CAT_CONTEXT, "GST_CONTEXT");
-    g_once_init_leave (&_init, 1);
-  }
+  } GST_D3D11_CALL_ONCE_END;
 }
 
 /**
@@ -78,7 +83,7 @@ _init_context_debug (void)
  *
  * Returns: whether the @device could be set successfully
  *
- * Since: 1.20
+ * Since: 1.22
  */
 gboolean
 gst_d3d11_handle_set_context (GstElement * element, GstContext * context,
@@ -139,7 +144,7 @@ gst_d3d11_handle_set_context (GstElement * element, GstContext * context,
  *
  * Returns: whether the @device could be set successfully
  *
- * Since: 1.20
+ * Since: 1.22
  */
 gboolean
 gst_d3d11_handle_set_context_for_adapter_luid (GstElement * element,
@@ -227,7 +232,7 @@ context_set_d3d11_device (GstContext * context, GstD3D11Device * device)
  * Returns: Whether the @query was successfully responded to from the passed
  *          @device.
  *
- * Since: 1.20
+ * Since: 1.22
  */
 gboolean
 gst_d3d11_handle_context_query (GstElement * element, GstQuery * query,
@@ -373,13 +378,16 @@ run_d3d11_context_query (GstElement * element, GstD3D11Device ** device)
  *
  * Returns: whether a #GstD3D11Device exists in @device
  *
- * Since: 1.20
+ * Since: 1.22
  */
 gboolean
 gst_d3d11_ensure_element_data (GstElement * element, gint adapter,
     GstD3D11Device ** device)
 {
   guint target_adapter = 0;
+  /* *INDENT-OFF* */
+  std::lock_guard<std::recursive_mutex> lk (_context_lock);
+  /* *INDENT-ON* */
 
   g_return_val_if_fail (element != NULL, FALSE);
   g_return_val_if_fail (device != NULL, FALSE);
@@ -441,12 +449,16 @@ gst_d3d11_ensure_element_data (GstElement * element, gint adapter,
  *
  * Returns: whether a #GstD3D11Device exists in @device
  *
- * Since: 1.20
+ * Since: 1.22
  */
 gboolean
 gst_d3d11_ensure_element_data_for_adapter_luid (GstElement * element,
     gint64 adapter_luid, GstD3D11Device ** device)
 {
+  /* *INDENT-OFF* */
+  std::lock_guard<std::recursive_mutex> lk (_context_lock);
+  /* *INDENT-ON* */
+
   g_return_val_if_fail (element != NULL, FALSE);
   g_return_val_if_fail (device != NULL, FALSE);
 
@@ -492,14 +504,37 @@ gst_d3d11_ensure_element_data_for_adapter_luid (GstElement * element,
 }
 
 /**
+ * gst_d3d11_context_new:
+ * @device: (transfer none): a #GstD3D11Device
+ *
+ * Creates a new #GstContext object with @device
+ *
+ * Returns: a #GstContext object
+ *
+ * Since: 1.22
+ */
+GstContext *
+gst_d3d11_context_new (GstD3D11Device * device)
+{
+  GstContext *context;
+
+  g_return_val_if_fail (GST_IS_D3D11_DEVICE (device), nullptr);
+
+  context = gst_context_new (GST_D3D11_DEVICE_HANDLE_CONTEXT_TYPE, TRUE);
+  context_set_d3d11_device (context, device);
+
+  return context;
+}
+
+/**
  * gst_d3d11_luid_to_int64:
  * @luid: A pointer to LUID struct
  *
- * Converts from a LUID to a 64-bit signed integer.
+ * Converts @luid to a 64-bit signed integer.
  * See also Int64FromLuid method defined in
  * windows.devices.display.core.interop.h Windows SDK header
  *
- * Since: 1.20
+ * Since: 1.22
  */
 gint64
 gst_d3d11_luid_to_int64 (const LUID * luid)
@@ -514,6 +549,21 @@ gst_d3d11_luid_to_int64 (const LUID * luid)
   return val.QuadPart;
 }
 
+/**
+ * _gst_d3d11_result:
+ * @result: HRESULT D3D11 API return code
+ * @device: (nullable): Associated #GstD3D11Device
+ * @cat: a #GstDebugCategory
+ * @file: the file that checking the result code
+ * @function: the function that checking the result code
+ * @line: the line that checking the result code
+ *
+ * Prints debug message if @result code indicates the operation was failed.
+ *
+ * Returns: %TRUE if D3D11 API call result is SUCCESS
+ *
+ * Since: 1.22
+ */
 gboolean
 _gst_d3d11_result (HRESULT hr, GstD3D11Device * device, GstDebugCategory * cat,
     const gchar * file, const gchar * function, gint line)

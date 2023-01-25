@@ -75,10 +75,6 @@ struct _GstVaH264Dec
 {
   GstVaBaseDec parent;
 
-  GstFlowReturn last_ret;
-
-  gint coded_width;
-  gint coded_height;
   gint dpb_size;
 
   /* Used to fill VAPictureParameterBufferH264.ReferenceFrames */
@@ -121,33 +117,19 @@ gst_va_h264_dec_output_picture (GstH264Decoder * decoder,
 {
   GstVaBaseDec *base = GST_VA_BASE_DEC (decoder);
   GstVaH264Dec *self = GST_VA_H264_DEC (decoder);
+  GstVideoDecoder *vdec = GST_VIDEO_DECODER (decoder);
+  gboolean ret;
 
   GST_LOG_OBJECT (self,
       "Outputting picture %p (poc %d)", picture, picture->pic_order_cnt);
 
-  if (self->last_ret != GST_FLOW_OK) {
-    gst_h264_picture_unref (picture);
-    gst_video_decoder_drop_frame (GST_VIDEO_DECODER (self), frame);
-    return self->last_ret;
-  }
-
-  if (base->copy_frames)
-    gst_va_base_dec_copy_output_buffer (base, frame);
-
-  if (picture->buffer_flags != 0) {
-    gboolean interlaced =
-        (picture->buffer_flags & GST_VIDEO_BUFFER_FLAG_INTERLACED) != 0;
-    gboolean tff = (picture->buffer_flags & GST_VIDEO_BUFFER_FLAG_TFF) != 0;
-
-    GST_TRACE_OBJECT (self,
-        "apply buffer flags 0x%x (interlaced %d, top-field-first %d)",
-        picture->buffer_flags, interlaced, tff);
-    GST_BUFFER_FLAG_SET (frame->output_buffer, picture->buffer_flags);
-  }
-
+  ret = gst_va_base_dec_process_output (base, frame, picture->discont_state,
+      picture->buffer_flags);
   gst_h264_picture_unref (picture);
 
-  return gst_video_decoder_finish_frame (GST_VIDEO_DECODER (self), frame);
+  if (ret)
+    return gst_video_decoder_finish_frame (vdec, frame);
+  return GST_FLOW_ERROR;
 }
 
 static void
@@ -491,19 +473,12 @@ gst_va_h264_dec_new_picture (GstH264Decoder * decoder,
     GstVideoCodecFrame * frame, GstH264Picture * picture)
 {
   GstVaH264Dec *self = GST_VA_H264_DEC (decoder);
-  GstVaDecodePicture *pic;
-  GstVideoDecoder *vdec = GST_VIDEO_DECODER (decoder);
   GstVaBaseDec *base = GST_VA_BASE_DEC (decoder);
+  GstVaDecodePicture *pic;
+  GstFlowReturn ret;
 
-  if (base->need_negotiation) {
-    if (!gst_video_decoder_negotiate (vdec)) {
-      GST_ERROR_OBJECT (self, "Failed to negotiate with downstream");
-      return GST_FLOW_NOT_NEGOTIATED;
-    }
-  }
-
-  self->last_ret = gst_video_decoder_allocate_output_frame (vdec, frame);
-  if (self->last_ret != GST_FLOW_OK)
+  ret = gst_va_base_dec_prepare_output_frame (base, frame);
+  if (ret != GST_FLOW_OK)
     goto error;
 
   pic = gst_va_decode_picture_new (base->decoder, frame->output_buffer);
@@ -520,20 +495,20 @@ error:
   {
     GST_WARNING_OBJECT (self,
         "Failed to allocated output buffer, return %s",
-        gst_flow_get_name (self->last_ret));
-    return self->last_ret;
+        gst_flow_get_name (ret));
+    return ret;
   }
 }
 
 static GstFlowReturn
 gst_va_h264_dec_new_field_picture (GstH264Decoder * decoder,
-    const GstH264Picture * first_field, GstH264Picture * second_field)
+    GstH264Picture * first_field, GstH264Picture * second_field)
 {
   GstVaDecodePicture *first_pic, *second_pic;
   GstVaH264Dec *self = GST_VA_H264_DEC (decoder);
   GstVaBaseDec *base = GST_VA_BASE_DEC (decoder);
 
-  first_pic = gst_h264_picture_get_user_data ((GstH264Picture *) first_field);
+  first_pic = gst_h264_picture_get_user_data (first_field);
   if (!first_pic)
     return GST_FLOW_ERROR;
 
@@ -667,6 +642,7 @@ gst_va_h264_dec_new_sequence (GstH264Decoder * decoder, const GstH264SPS * sps,
 {
   GstVaBaseDec *base = GST_VA_BASE_DEC (decoder);
   GstVaH264Dec *self = GST_VA_H264_DEC (decoder);
+  GstVideoInfo *info = &base->output_info;
   VAProfile profile;
   gint display_width;
   gint display_height;
@@ -704,34 +680,35 @@ gst_va_h264_dec_new_sequence (GstH264Decoder * decoder, const GstH264SPS * sps,
           rt_format, sps->width, sps->height)) {
     base->profile = profile;
     base->rt_format = rt_format;
-    self->coded_width = sps->width;
-    self->coded_height = sps->height;
+    base->width = sps->width;
+    base->height = sps->height;
 
     negotiation_needed = TRUE;
     GST_INFO_OBJECT (self, "Format changed to %s [%x] (%dx%d)",
-        gst_va_profile_name (profile), rt_format, self->coded_width,
-        self->coded_height);
+        gst_va_profile_name (profile), rt_format, base->width, base->height);
   }
 
-  if (base->width != display_width || base->height != display_height) {
-    base->width = display_width;
-    base->height = display_height;
+  if (GST_VIDEO_INFO_WIDTH (info) != display_width ||
+      GST_VIDEO_INFO_HEIGHT (info) != display_height) {
+    GST_VIDEO_INFO_WIDTH (info) = display_width;
+    GST_VIDEO_INFO_HEIGHT (info) = display_height;
 
     negotiation_needed = TRUE;
-    GST_INFO_OBJECT (self, "Resolution changed to %dx%d", base->width,
-        base->height);
+    GST_INFO_OBJECT (self, "Resolution changed to %dx%d",
+        GST_VIDEO_INFO_WIDTH (info), GST_VIDEO_INFO_HEIGHT (info));
   }
 
   interlaced = !sps->frame_mbs_only_flag;
   if (self->interlaced != interlaced) {
     self->interlaced = interlaced;
-
+    GST_VIDEO_INFO_INTERLACE_MODE (info) = interlaced ?
+        GST_VIDEO_INTERLACE_MODE_MIXED : GST_VIDEO_INTERLACE_MODE_PROGRESSIVE;
     negotiation_needed = TRUE;
     GST_INFO_OBJECT (self, "Interlaced mode changed to %d", interlaced);
   }
 
-  base->need_valign = base->width < self->coded_width
-      || base->height < self->coded_height;
+  base->need_valign = GST_VIDEO_INFO_WIDTH (info) < base->width ||
+      GST_VIDEO_INFO_HEIGHT (info) < base->height;
   if (base->need_valign) {
     /* *INDENT-OFF* */
     if (base->valign.padding_left != padding_left ||
@@ -752,10 +729,22 @@ gst_va_h264_dec_new_sequence (GstH264Decoder * decoder, const GstH264SPS * sps,
   }
 
   base->min_buffers = self->dpb_size + 4;       /* dpb size + scratch surfaces */
-
   base->need_negotiation = negotiation_needed;
+  g_clear_pointer (&base->input_state, gst_video_codec_state_unref);
+  base->input_state = gst_video_codec_state_ref (decoder->input_state);
 
   return GST_FLOW_OK;
+}
+
+static inline void
+_append_str (GValue * list, const gchar * str)
+{
+  GValue v = G_VALUE_INIT;
+
+  g_value_init (&v, G_TYPE_STRING);
+  g_value_set_string (&v, str);
+  gst_value_list_append_value (list, &v);
+  g_value_unset (&v);
 }
 
 static GstCaps *
@@ -763,8 +752,12 @@ _complete_sink_caps (GstCaps * sinkcaps)
 {
   GstCaps *caps = gst_caps_copy (sinkcaps);
   GValue val = G_VALUE_INIT;
+  const GValue *profiles;
+  GstStructure *st;
   const gchar *streamformat[] = { "avc", "avc3", "byte-stream" };
-  gint i;
+  const gchar *high_synthetic[] = { "progressive-high", "constrained-high" };
+  guint i, j, siz;
+  gboolean baseline = FALSE;
 
   g_value_init (&val, G_TYPE_STRING);
   g_value_set_string (&val, "au");
@@ -772,15 +765,33 @@ _complete_sink_caps (GstCaps * sinkcaps)
   g_value_unset (&val);
 
   gst_value_list_init (&val, G_N_ELEMENTS (streamformat));
-  for (i = 0; i < G_N_ELEMENTS (streamformat); i++) {
-    GValue v = G_VALUE_INIT;
-
-    g_value_init (&v, G_TYPE_STRING);
-    g_value_set_string (&v, streamformat[i]);
-    gst_value_list_append_value (&val, &v);
-    g_value_unset (&v);
-  }
+  for (i = 0; i < G_N_ELEMENTS (streamformat); i++)
+    _append_str (&val, streamformat[i]);
   gst_caps_set_value (caps, "stream-format", &val);
+  g_value_unset (&val);
+
+  /* add synthetic profiles */
+  st = gst_caps_get_structure (caps, 0);
+  profiles = gst_structure_get_value (st, "profile");
+  siz = gst_value_list_get_size (profiles);
+  gst_value_list_init (&val, siz);
+  for (i = 0; i < siz; i++) {
+    const gchar *profile =
+        g_value_get_string (gst_value_list_get_value (profiles, i));
+
+    _append_str (&val, profile);
+
+    if (g_strcmp0 (profile, "high") == 0) {
+      for (j = 0; j < G_N_ELEMENTS (high_synthetic); j++)
+        _append_str (&val, high_synthetic[j]);
+    }
+    if (!baseline && ((g_strcmp0 (profile, "main") == 0)
+            || g_strcmp0 (profile, "constrained-baseline") == 0)) {
+      _append_str (&val, "baseline");
+      baseline = TRUE;
+    }
+  }
+  gst_caps_set_value (caps, "profile", &val);
   g_value_unset (&val);
 
   return caps;
@@ -812,54 +823,6 @@ gst_va_h264_dec_getcaps (GstVideoDecoder * decoder, GstCaps * filter)
   }
 
   return caps;
-}
-
-static gboolean
-gst_va_h264_dec_negotiate (GstVideoDecoder * decoder)
-{
-  GstVaBaseDec *base = GST_VA_BASE_DEC (decoder);
-  GstVaH264Dec *self = GST_VA_H264_DEC (decoder);
-  GstVideoFormat format = GST_VIDEO_FORMAT_UNKNOWN;
-  GstCapsFeatures *capsfeatures = NULL;
-  GstH264Decoder *h264dec = GST_H264_DECODER (decoder);
-
-  /* Ignore downstream renegotiation request. */
-  if (!base->need_negotiation)
-    return TRUE;
-
-  base->need_negotiation = FALSE;
-
-  if (gst_va_decoder_is_open (base->decoder)
-      && !gst_va_decoder_close (base->decoder))
-    return FALSE;
-
-  if (!gst_va_decoder_open (base->decoder, base->profile, base->rt_format))
-    return FALSE;
-
-  if (!gst_va_decoder_set_frame_size (base->decoder, self->coded_width,
-          self->coded_height))
-    return FALSE;
-
-  if (base->output_state)
-    gst_video_codec_state_unref (base->output_state);
-
-  gst_va_base_dec_get_preferred_format_and_caps_features (base, &format,
-      &capsfeatures);
-
-  base->output_state =
-      gst_video_decoder_set_output_state (decoder, format,
-      base->width, base->height, h264dec->input_state);
-  if (self->interlaced)
-    base->output_state->info.interlace_mode = GST_VIDEO_INTERLACE_MODE_MIXED;
-
-  base->output_state->caps = gst_video_info_to_caps (&base->output_state->info);
-  if (capsfeatures)
-    gst_caps_set_features_simple (base->output_state->caps, capsfeatures);
-
-  GST_INFO_OBJECT (self, "Negotiated caps %" GST_PTR_FORMAT,
-      base->output_state->caps);
-
-  return GST_VIDEO_DECODER_CLASS (parent_class)->negotiate (decoder);
 }
 
 static void
@@ -901,6 +864,13 @@ gst_va_h264_dec_class_init (gpointer g_class, gpointer class_data)
 
   parent_class = g_type_class_peek_parent (g_class);
 
+  /**
+   * GstVaH264Dec:device-path:
+   *
+   * It shows the DRM device path used for the VA operation, if any.
+   *
+   * Since: 1.22
+   */
   gst_va_base_dec_class_init (GST_VA_BASE_DEC_CLASS (g_class), H264,
       cdata->render_device_path, cdata->sink_caps, cdata->src_caps,
       src_doc_caps, sink_doc_caps);
@@ -908,7 +878,6 @@ gst_va_h264_dec_class_init (gpointer g_class, gpointer class_data)
   gobject_class->dispose = gst_va_h264_dec_dispose;
 
   decoder_class->getcaps = GST_DEBUG_FUNCPTR (gst_va_h264_dec_getcaps);
-  decoder_class->negotiate = GST_DEBUG_FUNCPTR (gst_va_h264_dec_negotiate);
 
   h264decoder_class->new_sequence =
       GST_DEBUG_FUNCPTR (gst_va_h264_dec_new_sequence);
@@ -946,7 +915,7 @@ gst_va_h264_dec_init (GTypeInstance * instance, gpointer g_class)
   self->ref_list = g_array_sized_new (FALSE, TRUE,
       sizeof (GstH264Picture *), 16);
   g_array_set_clear_func (self->ref_list,
-      (GDestroyNotify) gst_h264_picture_clear);
+      (GDestroyNotify) gst_clear_h264_picture);
 }
 
 static gpointer
@@ -992,16 +961,14 @@ gst_va_h264_dec_register (GstPlugin * plugin, GstVaDevice * device,
 
   type_info.class_data = cdata;
 
-  type_name = g_strdup ("GstVaH264Dec");
-  feature_name = g_strdup ("vah264dec");
-
   /* The first decoder to be registered should use a constant name,
    * like vah264dec, for any additional decoders, we create unique
    * names, using inserting the render device name. */
-  if (g_type_from_name (type_name)) {
+  if (device->index == 0) {
+    type_name = g_strdup ("GstVaH264Dec");
+    feature_name = g_strdup ("vah264dec");
+  } else {
     gchar *basename = g_path_get_basename (device->render_device_path);
-    g_free (type_name);
-    g_free (feature_name);
     type_name = g_strdup_printf ("GstVa%sH264Dec", basename);
     feature_name = g_strdup_printf ("va%sh264dec", basename);
     cdata->description = basename;

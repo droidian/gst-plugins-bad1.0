@@ -50,9 +50,9 @@
 #include <gst/gl/gstglfuncs.h>
 #endif
 
-#include "gstcudamemory.h"
+#include <gst/cuda/gstcudamemory.h>
+#include <gst/cuda/gstcudabufferpool.h>
 #include "gstnvdecoder.h"
-#include "gstcudabufferpool.h"
 #include <string.h>
 
 GST_DEBUG_CATEGORY_EXTERN (gst_nv_decoder_debug);
@@ -84,6 +84,7 @@ struct _GstNvDecoder
 
   GstNvDecoderFrameInfo *frame_pool;
   guint pool_size;
+  gboolean alloc_aux_frame;
 
   GstVideoInfo info;
   GstVideoInfo coded_info;
@@ -254,11 +255,12 @@ gst_nv_decoder_reset (GstNvDecoder * self)
 gboolean
 gst_nv_decoder_configure (GstNvDecoder * decoder, cudaVideoCodec codec,
     GstVideoInfo * info, gint coded_width, gint coded_height,
-    guint coded_bitdepth, guint pool_size)
+    guint coded_bitdepth, guint pool_size, gboolean alloc_aux_frame)
 {
   CUVIDDECODECREATEINFO create_info = { 0, };
   GstVideoFormat format;
   gboolean ret;
+  guint alloc_size;
 
   g_return_val_if_fail (GST_IS_NV_DECODER (decoder), FALSE);
   g_return_val_if_fail (codec < cudaVideoCodec_NumCodecs, FALSE);
@@ -276,10 +278,23 @@ gst_nv_decoder_configure (GstNvDecoder * decoder, cudaVideoCodec codec,
 
   format = GST_VIDEO_INFO_FORMAT (info);
 
+  /* Additional 2 frame margin */
+  pool_size += 2;
+
+  /* Need pool size * 2 for decode-only (used for reference) frame
+   * and output frame, AV1 film grain case for example */
+  if (alloc_aux_frame) {
+    alloc_size = pool_size * 2;
+  } else {
+    alloc_size = pool_size;
+  }
+
+  decoder->alloc_aux_frame = alloc_aux_frame;
+
   /* FIXME: check aligned resolution or actual coded resolution */
   create_info.ulWidth = GST_VIDEO_INFO_WIDTH (&decoder->coded_info);
   create_info.ulHeight = GST_VIDEO_INFO_HEIGHT (&decoder->coded_info);
-  create_info.ulNumDecodeSurfaces = pool_size;
+  create_info.ulNumDecodeSurfaces = alloc_size;
   create_info.CodecType = codec;
   create_info.ChromaFormat = chroma_format_from_video_format (format);
   create_info.ulCreationFlags = cudaVideoCreate_Default;
@@ -352,8 +367,15 @@ gst_nv_decoder_new_frame (GstNvDecoder * decoder)
 
   frame = g_new0 (GstNvDecoderFrame, 1);
   frame->index = index_to_use;
+  frame->decode_frame_index = index_to_use;
   frame->decoder = gst_object_ref (decoder);
   frame->ref_count = 1;
+  if (decoder->alloc_aux_frame) {
+    /* [0, pool_size - 1]: output picture
+     * [pool_size, pool_size * 2 - 1]: decoder output without film-grain,
+     * used for reference picture */
+    frame->decode_frame_index = index_to_use + decoder->pool_size;
+  }
 
   GST_LOG_OBJECT (decoder, "New frame %p (index %d)", frame, frame->index);
 
@@ -375,6 +397,7 @@ gst_nv_decoder_frame_map (GstNvDecoderFrame * frame)
 
   /* TODO: check interlaced */
   params.progressive_frame = 1;
+  params.output_stream = self->cuda_stream;
 
   if (frame->mapped) {
     GST_WARNING_OBJECT (self, "Frame %p is mapped already", frame);
@@ -644,13 +667,13 @@ gst_nv_decoder_copy_frame_to_gl_internal (GstGLContext * context,
     copy_params.dstDevice = dst_ptr;
     copy_params.Height = GST_VIDEO_INFO_COMP_HEIGHT (info, i);
 
-    if (!gst_cuda_result (CuMemcpy2DAsync (&copy_params, NULL))) {
+    if (!gst_cuda_result (CuMemcpy2DAsync (&copy_params, self->cuda_stream))) {
       GST_WARNING_OBJECT (self, "memcpy to mapped array failed");
       data->ret = FALSE;
     }
   }
 
-  gst_cuda_result (CuStreamSynchronize (NULL));
+  gst_cuda_result (CuStreamSynchronize (self->cuda_stream));
 
 unmap_video_frame:
   for (i = 0; i < num_resources; i++) {
@@ -740,33 +763,24 @@ gst_nv_decoder_copy_frame_to_cuda (GstNvDecoder * decoder,
 {
   CUDA_MEMCPY2D copy_params = { 0, };
   GstMemory *mem;
-  GstCudaMemory *cuda_mem = NULL;
   gint i;
   gboolean ret = FALSE;
+  GstVideoFrame video_frame;
 
   mem = gst_buffer_peek_memory (buffer, 0);
   if (!gst_is_cuda_memory (mem)) {
     GST_WARNING_OBJECT (decoder, "Not a CUDA memory");
     return FALSE;
-  } else {
-    GstCudaMemory *cmem = GST_CUDA_MEMORY_CAST (mem);
-
-    if (cmem->context == decoder->context ||
-        gst_cuda_context_get_handle (cmem->context) ==
-        gst_cuda_context_get_handle (decoder->context) ||
-        (gst_cuda_context_can_access_peer (cmem->context, decoder->context) &&
-            gst_cuda_context_can_access_peer (decoder->context,
-                cmem->context))) {
-      cuda_mem = cmem;
-    }
   }
 
-  if (!cuda_mem) {
-    GST_WARNING_OBJECT (decoder, "Access to CUDA memory is not allowed");
+  if (!gst_video_frame_map (&video_frame,
+          &decoder->info, buffer, GST_MAP_WRITE | GST_MAP_CUDA)) {
+    GST_ERROR_OBJECT (decoder, "frame map failure");
     return FALSE;
   }
 
   if (!gst_cuda_context_push (decoder->context)) {
+    gst_video_frame_unmap (&video_frame);
     GST_ERROR_OBJECT (decoder, "Failed to push CUDA context");
     return FALSE;
   }
@@ -778,8 +792,9 @@ gst_nv_decoder_copy_frame_to_cuda (GstNvDecoder * decoder,
   for (i = 0; i < GST_VIDEO_INFO_N_PLANES (&decoder->info); i++) {
     copy_params.srcDevice = frame->devptr +
         (i * frame->pitch * GST_VIDEO_INFO_HEIGHT (&decoder->info));
-    copy_params.dstDevice = cuda_mem->data + cuda_mem->offset[i];
-    copy_params.dstPitch = cuda_mem->stride;
+    copy_params.dstDevice =
+        (CUdeviceptr) GST_VIDEO_FRAME_PLANE_DATA (&video_frame, i);
+    copy_params.dstPitch = GST_VIDEO_FRAME_PLANE_STRIDE (&video_frame, i);
     copy_params.WidthInBytes = GST_VIDEO_INFO_COMP_WIDTH (&decoder->info, 0)
         * GST_VIDEO_INFO_COMP_PSTRIDE (&decoder->info, 0);
     copy_params.Height = GST_VIDEO_INFO_COMP_HEIGHT (&decoder->info, i);
@@ -795,6 +810,7 @@ gst_nv_decoder_copy_frame_to_cuda (GstNvDecoder * decoder,
   ret = TRUE;
 
 done:
+  gst_video_frame_unmap (&video_frame);
   gst_cuda_context_pop (NULL);
 
   GST_LOG_OBJECT (decoder, "Copy frame to CUDA ret %d", ret);
@@ -804,7 +820,8 @@ done:
 
 gboolean
 gst_nv_decoder_finish_frame (GstNvDecoder * decoder, GstVideoDecoder * videodec,
-    GstNvDecoderFrame * frame, GstBuffer ** buffer)
+    GstVideoCodecState * input_state, GstNvDecoderFrame * frame,
+    GstBuffer ** buffer)
 {
   GstBuffer *outbuf = NULL;
   gboolean ret = FALSE;
@@ -813,6 +830,13 @@ gst_nv_decoder_finish_frame (GstNvDecoder * decoder, GstVideoDecoder * videodec,
   g_return_val_if_fail (GST_IS_VIDEO_DECODER (videodec), GST_FLOW_ERROR);
   g_return_val_if_fail (frame != NULL, GST_FLOW_ERROR);
   g_return_val_if_fail (buffer != NULL, GST_FLOW_ERROR);
+
+  if (input_state) {
+    if (!gst_nv_decoder_negotiate (decoder, videodec, input_state)) {
+      GST_ERROR_OBJECT (videodec, "Couldn't re-negotiate with updated state");
+      return FALSE;
+    }
+  }
 
   outbuf = gst_video_decoder_allocate_output_buffer (videodec);
   if (!outbuf) {
@@ -1005,6 +1029,10 @@ gst_nv_decoder_get_supported_codec_profiles (GValue * profiles,
 
       ret = TRUE;
       break;
+    case cudaVideoCodec_AV1:
+      g_value_set_static_string (&val, "main");
+      gst_value_list_append_value (profiles, &val);
+      ret = TRUE;
     default:
       break;
   }
@@ -1049,7 +1077,8 @@ const GstNvdecoderCodecMap codec_map_list[] = {
       "video/x-h265, stream-format = (string) byte-stream"
         ", alignment = (string) au, profile = (string) { main }"},
   {cudaVideoCodec_VP8, "vp8", "video/x-vp8"},
-  {cudaVideoCodec_VP9, "vp9", "video/x-vp9"}
+  {cudaVideoCodec_VP9, "vp9", "video/x-vp9"},
+  {cudaVideoCodec_AV1, "av1", "video/x-av1, alignment = (string) frame"}
 };
 
 gboolean
@@ -1434,8 +1463,7 @@ gst_nv_decoder_ensure_gl_context (GstNvDecoder * decoder, GstElement * videodec)
 
 gboolean
 gst_nv_decoder_negotiate (GstNvDecoder * decoder,
-    GstVideoDecoder * videodec, GstVideoCodecState * input_state,
-    GstVideoCodecState ** output_state)
+    GstVideoDecoder * videodec, GstVideoCodecState * input_state)
 {
   GstVideoCodecState *state;
   GstVideoInfo *info;
@@ -1443,7 +1471,6 @@ gst_nv_decoder_negotiate (GstNvDecoder * decoder,
   g_return_val_if_fail (GST_IS_NV_DECODER (decoder), FALSE);
   g_return_val_if_fail (GST_IS_VIDEO_DECODER (videodec), FALSE);
   g_return_val_if_fail (input_state != NULL, FALSE);
-  g_return_val_if_fail (output_state != NULL, FALSE);
 
   if (!decoder->configured) {
     GST_ERROR_OBJECT (videodec, "Should configure decoder first");
@@ -1456,9 +1483,8 @@ gst_nv_decoder_negotiate (GstNvDecoder * decoder,
       GST_VIDEO_INFO_WIDTH (info), GST_VIDEO_INFO_HEIGHT (info), input_state);
   state->caps = gst_video_info_to_caps (&state->info);
 
-  if (*output_state)
-    gst_video_codec_state_unref (*output_state);
-  *output_state = state;
+  /* decoder baseclass will hold other reference to output state */
+  gst_video_codec_state_unref (state);
 
   decoder->output_type = GST_NV_DECODER_OUTPUT_TYPE_SYSTEM;
 
@@ -1567,6 +1593,12 @@ gst_nv_decoder_ensure_cuda_pool (GstNvDecoder * decoder, GstQuery * query)
   gst_buffer_pool_config_set_params (config, outcaps, size, min, max);
   gst_buffer_pool_config_add_option (config, GST_BUFFER_POOL_OPTION_VIDEO_META);
   gst_buffer_pool_set_config (pool, config);
+
+  /* Get updated size by cuda buffer pool */
+  config = gst_buffer_pool_get_config (pool);
+  gst_buffer_pool_config_get_params (config, NULL, &size, NULL, NULL);
+  gst_structure_free (config);
+
   if (n > 0)
     gst_query_set_nth_allocation_pool (query, 0, pool, size, min, max);
   else

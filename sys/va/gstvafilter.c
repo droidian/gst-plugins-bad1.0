@@ -24,15 +24,13 @@
 
 #include "gstvafilter.h"
 
+#include <gst/va/gstvavideoformat.h>
+#include <gst/va/vasurfaceimage.h>
 #include <gst/video/video.h>
-
 #include <va/va_drmcommon.h>
 
-#include "gstvaallocator.h"
 #include "gstvacaps.h"
 #include "gstvadisplay_priv.h"
-#include "gstvavideoformat.h"
-#include "vasurfaceimage.h"
 
 struct _GstVaFilter
 {
@@ -60,6 +58,8 @@ struct _GstVaFilter
   guint mirror;
   guint rotation;
   GstVideoOrientationMethod orientation;
+
+  guint32 scale_method;
 
   gboolean crop_enabled;
 
@@ -203,10 +203,8 @@ gst_va_filter_ensure_config_attributes (GstVaFilter * self,
 
   dpy = gst_va_display_get_va_dpy (self->display);
 
-  gst_va_display_lock (self->display);
   status = vaGetConfigAttributes (dpy, VAProfileNone, VAEntrypointVideoProc,
       attribs, G_N_ELEMENTS (attribs));
-  gst_va_display_unlock (self->display);
   if (status != VA_STATUS_SUCCESS) {
     GST_ERROR_OBJECT (self, "vaGetConfigAttributes: %s", vaErrorStr (status));
     return FALSE;
@@ -247,8 +245,7 @@ format_is_accepted (GstVaFilter * self, GstVideoFormat format)
 {
   /* https://github.com/intel/media-driver/issues/690
    * https://github.com/intel/media-driver/issues/644 */
-  if (!gst_va_display_is_implementation (self->display,
-          GST_VA_IMPLEMENTATION_INTEL_IHD))
+  if (!GST_VA_DISPLAY_IS_IMPLEMENTATION (self->display, INTEL_IHD))
     return TRUE;
 
   switch (format) {
@@ -332,10 +329,8 @@ gst_va_filter_ensure_pipeline_caps (GstVaFilter * self)
 
   dpy = gst_va_display_get_va_dpy (self->display);
 
-  gst_va_display_lock (self->display);
   status = vaQueryVideoProcPipelineCaps (dpy, self->context, NULL, 0,
       &self->pipeline_caps);
-  gst_va_display_unlock (self->display);
   if (status != VA_STATUS_SUCCESS) {
     GST_ERROR_OBJECT (self, "vaQueryVideoProcPipelineCaps: %s",
         vaErrorStr (status));
@@ -363,19 +358,14 @@ gst_va_filter_open (GstVaFilter * self)
   if (!gst_va_filter_ensure_config_attributes (self, &attrib.value))
     return FALSE;
 
-  if (!gst_va_filter_ensure_pipeline_caps (self))
-    return FALSE;
-
   self->image_formats = gst_va_display_get_image_formats (self->display);
   if (!self->image_formats)
     return FALSE;
 
   dpy = gst_va_display_get_va_dpy (self->display);
 
-  gst_va_display_lock (self->display);
   status = vaCreateConfig (dpy, VAProfileNone, VAEntrypointVideoProc, &attrib,
       1, &self->config);
-  gst_va_display_unlock (self->display);
   if (status != VA_STATUS_SUCCESS) {
     GST_ERROR_OBJECT (self, "vaCreateConfig: %s", vaErrorStr (status));
     return FALSE;
@@ -384,12 +374,15 @@ gst_va_filter_open (GstVaFilter * self)
   if (!gst_va_filter_ensure_surface_attributes (self))
     goto bail;
 
-  gst_va_display_lock (self->display);
   status = vaCreateContext (dpy, self->config, 0, 0, 0, NULL, 0,
       &self->context);
-  gst_va_display_unlock (self->display);
   if (status != VA_STATUS_SUCCESS) {
     GST_ERROR_OBJECT (self, "vaCreateContext: %s", vaErrorStr (status));
+    goto bail;
+  }
+
+  if (!gst_va_filter_ensure_pipeline_caps (self)) {
+    vaDestroyContext (dpy, self->context);
     goto bail;
   }
 
@@ -397,9 +390,7 @@ gst_va_filter_open (GstVaFilter * self)
 
 bail:
   {
-    gst_va_display_lock (self->display);
     status = vaDestroyConfig (dpy, self->config);
-    gst_va_display_unlock (self->display);
 
     return FALSE;
   }
@@ -420,16 +411,12 @@ gst_va_filter_close (GstVaFilter * self)
   dpy = gst_va_display_get_va_dpy (self->display);
 
   if (self->context != VA_INVALID_ID) {
-    gst_va_display_lock (self->display);
     status = vaDestroyContext (dpy, self->context);
-    gst_va_display_unlock (self->display);
     if (status != VA_STATUS_SUCCESS)
       GST_ERROR_OBJECT (self, "vaDestroyContext: %s", vaErrorStr (status));
   }
 
-  gst_va_display_lock (self->display);
   status = vaDestroyConfig (dpy, self->config);
-  gst_va_display_unlock (self->display);
   if (status != VA_STATUS_SUCCESS) {
     GST_ERROR_OBJECT (self, "vaDestroyConfig: %s", vaErrorStr (status));
     return FALSE;
@@ -447,15 +434,21 @@ gst_va_filter_close (GstVaFilter * self)
 static const struct VaFilterCapMap {
   VAProcFilterType type;
   guint count;
+  const char *name;
 } filter_cap_map[] = {
-  { VAProcFilterNoiseReduction, 1 },
-  { VAProcFilterDeinterlacing, VAProcDeinterlacingCount },
-  { VAProcFilterSharpening, 1 },
-  { VAProcFilterColorBalance, VAProcColorBalanceCount },
-  { VAProcFilterSkinToneEnhancement, 1 },
-  { VAProcFilterTotalColorCorrection, VAProcTotalColorCorrectionCount },
-  { VAProcFilterHVSNoiseReduction, 0 },
-  { VAProcFilterHighDynamicRangeToneMapping, 1 },
+#define F(name, count) { G_PASTE (VAProcFilter, name), count, G_STRINGIFY (name) }
+  F(NoiseReduction, 1),
+  F(Deinterlacing, VAProcDeinterlacingCount),
+  F(Sharpening, 1),
+  F(ColorBalance, VAProcColorBalanceCount),
+  F(SkinToneEnhancement, 1),
+  F(TotalColorCorrection, VAProcTotalColorCorrectionCount),
+  F(HVSNoiseReduction, 0),
+  F(HighDynamicRangeToneMapping, VAProcHighDynamicRangeMetadataTypeCount),
+#if VA_CHECK_VERSION (1, 12, 0)
+  F(3DLUT, 16),
+#endif
+#undef F
 };
 /* *INDENT-ON* */
 
@@ -489,7 +482,11 @@ struct VaFilter
     VAProcFilterCapDeinterlacing deint[VAProcDeinterlacingCount];
     VAProcFilterCapColorBalance cb[VAProcColorBalanceCount];
     VAProcFilterCapTotalColorCorrection cc[VAProcTotalColorCorrectionCount];
-    VAProcFilterCapHighDynamicRange hdr;
+      VAProcFilterCapHighDynamicRange
+        hdr[VAProcHighDynamicRangeMetadataTypeCount];
+#if VA_CHECK_VERSION (1, 12, 0)
+    VAProcFilterCap3DLUT lut[16];
+#endif
   } caps;
 };
 
@@ -514,14 +511,10 @@ gst_va_filter_ensure_filters (GstVaFilter * self)
 
   dpy = gst_va_display_get_va_dpy (self->display);
 
-  gst_va_display_lock (self->display);
   status = vaQueryVideoProcFilters (dpy, self->context, filter_types, &num);
-  gst_va_display_unlock (self->display);
   if (status == VA_STATUS_ERROR_MAX_NUM_EXCEEDED) {
     filter_types = g_try_realloc_n (filter_types, num, sizeof (*filter_types));
-    gst_va_display_lock (self->display);
     status = vaQueryVideoProcFilters (dpy, self->context, filter_types, &num);
-    gst_va_display_unlock (self->display);
   }
   if (status != VA_STATUS_SUCCESS) {
     GST_ERROR_OBJECT (self, "vaQueryVideoProcFilters: %s", vaErrorStr (status));
@@ -538,10 +531,8 @@ gst_va_filter_ensure_filters (GstVaFilter * self)
     struct VaFilter filter = { filter_types[i], num_caps, {{{0,}}} };
 
     if (num_caps > 0) {
-      gst_va_display_lock (self->display);
       status = vaQueryVideoProcFilterCaps (dpy, self->context, filter.type,
           &filter.caps, &filter.num_caps);
-      gst_va_display_unlock (self->display);
       if (status != VA_STATUS_SUCCESS) {
         GST_WARNING_OBJECT (self, "vaQueryVideoProcFiltersCaps: %s",
             vaErrorStr (status));
@@ -676,6 +667,19 @@ gst_va_filter_install_properties (GstVaFilter * self, GObjectClass * klass)
 
         break;
       }
+      case VAProcFilterHighDynamicRangeToneMapping:{
+        guint j;
+        for (j = 0; j < filter->num_caps; j++) {
+          const VAProcFilterCapHighDynamicRange *caps = &filter->caps.hdr[j];
+          if (caps->metadata_type == VAProcHighDynamicRangeMetadataHDR10
+              && (caps->caps_flag & VA_TONE_MAPPING_HDR_TO_SDR)) {
+            g_object_class_install_property (klass, GST_VA_FILTER_PROP_HDR,
+                g_param_spec_boolean ("hdr-tone-mapping", "HDR tone mapping",
+                    "Enable HDR to SDR tone mapping", FALSE, common_flags));
+            break;
+          }
+        }
+      }
       default:
         break;
     }
@@ -689,37 +693,6 @@ gst_va_filter_install_properties (GstVaFilter * self, GObjectClass * klass)
             GST_TYPE_VIDEO_ORIENTATION_METHOD, GST_VIDEO_ORIENTATION_IDENTITY,
             common_flags));
   }
-
-  /**
-   * GstVaPostProc:disable-passthrough:
-   *
-   * If set to %TRUE the filter will not enable passthrough mode, thus
-   * each frame will be processed. It's useful for cropping, for
-   * example.
-   *
-   * Since: 1.20
-   */
-  g_object_class_install_property (klass,
-      GST_VA_FILTER_PROP_DISABLE_PASSTHROUGH,
-      g_param_spec_boolean ("disable-passthrough", "Disable Passthrough",
-          "Forces passing buffers through the postprocessor", FALSE,
-          G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS
-          | GST_PARAM_MUTABLE_READY));
-
-  /**
-   * GstVaPostProc:add-borders:
-   *
-   * If set to %TRUE the filter will add black borders if necessary to
-   * keep the display aspect ratio.
-   *
-   * Since: 1.20
-   */
-  g_object_class_install_property (klass, GST_VA_FILTER_PROP_ADD_BORDERS,
-      g_param_spec_boolean ("add-borders", "Add Borders",
-          "Add black borders if necessary to keep the display aspect ratio",
-          FALSE, G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS
-          | GST_PARAM_MUTABLE_PLAYING));
-
 
   return TRUE;
 }
@@ -941,6 +914,18 @@ gst_va_filter_get_surface_formats (GstVaFilter * self)
   GST_OBJECT_UNLOCK (self);
 
   return ret;
+}
+
+gboolean
+gst_va_filter_set_scale_method (GstVaFilter * self, guint32 method)
+{
+  g_return_val_if_fail (GST_IS_VA_FILTER (self), FALSE);
+
+  GST_OBJECT_LOCK (self);
+  self->scale_method = method;
+  GST_OBJECT_UNLOCK (self);
+
+  return TRUE;
 }
 
 static gboolean
@@ -1382,10 +1367,8 @@ _query_pipeline_caps (GstVaFilter * self, GArray * filters,
 
   dpy = gst_va_display_get_va_dpy (self->display);
 
-  gst_va_display_lock (self->display);
   status = vaQueryVideoProcPipelineCaps (dpy, self->context, va_filters,
       num_filters, caps);
-  gst_va_display_unlock (self->display);
 
   if (status != VA_STATUS_SUCCESS) {
     GST_ERROR_OBJECT (self, "vaQueryVideoProcPipelineCaps: %s",
@@ -1438,6 +1421,17 @@ gst_va_filter_add_deinterlace_buffer (GstVaFilter * self,
   return TRUE;
 }
 
+#ifndef GST_DISABLE_GST_DEBUG
+static const gchar *
+get_va_filter_name (gpointer data)
+{
+  VAProcFilterType type = ((VAProcFilterParameterBuffer *) data)->type;
+  const struct VaFilterCapMap *m = gst_va_filter_get_filter_cap (type);
+
+  return m ? m->name : "Unknown";
+}
+#endif
+
 gboolean
 gst_va_filter_add_filter_buffer (GstVaFilter * self, gpointer data, gsize size,
     guint num)
@@ -1453,14 +1447,14 @@ gst_va_filter_add_filter_buffer (GstVaFilter * self, gpointer data, gsize size,
     return FALSE;
 
   dpy = gst_va_display_get_va_dpy (self->display);
-  gst_va_display_lock (self->display);
   status = vaCreateBuffer (dpy, self->context, VAProcFilterParameterBufferType,
       size, num, data, &buffer);
-  gst_va_display_unlock (self->display);
   if (status != VA_STATUS_SUCCESS) {
     GST_ERROR_OBJECT (self, "vaCreateBuffer: %s", vaErrorStr (status));
     return FALSE;
   }
+
+  GST_DEBUG_OBJECT (self, "Added filter: %s", get_va_filter_name (data));
 
   /* lazy creation */
   GST_OBJECT_LOCK (self);
@@ -1489,9 +1483,7 @@ _destroy_filters_unlocked (GstVaFilter * self)
   for (i = 0; i < self->filters->len; i++) {
     buffer = g_array_index (self->filters, VABufferID, i);
 
-    gst_va_display_lock (self->display);
     status = vaDestroyBuffer (dpy, buffer);
-    gst_va_display_unlock (self->display);
     if (status != VA_STATUS_SUCCESS) {
       ret = FALSE;
       GST_WARNING_OBJECT (self, "Failed to destroy filter buffer: %s",
@@ -1519,23 +1511,34 @@ gst_va_filter_drop_filter_buffers (GstVaFilter * self)
   return ret;
 }
 
+static VASurfaceID
+_get_surface_from_buffer (GstVaFilter * self, GstBuffer * buffer)
+{
+  VASurfaceID surface = VA_INVALID_ID;
+
+  if (buffer)
+    surface = gst_va_buffer_get_surface (buffer);
+
+  if (surface != VA_INVALID_ID) {
+    /* @FIXME: in gallium vaQuerySurfaceStatus only seems to work with
+     * encoder's surfaces */
+    if (!GST_VA_DISPLAY_IS_IMPLEMENTATION (self->display, MESA_GALLIUM))
+      if (!va_check_surface (self->display, surface))
+        surface = VA_INVALID_ID;
+  }
+
+  return surface;
+}
+
 static gboolean
 _fill_va_sample (GstVaFilter * self, GstVaSample * sample,
     GstPadDirection direction)
 {
   GstVideoCropMeta *crop = NULL;
 
-  if (sample->buffer)
-    sample->surface = gst_va_buffer_get_surface (sample->buffer);
+  sample->surface = _get_surface_from_buffer (self, sample->buffer);
   if (sample->surface == VA_INVALID_ID)
     return FALSE;
-
-  /* @FIXME: in gallium vaQuerySurfaceStatus only seems to work with
-   * encoder's surfaces */
-  if (!GST_VA_DISPLAY_IS_IMPLEMENTATION (self->display, MESA_GALLIUM)) {
-    if (!va_check_surface (self->display, sample->surface))
-      return FALSE;
-  }
 
   /* XXX: cropping occurs only in input frames */
   if (direction == GST_PAD_SRC) {
@@ -1608,23 +1611,24 @@ _create_pipeline_buffer (GstVaFilter * self, GstVaSample * src,
     .output_surface_flag = dst->flags,
     .input_color_properties = self->input_color_properties,
     .output_color_properties = self->output_color_properties,
+    .filter_flags = self->scale_method,
+    /* output to SDR */
+    .output_hdr_metadata = NULL,
   };
   /* *INDENT-ON* */
 
   GST_OBJECT_UNLOCK (self);
 
   dpy = gst_va_display_get_va_dpy (self->display);
-  gst_va_display_lock (self->display);
   status = vaCreateBuffer (dpy, self->context,
       VAProcPipelineParameterBufferType, sizeof (params), 1, &params, buffer);
-  gst_va_display_unlock (self->display);
   if (status != VA_STATUS_SUCCESS) {
     GST_ERROR_OBJECT (self, "vaCreateBuffer: %s", vaErrorStr (status));
     return FALSE;
   }
 
-  GST_TRACE_OBJECT (self, "Created VABufferID %#x with %u filters", *buffer,
-      num_filters);
+  GST_TRACE_OBJECT (self, "Created VABufferID %#x with %u filters: "
+      "src %#x / dst %#x", *buffer, num_filters, src->surface, dst->surface);
 
   return TRUE;
 }
@@ -1666,25 +1670,20 @@ gst_va_filter_process (GstVaFilter * self, GstVaSample * src, GstVaSample * dst)
 
   dpy = gst_va_display_get_va_dpy (self->display);
 
-  gst_va_display_lock (self->display);
   status = vaBeginPicture (dpy, self->context, dst->surface);
-  gst_va_display_unlock (self->display);
   if (status != VA_STATUS_SUCCESS) {
     GST_ERROR_OBJECT (self, "vaBeginPicture: %s", vaErrorStr (status));
     return FALSE;
   }
 
-  gst_va_display_lock (self->display);
   status = vaRenderPicture (dpy, self->context, &buffer, 1);
-  gst_va_display_unlock (self->display);
   if (status != VA_STATUS_SUCCESS) {
-    GST_ERROR_OBJECT (self, "vaRenderPicture: %s", vaErrorStr (status));
+    GST_ERROR_OBJECT (self, "vaRenderPicture: %s with buffer %#x",
+        vaErrorStr (status), buffer);
     goto fail_end_pic;
   }
 
-  gst_va_display_lock (self->display);
   status = vaEndPicture (dpy, self->context);
-  gst_va_display_unlock (self->display);
   if (status != VA_STATUS_SUCCESS) {
     GST_ERROR_OBJECT (self, "vaEndPicture: %s", vaErrorStr (status));
     goto bail;
@@ -1693,9 +1692,7 @@ gst_va_filter_process (GstVaFilter * self, GstVaSample * src, GstVaSample * dst)
   ret = TRUE;
 
 bail:
-  gst_va_display_lock (self->display);
   status = vaDestroyBuffer (dpy, buffer);
-  gst_va_display_unlock (self->display);
   if (status != VA_STATUS_SUCCESS) {
     GST_WARNING_OBJECT (self, "Failed to destroy pipeline buffer: %s",
         vaErrorStr (status));
@@ -1705,12 +1702,145 @@ bail:
 
 fail_end_pic:
   {
-    gst_va_display_lock (self->display);
     status = vaEndPicture (dpy, self->context);
-    gst_va_display_unlock (self->display);
     if (status != VA_STATUS_SUCCESS)
       GST_ERROR_OBJECT (self, "vaEndPicture: %s", vaErrorStr (status));
     goto bail;
+  }
+}
+
+gboolean
+gst_va_filter_has_compose (GstVaFilter * self)
+{
+  g_return_val_if_fail (GST_IS_VA_FILTER (self), FALSE);
+
+  if (!gst_va_filter_is_open (self))
+    return FALSE;
+
+  /* HACK(uartie): i965 can't do composition */
+  if (GST_VA_DISPLAY_IS_IMPLEMENTATION (self->display, INTEL_I965))
+    return FALSE;
+
+  /* some drivers can compose, but may not support blending (e.g. GALLIUM) */
+#ifndef GST_DISABLE_GST_DEBUG
+  if (!(self->pipeline_caps.blend_flags & VA_BLEND_GLOBAL_ALPHA))
+    GST_WARNING_OBJECT (self, "VPP does not support alpha blending");
+#endif
+
+  return TRUE;
+}
+
+/**
+ * gst_va_filter_compose:
+ * @tx: the #GstVaComposeTransaction for input samples and output.
+ *
+ * Iterates over all inputs via #GstVaComposeTransaction:next and composes
+ * them onto the #GstVaComposeTransaction:output.
+ *
+ * Only csc, scaling and blending filters are applied during composition.
+ * All other filters are ignored here.  Use #gst_va_filter_process to apply
+ * other filters.
+ *
+ * Returns: TRUE on successful compose, FALSE otherwise.
+ *
+ * Since: 1.22
+ */
+gboolean
+gst_va_filter_compose (GstVaFilter * self, GstVaComposeTransaction * tx)
+{
+  VADisplay dpy;
+  VAStatus status;
+  VASurfaceID out_surface;
+  GstVaComposeSample *sample;
+
+  g_return_val_if_fail (GST_IS_VA_FILTER (self), FALSE);
+  g_return_val_if_fail (tx, FALSE);
+  g_return_val_if_fail (tx->next, FALSE);
+  g_return_val_if_fail (tx->output, FALSE);
+
+  if (!gst_va_filter_is_open (self))
+    return FALSE;
+
+  out_surface = _get_surface_from_buffer (self, tx->output);
+  if (out_surface == VA_INVALID_ID)
+    return FALSE;
+
+  dpy = gst_va_display_get_va_dpy (self->display);
+
+  status = vaBeginPicture (dpy, self->context, out_surface);
+  if (status != VA_STATUS_SUCCESS) {
+    GST_ERROR_OBJECT (self, "vaBeginPicture: %s", vaErrorStr (status));
+    return FALSE;
+  }
+
+  sample = tx->next (tx->user_data);
+  for (; sample; sample = tx->next (tx->user_data)) {
+    VAProcPipelineParameterBuffer params = { 0, };
+    VABufferID buffer;
+    VASurfaceID in_surface;
+    VABlendState blend = { 0, };
+
+    in_surface = _get_surface_from_buffer (self, sample->buffer);
+    if (in_surface == VA_INVALID_ID)
+      return FALSE;
+
+    /* (transfer full), unref it */
+    gst_buffer_unref (sample->buffer);
+
+    GST_OBJECT_LOCK (self);
+    /* *INDENT-OFF* */
+    params = (VAProcPipelineParameterBuffer) {
+      .surface = in_surface,
+      .surface_region = &sample->input_region,
+      .output_region = &sample->output_region,
+      .output_background_color = 0xff000000,
+      .filter_flags = self->scale_method,
+    };
+    /* *INDENT-ON* */
+    GST_OBJECT_UNLOCK (self);
+
+    /* only send blend state when sample is not fully opaque */
+    if ((self->pipeline_caps.blend_flags & VA_BLEND_GLOBAL_ALPHA)
+        && sample->alpha < 1.0) {
+      /* *INDENT-OFF* */
+      blend = (VABlendState) {
+        .flags = VA_BLEND_GLOBAL_ALPHA,
+        .global_alpha = sample->alpha,
+      };
+      /* *INDENT-ON* */
+      params.blend_state = &blend;
+    }
+
+    status = vaCreateBuffer (dpy, self->context,
+        VAProcPipelineParameterBufferType, sizeof (params), 1, &params,
+        &buffer);
+    if (status != VA_STATUS_SUCCESS) {
+      GST_ERROR_OBJECT (self, "vaCreateBuffer: %s", vaErrorStr (status));
+      goto fail_end_pic;
+    }
+
+    status = vaRenderPicture (dpy, self->context, &buffer, 1);
+    vaDestroyBuffer (dpy, buffer);
+    if (status != VA_STATUS_SUCCESS) {
+      GST_ERROR_OBJECT (self, "vaRenderPicture: %s", vaErrorStr (status));
+      goto fail_end_pic;
+    }
+  }
+
+  status = vaEndPicture (dpy, self->context);
+  if (status != VA_STATUS_SUCCESS) {
+    GST_ERROR_OBJECT (self, "vaEndPicture: %s", vaErrorStr (status));
+    return FALSE;
+  }
+
+  return TRUE;
+
+fail_end_pic:
+  {
+    status = vaEndPicture (dpy, self->context);
+    if (status != VA_STATUS_SUCCESS)
+      GST_ERROR_OBJECT (self, "vaEndPicture: %s", vaErrorStr (status));
+    return FALSE;
   }
 }
 
@@ -1792,4 +1922,27 @@ gst_va_filter_has_video_format (GstVaFilter * self, GstVideoFormat format,
   GST_OBJECT_UNLOCK (self);
 
   return FALSE;
+}
+
+/**
+ * GstVaScaleMethod:
+ *
+ * Since: 1.22
+ */
+GType
+gst_va_scale_method_get_type (void)
+{
+  static gsize type = 0;
+  static const GEnumValue values[] = {
+    {VA_FILTER_SCALING_DEFAULT, "Default scaling method", "default"},
+    {VA_FILTER_SCALING_FAST, "Fast scaling method", "fast"},
+    {VA_FILTER_SCALING_HQ, "High quality scaling method", "hq"},
+    {0, NULL, NULL},
+  };
+
+  if (g_once_init_enter (&type)) {
+    const GType _type = g_enum_register_static ("GstVaScaleMethod", values);
+    g_once_init_leave (&type, _type);
+  }
+  return type;
 }

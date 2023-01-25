@@ -33,10 +33,12 @@
 #include "vkupload.h"
 #include "vkimageidentity.h"
 #include "vkcolorconvert.h"
+#include "vkshaderspv.h"
 #include "vkdownload.h"
 #include "vkviewconvert.h"
 #include "vkdeviceprovider.h"
 #include "gstvulkanelements.h"
+#include "vkoverlaycompositor.h"
 
 
 static gboolean
@@ -56,7 +58,11 @@ plugin_init (GstPlugin * plugin)
 
   ret |= GST_ELEMENT_REGISTER (vulkanimageidentity, plugin);
 
+  ret |= GST_ELEMENT_REGISTER (vulkanshaderspv, plugin);
+
   ret |= GST_ELEMENT_REGISTER (vulkanviewconvert, plugin);
+
+  ret |= GST_ELEMENT_REGISTER (vulkanoverlaycompositor, plugin);
 
   return ret;
 }

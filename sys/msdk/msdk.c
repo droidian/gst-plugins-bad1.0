@@ -312,7 +312,7 @@ msdk_init_msdk_session (mfxIMPL impl, mfxVersion * pver,
 }
 
 void
-MFXUnload (mfxLoader loader)
+GstMFXUnload (mfxLoader loader)
 {
   g_assert (loader == NULL);
 }
@@ -551,6 +551,18 @@ gst_msdk_is_msdk_buffer (GstBuffer * buf)
     return TRUE;
   else
     return FALSE;
+}
+
+gboolean
+gst_msdk_is_va_mem (GstMemory * mem)
+{
+  GstAllocator *allocator;
+
+  allocator = mem->allocator;
+  if (!allocator)
+    return FALSE;
+
+  return g_str_equal (allocator->mem_type, "VAMemory");
 }
 
 mfxFrameSurface1 *

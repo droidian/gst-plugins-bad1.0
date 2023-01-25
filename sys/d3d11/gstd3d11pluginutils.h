@@ -24,10 +24,9 @@
 #include <gst/gst.h>
 #include <gst/video/video.h>
 #include <gst/d3d11/gstd3d11.h>
+#include <gst/d3d11/gstd3d11-private.h>
 
 G_BEGIN_DECLS
-
-typedef struct _GstDxgiColorSpace GstDxgiColorSpace;
 
 typedef enum
 {
@@ -39,22 +38,6 @@ typedef enum
   GST_D3D11_DEVICE_VENDOR_XBOX,
 } GstD3D11DeviceVendor;
 
-struct _GstDxgiColorSpace
-{
-  guint dxgi_color_space_type;
-  GstVideoColorRange range;
-  GstVideoColorMatrix matrix;
-  GstVideoTransferFunction transfer;
-  GstVideoColorPrimaries primaries;
-};
-
-#define GST_D3D11_CLEAR_COM(obj) G_STMT_START { \
-    if (obj) { \
-      (obj)->Release (); \
-      (obj) = NULL; \
-    } \
-  } G_STMT_END
-
 void            gst_d3d11_plugin_utils_init         (D3D_FEATURE_LEVEL feature_level);
 
 GstCaps *       gst_d3d11_get_updated_template_caps (GstStaticCaps * template_caps);
@@ -63,18 +46,13 @@ gboolean        gst_d3d11_is_windows_8_or_greater   (void);
 
 GstD3D11DeviceVendor gst_d3d11_get_device_vendor    (GstD3D11Device * device);
 
-#if (GST_D3D11_DXGI_HEADER_VERSION >= 5)
 gboolean        gst_d3d11_hdr_meta_data_to_dxgi     (GstVideoMasteringDisplayInfo * minfo,
                                                      GstVideoContentLightLevel * cll,
                                                      DXGI_HDR_METADATA_HDR10 * dxgi_hdr10);
-#endif
 
-#if (GST_D3D11_DXGI_HEADER_VERSION >= 4)
-const GstDxgiColorSpace * gst_d3d11_video_info_to_dxgi_color_space (GstVideoInfo * info);
-
-const GstDxgiColorSpace * gst_d3d11_find_swap_chain_color_space (GstVideoInfo * info,
-                                                                 IDXGISwapChain3 * swapchain);
-#endif
+gboolean        gst_d3d11_find_swap_chain_color_space (const GstVideoInfo * info,
+                                                       IDXGISwapChain3 * swapchain,
+                                                       DXGI_COLOR_SPACE_TYPE * color_space);
 
 GstBuffer *     gst_d3d11_allocate_staging_buffer_for (GstBuffer * buffer,
                                                        const GstVideoInfo * info,

@@ -15,7 +15,9 @@ codecparser_sources = files([
   'dboolhuff.c',
   'vp8utils.c',
   'gstmpegvideometa.c',
-  'gstav1parser.c'
+  'gstav1parser.c',
+  'gsth264bitwriter.c',
+  'gsth265bitwriter.c',
 ])
 codecparser_headers = [
   'codecparsers-prelude.h',
@@ -30,7 +32,7 @@ codecparser_headers = [
   'gstjpegparser.h',
   'gstmpegvideometa.h',
   'gstvp9parser.h',
-  'gstav1parser.h'
+  'gstav1parser.h',
 ]
 install_headers(codecparser_headers, subdir : 'gstreamer-1.0/gst/codecparsers')
 
@@ -67,5 +69,5 @@ gstcodecparsers_dep = declare_dependency(link_with : gstcodecparsers,
   include_directories : [libsinc],
   dependencies : [gstbase_dep])
 
-libraries += [[pkg_name, {'lib': gstcodecparsers}]]
+gst_libraries += [[pkg_name, {'lib': gstcodecparsers}]]
 meson.override_dependency(pkg_name, gstcodecparsers_dep)

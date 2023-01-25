@@ -1058,12 +1058,18 @@ warning_cb (G_GNUC_UNUSED GstBus * bus, GstMessage * msg, gpointer user_data)
   play_err =
       g_error_new_literal (GST_PLAY_ERROR, GST_PLAY_ERROR_FAILED, full_message);
 
-  GST_ERROR_OBJECT (self, "Warning: %s (%s, %d)", err->message,
+  GST_WARNING_OBJECT (self, "Warning: %s (%s, %d)", err->message,
       g_quark_to_string (err->domain), err->code);
 
-  api_bus_post_message (self, GST_PLAY_MESSAGE_WARNING,
-      GST_PLAY_MESSAGE_DATA_WARNING, G_TYPE_ERROR, play_err,
-      GST_PLAY_MESSAGE_DATA_WARNING_DETAILS, GST_TYPE_STRUCTURE, details, NULL);
+  if (details != NULL) {
+    api_bus_post_message (self, GST_PLAY_MESSAGE_WARNING,
+        GST_PLAY_MESSAGE_DATA_WARNING, G_TYPE_ERROR, play_err,
+        GST_PLAY_MESSAGE_DATA_WARNING_DETAILS, GST_TYPE_STRUCTURE, details,
+        NULL);
+  } else {
+    api_bus_post_message (self, GST_PLAY_MESSAGE_WARNING,
+        GST_PLAY_MESSAGE_DATA_WARNING, G_TYPE_ERROR, play_err, NULL);
+  }
 
   g_clear_error (&play_err);
   g_clear_error (&err);
@@ -1756,7 +1762,7 @@ gst_play_subtitle_info_update (GstPlay * self, GstPlayStreamInfo * stream_info)
 
       g_object_get (G_OBJECT (self->playbin), "current-suburi", &suburi, NULL);
       if (suburi) {
-        if (self->use_playbin3) {
+        if (self->use_playbin3 && self->subtitle_sid) {
           if (g_str_equal (self->subtitle_sid, stream_info->stream_id))
             info->language = g_path_get_basename (suburi);
         } else {

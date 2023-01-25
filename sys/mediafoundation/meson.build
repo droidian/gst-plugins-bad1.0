@@ -1,22 +1,26 @@
 mf_sources = [
-  'plugin.c',
-  'gstmfutils.cpp',
-  'gstmftransform.cpp',
-  'gstmfvideoenc.cpp',
+  'gstmfaacdec.cpp',
+  'gstmfaacenc.cpp',
+  'gstmfaudiodecoder.cpp',
+  'gstmfaudioencoder.cpp',
+  'gstmfdevice.cpp',
   'gstmfh264enc.cpp',
   'gstmfh265enc.cpp',
-  'gstmfvp9enc.cpp',
-  'gstmfvideosrc.c',
-  'gstmfsourceobject.c',
-  'gstmfdevice.c',
-  'gstmfaudioenc.cpp',
-  'gstmfaacenc.cpp',
+  'gstmfmp3dec.cpp',
   'gstmfmp3enc.cpp',
+  'gstmfplatloader.cpp',
+  'gstmfsourceobject.cpp',
+  'gstmftransform.cpp',
+  'gstmfutils.cpp',
   'gstmfvideobuffer.cpp',
-  'gstmfplatloader.c',
+  'gstmfvideoencoder.cpp',
+  'gstmfvideosrc.cpp',
+  'gstmfvp9enc.cpp',
+  'plugin.cpp',
 ]
 
 mf_desktop_sources = [
+  'gstmfcapturedshow.cpp',
   'gstmfsourcereader.cpp',
   'gstwin32devicewatcher.cpp',
 ]
@@ -168,5 +172,4 @@ gstmediafoundation = library('gstmediafoundation',
   install : true,
   install_dir : plugins_install_dir,
 )
-pkgconfig.generate(gstmediafoundation, install_dir : plugins_pkgconfig_install_dir)
 plugins += [gstmediafoundation]

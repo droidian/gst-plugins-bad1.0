@@ -365,9 +365,6 @@ typedef struct _GST_DXVA_Status_AV1
 
 #pragma pack(pop)
 
-/* reference list 8 + 4 margin */
-#define NUM_OUTPUT_VIEW 12
-
 /* *INDENT-OFF* */
 typedef struct _GstD3D11AV1DecInner
 {
@@ -423,11 +420,11 @@ static gboolean gst_d3d11_av1_dec_sink_event (GstVideoDecoder * decoder,
 
 /* GstAV1Decoder */
 static GstFlowReturn gst_d3d11_av1_dec_new_sequence (GstAV1Decoder * decoder,
-    const GstAV1SequenceHeaderOBU * seq_hdr);
+    const GstAV1SequenceHeaderOBU * seq_hdr, gint max_dpb_size);
 static GstFlowReturn gst_d3d11_av1_dec_new_picture (GstAV1Decoder * decoder,
     GstVideoCodecFrame * frame, GstAV1Picture * picture);
 static GstAV1Picture *gst_d3d11_av1_dec_duplicate_picture (GstAV1Decoder *
-    decoder, GstAV1Picture * picture);
+    decoder, GstVideoCodecFrame * frame, GstAV1Picture * picture);
 static GstFlowReturn gst_d3d11_av1_dec_start_picture (GstAV1Decoder * decoder,
     GstAV1Picture * picture, GstAV1Dpb * dpb);
 static GstFlowReturn gst_d3d11_av1_dec_decode_tile (GstAV1Decoder * decoder,
@@ -630,7 +627,7 @@ gst_d3d11_av1_dec_sink_event (GstVideoDecoder * decoder, GstEvent * event)
 
 static GstFlowReturn
 gst_d3d11_av1_dec_new_sequence (GstAV1Decoder * decoder,
-    const GstAV1SequenceHeaderOBU * seq_hdr)
+    const GstAV1SequenceHeaderOBU * seq_hdr, gint max_dpb_size)
 {
   GstD3D11AV1Dec *self = GST_D3D11_AV1_DEC (decoder);
   GstD3D11AV1DecInner *inner = self->inner;
@@ -686,14 +683,14 @@ gst_d3d11_av1_dec_new_sequence (GstAV1Decoder * decoder,
         out_format, inner->max_width, inner->max_height);
 
     if (!gst_d3d11_decoder_configure (inner->d3d11_decoder,
-            decoder->input_state, &info, (gint) inner->max_width,
-            (gint) inner->max_height, NUM_OUTPUT_VIEW)) {
+            decoder->input_state, &info, 0, 0, (gint) inner->max_width,
+            (gint) inner->max_height, max_dpb_size)) {
       GST_ERROR_OBJECT (self, "Failed to create decoder");
       return GST_FLOW_NOT_NEGOTIATED;
     }
 
     if (!gst_video_decoder_negotiate (GST_VIDEO_DECODER (self))) {
-      GST_ERROR_OBJECT (self, "Failed to negotiate with downstream");
+      GST_WARNING_OBJECT (self, "Failed to negotiate with downstream");
       return GST_FLOW_NOT_NEGOTIATED;
     }
   }
@@ -728,7 +725,7 @@ gst_d3d11_av1_dec_new_picture (GstAV1Decoder * decoder,
 
 static GstAV1Picture *
 gst_d3d11_av1_dec_duplicate_picture (GstAV1Decoder * decoder,
-    GstAV1Picture * picture)
+    GstVideoCodecFrame * frame, GstAV1Picture * picture)
 {
   GstD3D11AV1Dec *self = GST_D3D11_AV1_DEC (decoder);
   GstBuffer *view_buffer;
@@ -1204,10 +1201,8 @@ gst_d3d11_av1_dec_end_picture (GstAV1Decoder * decoder, GstAV1Picture * picture)
   input_args.bitstream = &inner->bitstream_buffer[0];
   input_args.bitstream_size = inner->bitstream_buffer.size ();
 
-  if (!gst_d3d11_decoder_decode_frame (inner->d3d11_decoder, view, &input_args))
-    return GST_FLOW_ERROR;
-
-  return GST_FLOW_OK;
+  return gst_d3d11_decoder_decode_frame (inner->d3d11_decoder,
+      view, &input_args);
 }
 
 static GstFlowReturn
@@ -1230,8 +1225,9 @@ gst_d3d11_av1_dec_output_picture (GstAV1Decoder * decoder,
   }
 
   if (!gst_d3d11_decoder_process_output (inner->d3d11_decoder, vdec,
-          picture->frame_hdr.render_width, picture->frame_hdr.render_height,
-          view_buffer, &frame->output_buffer)) {
+          picture->discont_state, picture->frame_hdr.render_width,
+          picture->frame_hdr.render_height, view_buffer,
+          &frame->output_buffer)) {
     GST_ERROR_OBJECT (self, "Failed to copy buffer");
     goto error;
   }
@@ -1341,16 +1337,10 @@ gst_d3d11_av1_dec_register (GstPlugin * plugin, GstD3D11Device * device,
 
   /* To cover both landscape and portrait, select max value */
   resolution = MAX (max_width, max_height);
-  gst_caps_set_simple (sink_caps,
-      "width", GST_TYPE_INT_RANGE, 1, resolution,
-      "height", GST_TYPE_INT_RANGE, 1, resolution, NULL);
-  gst_caps_set_simple (src_caps,
-      "width", GST_TYPE_INT_RANGE, 1, resolution,
-      "height", GST_TYPE_INT_RANGE, 1, resolution, NULL);
 
   type_info.class_data =
       gst_d3d11_decoder_class_data_new (device, GST_DXVA_CODEC_AV1,
-      sink_caps, src_caps);
+      sink_caps, src_caps, resolution);
 
   type_name = g_strdup ("GstD3D11AV1Dec");
   feature_name = g_strdup ("d3d11av1dec");

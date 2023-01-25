@@ -267,6 +267,8 @@ struct _GstMpeg2DecoderPrivate
   GstQueueArray *output_queue;
   /* used for low-latency vs. high throughput mode decision */
   gboolean is_live;
+
+  gboolean input_state_changed;
 };
 
 #define UPDATE_FLOW_RETURN(ret,new_ret) G_STMT_START { \
@@ -293,6 +295,7 @@ static gboolean gst_mpeg2_decoder_start (GstVideoDecoder * decoder);
 static gboolean gst_mpeg2_decoder_stop (GstVideoDecoder * decoder);
 static gboolean gst_mpeg2_decoder_set_format (GstVideoDecoder * decoder,
     GstVideoCodecState * state);
+static gboolean gst_mpeg2_decoder_negotiate (GstVideoDecoder * decoder);
 static GstFlowReturn gst_mpeg2_decoder_finish (GstVideoDecoder * decoder);
 static gboolean gst_mpeg2_decoder_flush (GstVideoDecoder * decoder);
 static GstFlowReturn gst_mpeg2_decoder_drain (GstVideoDecoder * decoder);
@@ -314,6 +317,7 @@ gst_mpeg2_decoder_class_init (GstMpeg2DecoderClass * klass)
   decoder_class->start = GST_DEBUG_FUNCPTR (gst_mpeg2_decoder_start);
   decoder_class->stop = GST_DEBUG_FUNCPTR (gst_mpeg2_decoder_stop);
   decoder_class->set_format = GST_DEBUG_FUNCPTR (gst_mpeg2_decoder_set_format);
+  decoder_class->negotiate = GST_DEBUG_FUNCPTR (gst_mpeg2_decoder_negotiate);
   decoder_class->finish = GST_DEBUG_FUNCPTR (gst_mpeg2_decoder_finish);
   decoder_class->flush = GST_DEBUG_FUNCPTR (gst_mpeg2_decoder_flush);
   decoder_class->drain = GST_DEBUG_FUNCPTR (gst_mpeg2_decoder_drain);
@@ -379,6 +383,8 @@ gst_mpeg2_decoder_set_format (GstVideoDecoder * decoder,
 
   GST_DEBUG_OBJECT (decoder, "Set format");
 
+  priv->input_state_changed = TRUE;
+
   if (self->input_state)
     gst_video_codec_state_unref (self->input_state);
 
@@ -393,6 +399,17 @@ gst_mpeg2_decoder_set_format (GstVideoDecoder * decoder,
   gst_query_unref (query);
 
   return TRUE;
+}
+
+static gboolean
+gst_mpeg2_decoder_negotiate (GstVideoDecoder * decoder)
+{
+  GstMpeg2Decoder *self = GST_MPEG2_DECODER (decoder);
+
+  /* output state must be updated by subclass using new input state already */
+  self->priv->input_state_changed = FALSE;
+
+  return GST_VIDEO_DECODER_CLASS (parent_class)->negotiate (decoder);
 }
 
 static GstFlowReturn
@@ -741,6 +758,8 @@ gst_mpeg2_decoder_handle_picture (GstMpeg2Decoder * decoder,
   GstMpegVideoPictureHdr pic_hdr = { 0, };
   GstMpeg2DecoderClass *klass = GST_MPEG2_DECODER_GET_CLASS (decoder);
 
+  g_assert (klass->new_sequence);
+
   if (!_is_valid_state (decoder, GST_MPEG2_DECODER_STATE_VALID_SEQ_HEADERS)) {
     GST_ERROR_OBJECT (decoder, "no sequence before parsing picture header");
     return GST_FLOW_ERROR;
@@ -767,24 +786,27 @@ gst_mpeg2_decoder_handle_picture (GstMpeg2Decoder * decoder,
       priv->need_to_drain = FALSE;
     }
 
-    if (klass->get_preferred_output_delay)
+    if (klass->get_preferred_output_delay) {
       priv->preferred_output_delay =
           klass->get_preferred_output_delay (decoder, priv->is_live);
+    } else {
+      priv->preferred_output_delay = 0;
+    }
 
     priv->seq_changed = FALSE;
 
-    if (klass->new_sequence) {
-      ret = klass->new_sequence (decoder, &priv->seq_hdr,
-          _seq_ext_is_valid (&priv->seq_ext) ? &priv->seq_ext : NULL,
-          _seq_display_ext_is_valid (&priv->seq_display_ext) ?
-          &priv->seq_display_ext : NULL,
-          _seq_scalable_ext_is_valid (&priv->seq_scalable_ext) ?
-          &priv->seq_scalable_ext : NULL);
+    ret = klass->new_sequence (decoder, &priv->seq_hdr,
+        _seq_ext_is_valid (&priv->seq_ext) ? &priv->seq_ext : NULL,
+        _seq_display_ext_is_valid (&priv->seq_display_ext) ?
+        &priv->seq_display_ext : NULL,
+        _seq_scalable_ext_is_valid (&priv->seq_scalable_ext) ?
+        &priv->seq_scalable_ext : NULL,
+        /* previous/next 2 pictures */
+        2 + priv->preferred_output_delay);
 
-      if (ret != GST_FLOW_OK) {
-        GST_WARNING_OBJECT (decoder, "new sequence error");
-        return ret;
-      }
+    if (ret != GST_FLOW_OK) {
+      GST_WARNING_OBJECT (decoder, "new sequence error");
+      return ret;
     }
   }
 
@@ -811,6 +833,14 @@ gst_mpeg2_decoder_start_current_picture (GstMpeg2Decoder * decoder,
   GstMpeg2DecoderClass *klass = GST_MPEG2_DECODER_GET_CLASS (decoder);
   GstMpeg2Picture *prev_picture, *next_picture;
   GstFlowReturn ret;
+
+  /* If subclass didn't update output state at this point,
+   * marking this picture as a discont and stores current input state */
+  if (priv->input_state_changed) {
+    priv->current_picture->discont_state =
+        gst_video_codec_state_ref (decoder->input_state);
+    priv->input_state_changed = FALSE;
+  }
 
   if (!klass->start_picture)
     return GST_FLOW_OK;
@@ -856,7 +886,7 @@ gst_mpeg2_decoder_ensure_current_picture (GstMpeg2Decoder * decoder,
 
     if (priv->first_field) {
       GST_WARNING_OBJECT (decoder, "An unmatched first field");
-      gst_mpeg2_picture_clear (&priv->first_field);
+      gst_clear_mpeg2_picture (&priv->first_field);
     }
 
     picture = gst_mpeg2_picture_new ();
@@ -955,7 +985,7 @@ gst_mpeg2_decoder_finish_current_field (GstMpeg2Decoder * decoder)
         priv->current_picture, priv->current_picture->structure ==
         GST_MPEG_VIDEO_PICTURE_STRUCTURE_FRAME ?
         " a field" : "the first field");
-    gst_mpeg2_picture_clear (&priv->current_picture);
+    gst_clear_mpeg2_picture (&priv->current_picture);
   }
 
   return GST_FLOW_OK;
@@ -1191,7 +1221,7 @@ gst_mpeg2_decoder_clear_output_frame (GstMpeg2DecoderOutputFrame * output_frame)
     output_frame->frame = NULL;
   }
 
-  gst_mpeg2_picture_clear (&output_frame->picture);
+  gst_clear_mpeg2_picture (&output_frame->picture);
 }
 
 static GstFlowReturn
@@ -1259,8 +1289,8 @@ gst_mpeg2_decoder_handle_frame (GstVideoDecoder * decoder,
   }
 
   ret = gst_mpeg2_decoder_output_current_picture (self);
-  gst_mpeg2_picture_clear (&priv->current_picture);
-  gst_mpeg2_picture_clear (&priv->first_field);
+  gst_clear_mpeg2_picture (&priv->current_picture);
+  gst_clear_mpeg2_picture (&priv->first_field);
   gst_video_codec_frame_unref (priv->current_frame);
   priv->current_frame = NULL;
   return ret;
@@ -1274,8 +1304,8 @@ failed:
     }
 
     gst_video_decoder_drop_frame (decoder, frame);
-    gst_mpeg2_picture_clear (&priv->current_picture);
-    gst_mpeg2_picture_clear (&priv->first_field);
+    gst_clear_mpeg2_picture (&priv->current_picture);
+    gst_clear_mpeg2_picture (&priv->first_field);
     priv->current_frame = NULL;
 
     return ret;

@@ -25,6 +25,8 @@
 #include <gst/base/base.h>
 #include <gst/video/video.h>
 
+#include "ccutils.h"
+
 G_BEGIN_DECLS
 #define GST_TYPE_CCCOMBINER \
   (gst_cc_combiner_get_type())
@@ -39,15 +41,6 @@ G_BEGIN_DECLS
 
 typedef struct _GstCCCombiner GstCCCombiner;
 typedef struct _GstCCCombinerClass GstCCCombinerClass;
-
-struct cdp_fps_entry
-{
-  guint8 fps_idx;
-  guint fps_n, fps_d;
-  guint max_cc_count;
-  guint max_ccp_count;
-  guint max_cea608_count;
-};
 
 struct _GstCCCombiner
 {
@@ -65,11 +58,14 @@ struct _GstCCCombiner
 
   gboolean prop_schedule;
   guint prop_max_scheduled;
+  gboolean prop_output_padding;
 
   gboolean schedule;
   guint max_scheduled;
-  /* One queue per field */
-  GstQueueArray *scheduled[2];
+  gboolean output_padding;
+  guint current_scheduled;
+
+  CCBuffer *cc_buffer;
   guint16 cdp_hdr_sequence_cntr;
   const struct cdp_fps_entry *cdp_fps_entry;
 };

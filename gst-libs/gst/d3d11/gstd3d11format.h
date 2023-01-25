@@ -17,8 +17,7 @@
  * Boston, MA 02110-1301, USA.
  */
 
-#ifndef __GST_D3D11_FORMAT_H__
-#define __GST_D3D11_FORMAT_H__
+#pragma once
 
 #include <gst/gst.h>
 #include <gst/video/video.h>
@@ -26,24 +25,13 @@
 
 G_BEGIN_DECLS
 
-#define GST_D3D11_COMMON_FORMATS \
-    "BGRA, RGBA, RGB10A2_LE, BGRx, RGBx, VUYA, NV12, NV21, " \
-    "P010_10LE, P012_LE, P016_LE, I420, YV12, I420_10LE, I420_12LE, " \
-    "Y42B, I422_10LE, I422_12LE, Y444, Y444_10LE, Y444_12LE, Y444_16LE, " \
-    "GRAY8, GRAY16_LE"
-
-#define GST_D3D11_EXTRA_IN_FORMATS \
-    "Y410"
-
-#define GST_D3D11_SINK_FORMATS \
-    "{ " GST_D3D11_COMMON_FORMATS " ," GST_D3D11_EXTRA_IN_FORMATS " }"
-
-#define GST_D3D11_SRC_FORMATS \
-    "{ " GST_D3D11_COMMON_FORMATS " }"
-
-#define GST_D3D11_ALL_FORMATS \
-    "{ " GST_D3D11_COMMON_FORMATS " ," GST_D3D11_EXTRA_IN_FORMATS " }"
-
+/**
+ * GstD3D11Format:
+ *
+ * Represent video format information in Direct3D11 term.
+ *
+ * Since: 1.22
+ */
 struct _GstD3D11Format
 {
   GstVideoFormat format;
@@ -54,12 +42,18 @@ struct _GstD3D11Format
   /* formats for texture processing */
   DXGI_FORMAT resource_format[GST_VIDEO_MAX_PLANES];
 
-  /*< private >*/
-  gpointer _gst_reserved[GST_PADDING];
-};
+  /* extra format used for unordered access view (unused) */
+  DXGI_FORMAT uav_format[GST_VIDEO_MAX_PLANES];
 
-GST_D3D11_API
-guint           gst_d3d11_dxgi_format_n_planes      (DXGI_FORMAT format);
+  /* D3D11_FORMAT_SUPPORT flags */
+  guint format_support[GST_VIDEO_MAX_PLANES];
+
+  /* D3D11_FORMAT_SUPPORT2 flags (unused) */
+  guint format_support2[GST_VIDEO_MAX_PLANES];
+
+  /*< private >*/
+  guint padding[GST_PADDING_LARGE];
+};
 
 GST_D3D11_API
 gboolean        gst_d3d11_dxgi_format_get_size      (DXGI_FORMAT format,
@@ -73,6 +67,26 @@ gboolean        gst_d3d11_dxgi_format_get_size      (DXGI_FORMAT format,
 GST_D3D11_API
 GstVideoFormat  gst_d3d11_dxgi_format_to_gst        (DXGI_FORMAT format);
 
+GST_D3D11_API
+void            gst_d3d11_format_init               (GstD3D11Format * format);
+
+GST_D3D11_API
+guint           gst_d3d11_dxgi_format_get_resource_format (DXGI_FORMAT format,
+                                                           DXGI_FORMAT resource_format[GST_VIDEO_MAX_PLANES]);
+
+GST_D3D11_API
+guint           gst_d3d11_dxgi_format_get_alignment       (DXGI_FORMAT format);
+
+GST_D3D11_API
+const gchar *   gst_d3d11_dxgi_format_to_string           (DXGI_FORMAT format);
+
+GST_D3D11_API
+gboolean        gst_video_info_to_dxgi_color_space       (const GstVideoInfo * info,
+                                                          DXGI_COLOR_SPACE_TYPE * color_space);
+
+GST_D3D11_API
+gboolean        gst_video_info_apply_dxgi_color_space    (DXGI_COLOR_SPACE_TYPE color_space,
+                                                          GstVideoInfo * info);
+
 G_END_DECLS
 
-#endif /* __GST_D3D11_FORMAT_H__ */

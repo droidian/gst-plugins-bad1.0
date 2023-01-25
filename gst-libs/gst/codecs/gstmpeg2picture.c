@@ -40,6 +40,9 @@ _gst_mpeg2_picture_free (GstMpeg2Picture * picture)
   if (picture->notify)
     picture->notify (picture->user_data);
 
+  if (picture->discont_state)
+    gst_video_codec_state_unref (picture->discont_state);
+
   g_free (picture);
 }
 
@@ -153,11 +156,11 @@ gst_mpeg2_dpb_free (GstMpeg2Dpb * dpb)
 
   g_return_if_fail (dpb != NULL);
 
-  gst_mpeg2_picture_clear (&dpb->new_pic);
+  gst_clear_mpeg2_picture (&dpb->new_pic);
 
   g_assert (dpb->num_ref_pictures <= 2);
   for (i = 0; i < dpb->num_ref_pictures; i++)
-    gst_mpeg2_picture_clear (&dpb->ref_pic_list[i]);
+    gst_clear_mpeg2_picture (&dpb->ref_pic_list[i]);
 
   g_free (dpb);
 }
@@ -177,11 +180,11 @@ gst_mpeg2_dpb_clear (GstMpeg2Dpb * dpb)
 
   g_return_if_fail (dpb != NULL);
 
-  gst_mpeg2_picture_clear (&dpb->new_pic);
+  gst_clear_mpeg2_picture (&dpb->new_pic);
 
   g_assert (dpb->num_ref_pictures <= 2);
   for (i = 0; i < dpb->num_ref_pictures; i++)
-    gst_mpeg2_picture_clear (&dpb->ref_pic_list[i]);
+    gst_clear_mpeg2_picture (&dpb->ref_pic_list[i]);
 
   dpb->num_ref_pictures = 0;
 }
@@ -289,13 +292,13 @@ gst_mpeg2_dpb_bump (GstMpeg2Dpb * dpb)
   /* Then, replace the reference if needed. */
   if (dpb->new_pic && GST_MPEG2_PICTURE_IS_REF (dpb->new_pic)) {
     _dpb_add_to_reference (dpb, dpb->new_pic);
-    gst_mpeg2_picture_clear (&dpb->new_pic);
+    gst_clear_mpeg2_picture (&dpb->new_pic);
   }
 
   if (pic) {
     pic->needed_for_output = FALSE;
     if (pic == dpb->new_pic)
-      gst_mpeg2_picture_clear (&dpb->new_pic);
+      gst_clear_mpeg2_picture (&dpb->new_pic);
   }
 
   return pic;

@@ -8,6 +8,7 @@ srtp_sources = [
 
 srtp_cargs = []
 if get_option('srtp').disabled()
+  srtp_dep = dependency('', required : false)
   subdir_done()
 endif
 
@@ -39,6 +40,5 @@ if srtp_dep.found()
     install : true,
     install_dir : plugins_install_dir,
   )
-  pkgconfig.generate(gstsrtp, install_dir : plugins_pkgconfig_install_dir)
   plugins += [gstsrtp]
 endif

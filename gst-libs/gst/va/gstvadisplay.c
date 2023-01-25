@@ -23,6 +23,7 @@
  * @title: GstVaDisplay
  * @short_description: Generic VADisplay wrapper.
  * @sources:
+ * - gstva.h
  * - gstvadisplay.h
  *
  * It is a generic wrapper for VADisplay. To create new instances
@@ -41,6 +42,7 @@
 #endif
 
 #include "gstvadisplay.h"
+
 #include <va/va.h>
 
 GST_DEBUG_CATEGORY (gst_va_display_debug);
@@ -49,12 +51,12 @@ GST_DEBUG_CATEGORY (gst_va_display_debug);
 typedef struct _GstVaDisplayPrivate GstVaDisplayPrivate;
 struct _GstVaDisplayPrivate
 {
-  GRecMutex lock;
   VADisplay display;
 
   gboolean foreign;
   gboolean init;
   GstVaImplementation impl;
+  gchar *vendor_desc;
 };
 
 #define gst_va_display_parent_class parent_class
@@ -65,6 +67,7 @@ G_DEFINE_TYPE_WITH_CODE (GstVaDisplay, gst_va_display, GST_TYPE_OBJECT,
 enum
 {
   PROP_VA_DISPLAY = 1,
+  PROP_DESC,
   N_PROPERTIES
 };
 
@@ -105,6 +108,7 @@ _gst_va_display_filter_driver (GstVaDisplay * self, gpointer foreign_display)
     priv->foreign = TRUE;
   }
   priv->impl = _get_implementation (vendor);
+  priv->vendor_desc = g_strdup (vendor);
 
   return TRUE;
 }
@@ -157,6 +161,9 @@ gst_va_display_get_property (GObject * object, guint prop_id, GValue * value,
     case PROP_VA_DISPLAY:
       g_value_set_pointer (value, priv->display);
       break;
+    case PROP_DESC:
+      g_value_set_string (value, priv->vendor_desc);
+      break;
     default:
       G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
       break;
@@ -193,7 +200,7 @@ gst_va_display_finalize (GObject * object)
 {
   GstVaDisplayPrivate *priv = GET_PRIV (object);
 
-  g_rec_mutex_clear (&priv->lock);
+  g_free (priv->vendor_desc);
 
   G_OBJECT_CLASS (parent_class)->finalize (object);
 }
@@ -213,6 +220,11 @@ gst_va_display_class_init (GstVaDisplayClass * klass)
       g_param_spec_pointer ("va-display", "VADisplay", "VA Display handler",
       G_PARAM_READWRITE | G_PARAM_CONSTRUCT_ONLY | G_PARAM_STATIC_STRINGS);
 
+  g_properties[PROP_DESC] =
+      g_param_spec_string ("description", "Description",
+      "Vendor specific VA implementation description", NULL,
+      G_PARAM_READABLE | G_PARAM_STATIC_STRINGS);
+
   g_object_class_install_properties (gobject_class, N_PROPERTIES, g_properties);
 }
 
@@ -221,50 +233,7 @@ gst_va_display_init (GstVaDisplay * self)
 {
   GstVaDisplayPrivate *priv = GET_PRIV (self);
 
-  g_rec_mutex_init (&priv->lock);
   priv->impl = GST_VA_IMPLEMENTATION_INVALID;
-}
-
-/**
- * gst_va_display_lock:
- * @self: a #GstVaDisplay
- *
- * Lock the display. It will be used before we call the
- * VA API functions to serialize the VA commands.
- *
- * Since: 1.20
- **/
-void
-gst_va_display_lock (GstVaDisplay * self)
-{
-  GstVaDisplayPrivate *priv;
-
-  g_return_if_fail (GST_IS_VA_DISPLAY (self));
-
-  priv = GET_PRIV (self);
-
-  g_rec_mutex_lock (&priv->lock);
-}
-
-/**
- * gst_va_display_unlock:
- * @self: a #GstVaDisplay
- *
- * Unlock the display. It will be used after we call the
- * VA API functions.
- *
- * Since: 1.20
- **/
-void
-gst_va_display_unlock (GstVaDisplay * self)
-{
-  GstVaDisplayPrivate *priv;
-
-  g_return_if_fail (GST_IS_VA_DISPLAY (self));
-
-  priv = GET_PRIV (self);
-
-  g_rec_mutex_unlock (&priv->lock);
 }
 
 #ifndef GST_DISABLE_GST_DEBUG
