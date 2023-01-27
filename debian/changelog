@@ -1,9 +1,17 @@
-gst-plugins-bad1.0 (1.22.0-1) UNRELEASED; urgency=medium
+gst-plugins-bad1.0 (1.22.0-1) experimental; urgency=medium
 
   * Team upload
   * New upstream release
+  * debian/rules: Set -Dauto_features=enabled
+    and explicitly disable several things that aren't buildable in Debian
+  * Build-Depend on glslc, gstreamer1.0-tools, libdirectfb-dev, liblrdf0-dev,
+    libneon27-dev, libvulkan-dev, & libxkbcommon-x11-dev
+  * debian/control: Bump minimum gstreamer, glib, libnice, and meson
+  * Update debian/libgstreamer-plugins-bad1.0-0.install
+  * Set Rules-Requires-Root: no
+  * Bump Standards-Version to 4.6.2
 
- -- Jeremy Bicha <jbicha@ubuntu.com>  Wed, 25 Jan 2023 10:37:01 -0500
+ -- Jeremy Bicha <jbicha@ubuntu.com>  Fri, 27 Jan 2023 17:50:14 -0500
 
 gst-plugins-bad1.0 (1.20.5-1) unstable; urgency=medium
 
