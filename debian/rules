@@ -45,7 +45,7 @@ ifeq (,$(filter $(DEB_HOST_ARCH),amd64 arm64 armel armhf i386 mips64el mipsel pp
 conf_flags += -Dopencv=disabled
 endif
 
-ifeq (,$(filter $(DEB_HOST_ARCH),s390x hppa m68k powerpc ppc64 sparc64))
+ifneq ($(DEB_HOST_ARCH_ENDIAN),little)
 conf_flags += -Dldac=disabled
 endif
 
