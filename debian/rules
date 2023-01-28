@@ -38,8 +38,6 @@ conf_flags += -Dmicrodns=disabled -Donnx=disabled -Dopensles=disabled -Dsvthevce
 conf_flags += -Damfcodec=disabled -Ddirectshow=disabled -Dwasapi=disabled -Dwasapi2=disabled
 # In non-free currently
 conf_flags += -Dfdkaac=disabled
-# Don't know why this doesn't work
-conf_flags += -Dqsv=disabled
 
 ifeq (,$(filter $(DEB_HOST_ARCH),amd64 arm64 armel armhf i386 mips64el mipsel ppc64el s390x alpha hppa hurd-i386 m68k powerpc ppc64 riscv64))
 conf_flags += -Dopencv=disabled
@@ -50,7 +48,7 @@ conf_flags += -Dldac=disabled
 endif
 
 ifneq ($(DEB_HOST_ARCH),amd64)
-conf_flags += -Dmsdk=disabled
+conf_flags += -Dmsdk=disabled -Dqsv=disabled
 endif
 
 ifneq ($(DEB_HOST_ARCH_OS),linux)
@@ -104,6 +102,7 @@ ifeq ($(DEB_HOST_ARCH_OS),linux)
 	dh_install -pgstreamer1.0-plugins-bad debian/tmp/usr/lib/$(DEB_HOST_MULTIARCH)/gstreamer-1.0/libgstsctp.so
 ifeq ($(DEB_HOST_ARCH),amd64)
 	dh_install -pgstreamer1.0-plugins-bad debian/tmp/usr/lib/$(DEB_HOST_MULTIARCH)/gstreamer-1.0/libgstmsdk.so
+	dh_install -pgstreamer1.0-plugins-bad debian/tmp/usr/lib/$(DEB_HOST_MULTIARCH)/gstreamer-1.0/libgstqsv.so
 endif
 endif
 
