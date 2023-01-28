@@ -52,7 +52,8 @@ conf_flags += -Dmsdk=disabled -Dqsv=disabled
 endif
 
 ifneq ($(DEB_HOST_ARCH_OS),linux)
-conf_flags += -Dbluez=disabled -Ddc1394=disabled -Dfbdev=disabled -Dsbc=disabled -Dva=disabled -Dv4l2codecs=disabled -Duvch264=disabled
+conf_flags += -Dbluez=disabled -Ddc1394=disabled -Dfbdev=disabled -Dsbc=disabled
+conf_flags += -Dva=disabled -Dv4l2codecs=disabled -Dwpe=disabled -Duvch264=disabled
 endif
 
 ifeq ($(DEB_HOST_ARCH_OS),hurd)
