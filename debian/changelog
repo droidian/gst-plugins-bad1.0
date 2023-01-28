@@ -1,3 +1,10 @@
+gst-plugins-bad1.0 (1.22.0-2) experimental; urgency=medium
+
+  * Disable Intel Quick Sync Video plugin (there is a build issue with it)
+  * Adjust some other configure & install rules
+
+ -- Jeremy Bicha <jbicha@ubuntu.com>  Sat, 28 Jan 2023 11:51:52 -0500
+
 gst-plugins-bad1.0 (1.22.0-1) experimental; urgency=medium
 
   * Team upload
