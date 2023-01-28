@@ -1,3 +1,13 @@
+gst-plugins-bad1.0 (1.22.0-3) unstable; urgency=medium
+
+  * The new Intel Quick Sync Video plugin is amd64-only
+    so only enable it there
+  * Bump minimum libzxingcore-dev to 1.4.0
+  * Enable wpe on all non-Linux architectures
+  * Release to unstable
+
+ -- Jeremy Bicha <jbicha@ubuntu.com>  Sat, 28 Jan 2023 14:23:11 -0500
+
 gst-plugins-bad1.0 (1.22.0-2) experimental; urgency=medium
 
   * Disable Intel Quick Sync Video plugin (there is a build issue with it)
