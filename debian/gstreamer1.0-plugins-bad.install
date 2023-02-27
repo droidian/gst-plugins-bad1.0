@@ -123,6 +123,5 @@ usr/lib/*/gstreamer-1.0/libgstwildmidi.so
 usr/lib/*/gstreamer-1.0/libgstx265.so
 usr/lib/*/gstreamer-1.0/libgsty4mdec.so
 usr/lib/*/gstreamer-1.0/libgstzbar.so
-usr/lib/*/gstreamer-1.0/libgstzxing.so
 usr/share/locale
 usr/share/gstreamer-1.0/presets/

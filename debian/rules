@@ -40,7 +40,7 @@ conf_flags += -Damfcodec=disabled -Ddirectshow=disabled -Dwasapi=disabled -Dwasa
 conf_flags += -Dfdkaac=disabled
 
 ifeq (,$(filter $(DEB_HOST_ARCH),amd64 arm64 armel armhf i386 mips64el mipsel ppc64el s390x alpha hppa hurd-i386 m68k powerpc ppc64 riscv64))
-conf_flags += -Dopencv=disabled
+conf_flags += -Dopencv=disabled -Dzxing=disabled
 endif
 
 ifneq ($(DEB_HOST_ARCH_ENDIAN),little)
@@ -110,6 +110,10 @@ endif
 
 ifneq ($(DEB_HOST_ARCH_OS),hurd)
 	dh_install -pgstreamer1.0-plugins-bad debian/tmp/usr/lib/$(DEB_HOST_MULTIARCH)/gstreamer-1.0/libgstresindvd.so
+endif
+
+ifneq (,$(filter $(DEB_HOST_ARCH),amd64 arm64 armel armhf i386 mips64el mipsel ppc64el s390x alpha hppa hurd-i386 m68k powerpc ppc64 riscv64))
+	dh_install -pgstreamer1.0-plugins-bad debian/tmp/usr/lib/$(DEB_HOST_MULTIARCH)/gstreamer-1.0/libgstzxing.so
 endif
 
 ifeq ($(DEB_HOST_ARCH_ENDIAN),little)
