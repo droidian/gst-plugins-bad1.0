@@ -1,8 +1,10 @@
-gst-plugins-bad1.0 (1.22.0-4) UNRELEASED; urgency=medium
+gst-plugins-bad1.0 (1.22.0-4) unstable; urgency=medium
 
+  * Team upload
   * debian/rules: Disable vulkan on non-linux architectures
+  * Disable zxing element on architectures where opencv doesn't build
 
- -- Laurent Bigonville <bigon@debian.org>  Wed, 15 Feb 2023 15:36:24 +0100
+ -- Laurent Bigonville <bigon@debian.org>  Mon, 27 Feb 2023 23:59:59 +0100
 
 gst-plugins-bad1.0 (1.22.0-3) unstable; urgency=medium
 
