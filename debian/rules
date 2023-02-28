@@ -54,7 +54,7 @@ endif
 ifneq ($(DEB_HOST_ARCH_OS),linux)
 conf_flags += -Dbluez=disabled -Ddc1394=disabled -Dfbdev=disabled -Dsbc=disabled
 conf_flags += -Dva=disabled -Dv4l2codecs=disabled -Dwpe=disabled -Duvch264=disabled
-conf_flags += -Dvulkan=disabled
+conf_flags += -Dvulkan=disabled -Dwayland=disabled
 endif
 
 ifeq ($(DEB_HOST_ARCH_OS),hurd)
