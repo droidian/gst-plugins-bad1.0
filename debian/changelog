@@ -1,3 +1,9 @@
+gst-plugins-bad1.0 (1.22.0-5) UNRELEASED; urgency=medium
+
+  * debian/rules: Explicitly disable wayland on non-linux architectures
+
+ -- Laurent Bigonville <bigon@debian.org>  Tue, 28 Feb 2023 15:18:04 +0100
+
 gst-plugins-bad1.0 (1.22.0-4) unstable; urgency=medium
 
   * Team upload
