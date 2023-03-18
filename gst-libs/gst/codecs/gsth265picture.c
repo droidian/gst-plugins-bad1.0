@@ -34,6 +34,9 @@ _gst_h265_picture_free (GstH265Picture * picture)
   if (picture->notify)
     picture->notify (picture->user_data);
 
+  if (picture->discont_state)
+    gst_video_codec_state_unref (picture->discont_state);
+
   g_free (picture);
 }
 
@@ -51,7 +54,6 @@ gst_h265_picture_new (void)
 
   pic = g_new0 (GstH265Picture, 1);
 
-  pic->pts = GST_CLOCK_TIME_NONE;
   pic->pic_struct = GST_H265_SEI_PIC_STRUCT_FRAME;
   /* 0: interlaced, 1: progressive, 2: unspecified, 3: reserved, can be
    * interpreted as 2 */
@@ -68,7 +70,7 @@ gst_h265_picture_new (void)
 /**
  * gst_h265_picture_set_user_data:
  * @picture: a #GstH265Picture
- * @user_data: private data
+ * @user_data: (nullable): private data
  * @notify: (closure user_data): a #GDestroyNotify
  *
  * Sets @user_data on the picture and the #GDestroyNotify that will be called when
@@ -97,7 +99,7 @@ gst_h265_picture_set_user_data (GstH265Picture * picture, gpointer user_data,
  * Gets private data set on the picture via
  * gst_h265_picture_set_user_data() previously.
  *
- * Returns: (transfer none): The previously set user_data
+ * Returns: (transfer none) (nullable): The previously set user_data
  */
 gpointer
 gst_h265_picture_get_user_data (GstH265Picture * picture)
@@ -130,7 +132,7 @@ gst_h265_dpb_new (void)
       g_array_sized_new (FALSE, TRUE, sizeof (GstH265Picture *),
       GST_H265_DPB_MAX_SIZE);
   g_array_set_clear_func (dpb->pic_list,
-      (GDestroyNotify) gst_h265_picture_clear);
+      (GDestroyNotify) gst_clear_h265_picture);
 
   return dpb;
 }
@@ -455,7 +457,7 @@ gst_h265_dpb_get_size (GstH265Dpb * dpb)
  * @dpb: a #GstH265Dpb
  * @system_frame_number The system frame number
  *
- * Returns: (transfer full): the picture identified with the specified
+ * Returns: (transfer full) (nullable): the picture identified with the specified
  * @system_frame_number, or %NULL if DPB does not contain a #GstH265Picture
  * corresponding to the @system_frame_number
  *

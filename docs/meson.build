@@ -40,7 +40,7 @@ plugins_cache = join_paths(meson.current_source_dir(), 'plugins', 'gst_plugins_c
 if plugins.length() == 0
     message('All bad plugins have been disabled')
 elif plugins_cache_generator.found()
-    plugins_doc_dep = custom_target('bad-plugins-doc-cache',
+    gst_plugins_doc_dep = custom_target('bad-plugins-doc-cache',
         command: [plugins_cache_generator, plugins_cache, '@OUTPUT@', '@INPUT@'],
         input: plugins,
         output: 'gst_plugins_cache.json',
@@ -102,9 +102,15 @@ foreach f: [
         'ext/closedcaption/raw_decoder.[ch]',
         'ext/closedcaption/sampling_par.[ch]',
         'ext/closedcaption/sliced.[ch]',
-        'ext/*/*.h',
-        'sys/*/*.h',
-        'gst/*/*.h',
+        'ext/lv2/gstlv2utils.h',
+        'ext/closedcaption/hamm.h',
+        'ext/closedcaption/io-sim.h',
+        'ext/avtp/gstavtpcrfbase.h',
+        'sys/nvcodec/nvEncodeAPI.h',
+        'sys/nvcodec/cuviddec.h',
+        'sys/nvcodec/nvcuvid.h',
+        'sys/winks/ksvideohelpers.h',
+        'gst/videoparsers/gstjpeg2000parse.h',
         'gst-libs/gst/*/*-prelude.h',
         'gst-libs/gst/vulkan/vulkan_fwd.h'
     ]
@@ -125,12 +131,17 @@ if build_gir
         {'name': 'audio', 'gir': audio_gir, 'lib': gstbadaudio_dep, 'prefix': 'bad-'},
         {'name': 'transcoder', 'gir': transcoder_gir, 'lib': gst_transcoder_dep},
         {'name': 'codecs', 'gir': codecs_gir, 'lib': gstcodecs_dep},
+        {'name': 'cuda', 'gir': gst_cuda_gir, 'lib': gstcuda_dep},
     ]
 
     if gstopencv_dep.found()
         libs += [
             {'name': 'opencv', 'lib': gstopencv_dep, 'c_source_patterns': ['*.h', '*.cpp'], 'extra_c_flags': ['-x c++']},
         ]
+    endif
+
+    if gstva_dep.found()
+        libs += [{'name': 'va', 'gir': va_gir, 'lib': gstva_dep, 'suffix': 'lib'}]
     endif
 
     if gstvulkan_dep.found()
@@ -187,6 +198,7 @@ foreach lib_def: libs
                 dependencies: [lib, gir],
                 c_flags: '-DGST_USE_UNSTABLE_API',
                 install: false,
+                depends: gir[0],
             )]
         endif
     else
@@ -240,7 +252,7 @@ foreach plugin_name: list_plugin_res.stdout().split(':')
             join_paths(root_rel, 'gst/*/*.[ch]'),
             join_paths(root_rel, 'gst/rtmp2/*/*.[ch]'),
         ],
-        dependencies: [gst_dep, plugins],
+        dependencies: [gst_dep],
         install: false,
         disable_incremental_build: true,
         gst_cache_file: plugins_cache,

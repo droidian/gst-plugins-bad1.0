@@ -22,8 +22,8 @@
 #endif
 
 #include "gstnvbaseenc.h"
-#include "gstcudautils.h"
-#include "gstcudabufferpool.h"
+#include <gst/cuda/gstcudautils.h>
+#include <gst/cuda/gstcudabufferpool.h>
 
 #include <gst/pbutils/codec-utils.h>
 
@@ -625,6 +625,7 @@ gst_nv_base_enc_propose_allocation (GstVideoEncoder * enc, GstQuery * query)
   GstBufferPool *pool;
   GstStructure *config;
   GstCapsFeatures *features;
+  guint size;
 
   GST_DEBUG_OBJECT (nvenc, "propose allocation");
 
@@ -665,17 +666,22 @@ gst_nv_base_enc_propose_allocation (GstVideoEncoder * enc, GstQuery * query)
     goto done;
   }
 
-  config = gst_buffer_pool_get_config (pool);
-  gst_buffer_pool_config_set_params (config, caps, GST_VIDEO_INFO_SIZE (&info),
-      nvenc->items->len, 0);
+  size = GST_VIDEO_INFO_SIZE (&info);
 
-  gst_query_add_allocation_pool (query, pool, GST_VIDEO_INFO_SIZE (&info),
-      nvenc->items->len, 0);
+  config = gst_buffer_pool_get_config (pool);
+  gst_buffer_pool_config_set_params (config, caps, size, nvenc->items->len, 0);
   gst_buffer_pool_config_add_option (config, GST_BUFFER_POOL_OPTION_VIDEO_META);
-  gst_query_add_allocation_meta (query, GST_VIDEO_META_API_TYPE, NULL);
 
   if (!gst_buffer_pool_set_config (pool, config))
     goto error_pool_config;
+
+  /* Get updated size by cuda buffer pool */
+  config = gst_buffer_pool_get_config (pool);
+  gst_buffer_pool_config_get_params (config, NULL, &size, NULL, NULL);
+  gst_structure_free (config);
+
+  gst_query_add_allocation_pool (query, pool, size, nvenc->items->len, 0);
+  gst_query_add_allocation_meta (query, GST_VIDEO_META_API_TYPE, NULL);
 
   gst_object_unref (pool);
 
@@ -1841,7 +1847,8 @@ gst_nv_base_enc_set_format (GstVideoEncoder * enc, GstVideoCodecState * state)
 
   if (nv_ret != NV_ENC_SUCCESS) {
     GST_ELEMENT_ERROR (nvenc, LIBRARY, SETTINGS, (NULL),
-        ("Failed to %sinit encoder: %d", reconfigure ? "re" : "", nv_ret));
+        ("Failed to %sinit encoder: %d- %s", reconfigure ? "re" : "", nv_ret,
+            NvEncGetLastErrorString (nvenc->encoder)));
     NvEncDestroyEncoder (nvenc->encoder);
     nvenc->encoder = NULL;
     return FALSE;
@@ -2231,15 +2238,10 @@ gst_nv_base_enc_upload_frame (GstNvBaseEnc * nvenc, GstVideoFrame * frame,
   CUdeviceptr dst = resource->cuda_pointer;
   GstVideoInfo *info = &frame->info;
   CUresult cuda_ret;
-  GstCudaMemory *cuda_mem = NULL;
 
   if (!gst_cuda_context_push (nvenc->cuda_ctx)) {
     GST_ERROR_OBJECT (nvenc, "cannot push context");
     return FALSE;
-  }
-
-  if (use_device_memory) {
-    cuda_mem = (GstCudaMemory *) gst_buffer_peek_memory (frame->buffer, 0);
   }
 
   for (i = 0; i < GST_VIDEO_FRAME_N_PLANES (frame); i++) {
@@ -2249,13 +2251,12 @@ gst_nv_base_enc_upload_frame (GstNvBaseEnc * nvenc, GstVideoFrame * frame,
 
     if (use_device_memory) {
       param.srcMemoryType = CU_MEMORYTYPE_DEVICE;
-      param.srcDevice = cuda_mem->data + cuda_mem->offset[i];
-      param.srcPitch = cuda_mem->stride;
+      param.srcDevice = (CUdeviceptr) GST_VIDEO_FRAME_PLANE_DATA (frame, i);
     } else {
       param.srcMemoryType = CU_MEMORYTYPE_HOST;
       param.srcHost = GST_VIDEO_FRAME_PLANE_DATA (frame, i);
-      param.srcPitch = GST_VIDEO_FRAME_PLANE_STRIDE (frame, i);
     }
+    param.srcPitch = GST_VIDEO_FRAME_PLANE_STRIDE (frame, i);
 
     param.dstMemoryType = CU_MEMORYTYPE_DEVICE;
     param.dstDevice = dst;

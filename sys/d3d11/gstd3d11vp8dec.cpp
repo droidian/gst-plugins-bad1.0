@@ -53,9 +53,6 @@
 GST_DEBUG_CATEGORY_EXTERN (gst_d3d11_vp8_dec_debug);
 #define GST_CAT_DEFAULT gst_d3d11_vp8_dec_debug
 
-/* reference list 4 + 4 margin */
-#define NUM_OUTPUT_VIEW 8
-
 /* *INDENT-OFF* */
 typedef struct _GstD3D11Vp8DecInner
 {
@@ -111,7 +108,7 @@ static gboolean gst_d3d11_vp8_sink_event (GstVideoDecoder * decoder,
 
 /* GstVp8Decoder */
 static GstFlowReturn gst_d3d11_vp8_dec_new_sequence (GstVp8Decoder * decoder,
-    const GstVp8FrameHdr * frame_hdr);
+    const GstVp8FrameHdr * frame_hdr, gint max_dpb_size);
 static GstFlowReturn gst_d3d11_vp8_dec_new_picture (GstVp8Decoder * decoder,
     GstVideoCodecFrame * frame, GstVp8Picture * picture);
 static GstFlowReturn gst_d3d11_vp8_dec_start_picture (GstVp8Decoder * decoder,
@@ -313,7 +310,7 @@ gst_d3d11_vp8_sink_event (GstVideoDecoder * decoder, GstEvent * event)
 
 static GstFlowReturn
 gst_d3d11_vp8_dec_new_sequence (GstVp8Decoder * decoder,
-    const GstVp8FrameHdr * frame_hdr)
+    const GstVp8FrameHdr * frame_hdr, gint max_dpb_size)
 {
   GstD3D11Vp8Dec *self = GST_D3D11_VP8_DEC (decoder);
   GstD3D11Vp8DecInner *inner = self->inner;
@@ -330,14 +327,14 @@ gst_d3d11_vp8_dec_new_sequence (GstVp8Decoder * decoder,
       inner->out_format, inner->width, inner->height);
 
   if (!gst_d3d11_decoder_configure (inner->d3d11_decoder,
-          decoder->input_state, &info, inner->width, inner->height,
-          NUM_OUTPUT_VIEW)) {
+          decoder->input_state, &info, 0, 0, inner->width, inner->height,
+          max_dpb_size)) {
     GST_ERROR_OBJECT (self, "Failed to create decoder");
     return GST_FLOW_NOT_NEGOTIATED;
   }
 
   if (!gst_video_decoder_negotiate (GST_VIDEO_DECODER (self))) {
-    GST_ERROR_OBJECT (self, "Failed to negotiate with downstream");
+    GST_WARNING_OBJECT (self, "Failed to negotiate with downstream");
     return GST_FLOW_NOT_NEGOTIATED;
   }
 
@@ -623,10 +620,8 @@ gst_d3d11_vp8_dec_end_picture (GstVp8Decoder * decoder, GstVp8Picture * picture)
   input_args.bitstream = &inner->bitstream_buffer[0];
   input_args.bitstream_size = inner->bitstream_buffer.size ();
 
-  if (!gst_d3d11_decoder_decode_frame (inner->d3d11_decoder, view, &input_args))
-    return GST_FLOW_ERROR;
-
-  return GST_FLOW_OK;
+  return gst_d3d11_decoder_decode_frame (inner->d3d11_decoder,
+      view, &input_args);
 }
 
 static GstFlowReturn
@@ -650,7 +645,8 @@ gst_d3d11_vp8_dec_output_picture (GstVp8Decoder * decoder,
   }
 
   if (!gst_d3d11_decoder_process_output (inner->d3d11_decoder, vdec,
-          inner->width, inner->height, view_buffer, &frame->output_buffer)) {
+          picture->discont_state, inner->width, inner->height, view_buffer,
+          &frame->output_buffer)) {
     GST_ERROR_OBJECT (self, "Failed to copy buffer");
     goto error;
   }
@@ -727,16 +723,10 @@ gst_d3d11_vp8_dec_register (GstPlugin * plugin, GstD3D11Device * device,
 
   /* To cover both landscape and portrait, select max value */
   resolution = MAX (max_width, max_height);
-  gst_caps_set_simple (sink_caps,
-      "width", GST_TYPE_INT_RANGE, 1, resolution,
-      "height", GST_TYPE_INT_RANGE, 1, resolution, NULL);
-  gst_caps_set_simple (src_caps,
-      "width", GST_TYPE_INT_RANGE, 1, resolution,
-      "height", GST_TYPE_INT_RANGE, 1, resolution, NULL);
 
   type_info.class_data =
       gst_d3d11_decoder_class_data_new (device, GST_DXVA_CODEC_VP8,
-      sink_caps, src_caps);
+      sink_caps, src_caps, resolution);
 
   type_name = g_strdup ("GstD3D11Vp8Dec");
   feature_name = g_strdup ("d3d11vp8dec");

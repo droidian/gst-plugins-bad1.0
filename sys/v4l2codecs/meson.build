@@ -3,6 +3,7 @@ v4l2codecs_sources = [
   'gstv4l2codecallocator.c',
   'gstv4l2codecdevice.c',
   'gstv4l2codech264dec.c',
+  'gstv4l2codech265dec.c',
   'gstv4l2codecmpeg2dec.c',
   'gstv4l2codecpool.c',
   'gstv4l2codecvp8dec.c',
@@ -45,6 +46,5 @@ if have_v4l2 and libgudev_dep.found()
     install : true,
     install_dir : plugins_install_dir,
   )
-  pkgconfig.generate(gstv4l2codecs, install_dir : plugins_pkgconfig_install_dir)
   plugins += [gstv4l2codecs]
 endif

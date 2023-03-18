@@ -1,5 +1,6 @@
 msdk_sources = [
   'gstmsdk.c',
+  'gstmsdkallocator.c',
   'gstmsdkbufferpool.c',
   'gstmsdkcontext.c',
   'gstmsdkcontextutil.c',
@@ -24,20 +25,40 @@ msdk_sources = [
   'msdk.c',
 ]
 
-if host_machine.system() == 'windows'
-  msdk_sources += ['msdk_d3d.c', 'gstmsdkallocator_d3d.c' ]
-else
-  msdk_sources += ['msdk_libva.c', 'gstmsdkallocator_libva.c']
-endif
-
 have_msdk = false
 msdk_dep = []
 use_msdk = false
 use_onevpl = false
+onevpl_extra_args = []
+
+extra_args = [
+  '-DGST_USE_UNSTABLE_API',
+]
 
 msdk_option = get_option('msdk')
 if msdk_option.disabled()
   subdir_done()
+endif
+
+if host_machine.system() == 'windows'
+  msdk_sources += ['msdk_d3d.c', 'gstmsdkallocator_d3d.c' ]
+  if gstd3d11_dep.found()
+    extra_args += ['-DCOBJMACROS']
+  else
+    if msdk_option.enabled()
+      error('The msdk plugin was enabled explicity, but required d3d11 dependencies were not found.')
+    endif
+    subdir_done()
+  endif
+
+else
+  if not gstva_dep.found()
+    if msdk_option.enabled()
+      error('The msdk plugin was enabled explicity, but required va dependencies were not found.')
+    endif
+    subdir_done()
+  endif
+  msdk_sources += ['msdk_libva.c', 'gstmsdkallocator_libva.c']
 endif
 
 mfx_api = get_option('mfx_api')
@@ -91,6 +112,7 @@ endif
 
 # Check oneVPL firstly
 if use_onevpl
+  onevpl_extra_args += ['-DONEVPL_EXPERIMENTAL']
   mfx_incdir = join_paths([mfx_incdir, 'vpl'])
   mfx_inc = include_directories(mfx_incdir)
 elif cxx.has_header('mfx/mfxdefs.h', args: '-I' + mfx_incdir)
@@ -138,22 +160,34 @@ if have_mfx_ver134
   cdata.set('USE_MSDK_AV1_DEC', 1)
 endif
 
+mfx_ver205_check_code = '''
+#include <mfxdefs.h>
+#if MFX_VERSION < 2005
+#error "The current verison of mfx doesn't support AV1 encoding"
+#endif
+'''
+
+have_mfx_ver205 = cc.compiles(mfx_ver205_check_code,
+                include_directories: [configinc, mfx_inc])
+
+if use_onevpl and have_mfx_ver205
+  msdk_sources += [ 'gstmsdkav1enc.c' ]
+  cdata.set10('USE_MSDK_AV1_ENC', 1)
+endif
+
 if host_machine.system() == 'windows'
   if cc.get_id() != 'msvc' and msdk_option.enabled()
     error('msdk plugin can only be built with MSVC')
   endif
   legacy_stdio_dep = cc.find_library('legacy_stdio_definitions', required: get_option('msdk'))
-  d3d11_dep = cc.find_library('d3d11', required: get_option('msdk'))
-  msdk_deps = declare_dependency(dependencies: [d3d11_dep, legacy_stdio_dep])
-  msdk_deps_found = d3d11_dep.found() and legacy_stdio_dep.found() and cc.get_id() == 'msvc'
+  msdk_deps = declare_dependency(dependencies: [gstd3d11_dep, legacy_stdio_dep])
+  msdk_deps_found = gstd3d11_dep.found() and legacy_stdio_dep.found() and cc.get_id() == 'msvc'
 else
-  libva_dep = dependency('libva', required: get_option('msdk'))
-  libva_drm_dep = dependency('libva-drm', required: get_option('msdk'))
   libdl_dep = cc.find_library('dl', required: get_option('msdk'))
   libgudev_dep = dependency('gudev-1.0', required: get_option('msdk'))
   libdrm_dep = dependency('libdrm', required: get_option('msdk'))
-  msdk_deps = declare_dependency(dependencies: [libva_dep, libva_drm_dep, libdl_dep, libgudev_dep, libdrm_dep])
-  msdk_deps_found = libva_dep.found() and libva_drm_dep.found() and libdl_dep.found() and libgudev_dep.found() and libdrm_dep.found()
+  msdk_deps = declare_dependency(dependencies: [gstva_dep, libdl_dep, libgudev_dep, libdrm_dep])
+  msdk_deps_found = gstva_dep.found() and libdl_dep.found() and libgudev_dep.found() and libdrm_dep.found()
 endif
 
 if msdk_deps_found
@@ -167,13 +201,12 @@ if msdk_deps_found
 
   gstmsdktag = library('gstmsdk',
     msdk_sources,
-    c_args : gst_plugins_bad_args + ['-DGST_USE_UNSTABLE_API'],
+    c_args : gst_plugins_bad_args + extra_args + onevpl_extra_args,
     include_directories : [configinc, mfx_inc],
     dependencies : [gstbase_dep, gstvideo_dep, gstpbutils_dep, gstallocators_dep, gstcodecparsers_dep, mfx_dep, msdk_deps],
     install : true,
     install_dir : plugins_install_dir,
   )
-  pkgconfig.generate(gstmsdktag, install_dir : plugins_pkgconfig_install_dir)
   plugins += [gstmsdktag]
   have_msdk = true
 endif

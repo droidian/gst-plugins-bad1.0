@@ -42,6 +42,7 @@ G_BEGIN_DECLS
 #define GST_SRT_DEFAULT_LATENCY 125
 #define GST_SRT_DEFAULT_MSG_SIZE 1316
 #define GST_SRT_DEFAULT_WAIT_FOR_CONNECTION (TRUE)
+#define GST_SRT_DEFAULT_AUTO_RECONNECT (TRUE)
 
 typedef struct _GstSRTObject GstSRTObject;
 
@@ -69,10 +70,11 @@ struct _GstSRTObject
   GList                        *callers;
 
   gboolean                     wait_for_connection;
+  gboolean                     auto_reconnect;
 
   gboolean                     authentication;
 
-  guint64                      previous_bytes;
+  guint64                      bytes;
 };
 
 GstSRTObject   *gst_srt_object_new              (GstElement *element);

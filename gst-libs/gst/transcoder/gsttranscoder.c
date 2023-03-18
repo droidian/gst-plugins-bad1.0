@@ -262,6 +262,7 @@ gst_transcoder_finalize (GObject * object)
   g_free (self->source_uri);
   g_free (self->dest_uri);
   g_cond_clear (&self->cond);
+  gst_object_unref (self->api_bus);
 
   G_OBJECT_CLASS (parent_class)->finalize (object);
 }
@@ -942,6 +943,7 @@ _error_cb (RunSyncData * data, GError * error, GstStructure * details)
 
   if (data->loop) {
     g_main_loop_quit (data->loop);
+    g_main_loop_unref (data->loop);
     data->loop = NULL;
   }
 }
@@ -951,6 +953,7 @@ _done_cb (RunSyncData * data)
 {
   if (data->loop) {
     g_main_loop_quit (data->loop);
+    g_main_loop_unref (data->loop);
     data->loop = NULL;
   }
 }
@@ -1457,8 +1460,8 @@ gst_transcoder_message_parse_state (GstMessage * msg,
 /**
  * gst_transcoder_message_parse_error:
  * @msg: A #GstMessage
- * @error: (out): the resulting error
- * @details: (out): (transfer none): A GstStructure containing extra details about the error
+ * @error: (out) (optional) (transfer full): the resulting error
+ * @details: (out): (transfer full): A GstStructure containing extra details about the error
  *
  * Parse the given error @msg and extract the corresponding #GError
  *
@@ -1477,8 +1480,8 @@ gst_transcoder_message_parse_error (GstMessage * msg, GError * error,
 /**
  * gst_transcoder_message_parse_warning:
  * @msg: A #GstMessage
- * @error: (out): the resulting warning
- * @details: (out): (transfer none): A GstStructure containing extra details about the warning
+ * @error: (out) (optional) (transfer full): the resulting warning
+ * @details: (out): (transfer full): A GstStructure containing extra details about the warning
  *
  * Parse the given error @msg and extract the corresponding #GError warning
  *

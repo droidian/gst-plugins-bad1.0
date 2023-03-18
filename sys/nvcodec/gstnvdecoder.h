@@ -22,7 +22,7 @@
 
 #include <gst/gst.h>
 #include <gst/video/video.h>
-#include "gstcudautils.h"
+#include <gst/cuda/gstcudautils.h>
 #include "gstcuvidloader.h"
 
 G_BEGIN_DECLS
@@ -40,11 +40,21 @@ typedef struct _GstNvDecoderFrame
 
   gboolean mapped;
 
+  /* Extra frame allocated for AV1 film grain */
+  gint decode_frame_index;
+
   /*< private >*/
   GstNvDecoder *decoder;
 
   gint ref_count;
 } GstNvDecoderFrame;
+
+typedef struct _GstNvDecoderClassData
+{
+  GstCaps *sink_caps;
+  GstCaps *src_caps;
+  guint cuda_device_id;
+} GstNvDecoderClassData;
 
 GstNvDecoder * gst_nv_decoder_new (GstCudaContext * context);
 
@@ -56,7 +66,8 @@ gboolean       gst_nv_decoder_configure (GstNvDecoder * decoder,
                                          gint coded_width,
                                          gint coded_height,
                                          guint coded_bitdepth,
-                                         guint pool_size);
+                                         guint pool_size,
+                                         gboolean alloc_aux_frame);
 
 GstNvDecoderFrame * gst_nv_decoder_new_frame (GstNvDecoder * decoder);
 
@@ -69,6 +80,7 @@ gboolean gst_nv_decoder_decode_picture (GstNvDecoder * decoder,
 
 gboolean gst_nv_decoder_finish_frame   (GstNvDecoder * decoder,
                                         GstVideoDecoder * videodec,
+                                        GstVideoCodecState * input_state,
                                         GstNvDecoderFrame *frame,
                                         GstBuffer ** buffer);
 
@@ -91,8 +103,7 @@ gboolean gst_nv_decoder_handle_context_query (GstNvDecoder * decoder,
 
 gboolean gst_nv_decoder_negotiate            (GstNvDecoder * decoder,
                                               GstVideoDecoder * videodec,
-                                              GstVideoCodecState * input_state,
-                                              GstVideoCodecState ** output_state);
+                                              GstVideoCodecState * input_state);
 
 gboolean gst_nv_decoder_decide_allocation    (GstNvDecoder * decoder,
                                               GstVideoDecoder * videodec,

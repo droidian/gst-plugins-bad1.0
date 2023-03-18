@@ -149,10 +149,13 @@ GST_DEBUG_CATEGORY_STATIC (gst_decklink_video_src_debug);
 #define DEFAULT_DROP_NO_SIGNAL_FRAMES (FALSE)
 #define DEFAULT_OUTPUT_CC (FALSE)
 #define DEFAULT_OUTPUT_AFD_BAR (FALSE)
+#define DEFAULT_PERSISTENT_ID (-1)
 
 #ifndef ABSDIFF
 #define ABSDIFF(x, y) ( (x) > (y) ? ((x) - (y)) : ((y) - (x)) )
 #endif
+
+#define NO_SIGNL_RESET_COUNT (10)
 
 enum
 {
@@ -169,6 +172,7 @@ enum
   PROP_DROP_NO_SIGNAL_FRAMES,
   PROP_SIGNAL,
   PROP_HW_SERIAL_NUMBER,
+  PROP_PERSISTENT_ID,
   PROP_OUTPUT_CC,
   PROP_OUTPUT_AFD_BAR,
 };
@@ -290,6 +294,23 @@ gst_decklink_video_src_class_init (GstDecklinkVideoSrcClass * klass)
           (GParamFlags) (G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS |
               G_PARAM_CONSTRUCT)));
 
+    /**
+   * GstDecklinkVideoSrc:persistent-id
+   *
+   * Decklink device to use. Higher priority than "device-number".
+   * BMDDeckLinkPersistentID is a device speciﬁc, 32-bit unique identiﬁer.
+   * It is stable even when the device is plugged in a diﬀerent connector,
+   * across reboots, and when plugged into diﬀerent computers.
+   *
+   * Since: 1.22
+   */
+  g_object_class_install_property (gobject_class, PROP_PERSISTENT_ID,
+      g_param_spec_int64 ("persistent-id", "Persistent id",
+          "Output device instance to use. Higher priority than \"device-number\".",
+          DEFAULT_PERSISTENT_ID, G_MAXINT64, DEFAULT_PERSISTENT_ID,
+          (GParamFlags) (G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS |
+              G_PARAM_CONSTRUCT)));
+
   g_object_class_install_property (gobject_class, PROP_BUFFER_SIZE,
       g_param_spec_uint ("buffer-size", "Buffer Size",
           "Size of internal buffer in number of video frames", 1,
@@ -396,6 +417,7 @@ gst_decklink_video_src_init (GstDecklinkVideoSrc * self)
   self->caps_format = bmdFormat8BitYUV;
   self->connection = DEFAULT_CONNECTION;
   self->device_number = 0;
+  self->persistent_id = DEFAULT_PERSISTENT_ID;
   self->buffer_size = DEFAULT_BUFFER_SIZE;
   self->video_format = GST_DECKLINK_VIDEO_FORMAT_AUTO;
   self->profile_id = GST_DECKLINK_PROFILE_ID_DEFAULT;
@@ -490,6 +512,9 @@ gst_decklink_video_src_set_property (GObject * object, guint property_id,
     case PROP_DROP_NO_SIGNAL_FRAMES:
       self->drop_no_signal_frames = g_value_get_boolean (value);
       break;
+    case PROP_PERSISTENT_ID:
+      self->persistent_id = g_value_get_int64 (value);
+      break;
     case PROP_OUTPUT_CC:
       self->output_cc = g_value_get_boolean (value);
       break;
@@ -539,6 +564,9 @@ gst_decklink_video_src_get_property (GObject * object, guint property_id,
       break;
     case PROP_DROP_NO_SIGNAL_FRAMES:
       g_value_set_boolean (value, self->drop_no_signal_frames);
+      break;
+    case PROP_PERSISTENT_ID:
+      g_value_set_int64 (value, self->persistent_id);
       break;
     case PROP_SIGNAL:
       g_value_set_boolean (value, self->signal_state == SIGNAL_STATE_AVAILABLE);
@@ -669,6 +697,23 @@ gst_decklink_video_src_start (GstDecklinkVideoSrc * self)
   self->aspect_ratio_flag = -1;
 
   return TRUE;
+}
+
+static void
+gst_decklink_reset_time_mapping(GstDecklinkVideoSrc * self)
+{
+    self->window_fill = 0;
+    self->window_filled = FALSE;
+    self->window_skip = 1;
+    self->window_skip_count = 0;
+    self->current_time_mapping.xbase = 0;
+    self->current_time_mapping.b = 0;
+    self->current_time_mapping.num = 1;
+    self->current_time_mapping.den = 1;
+    self->next_time_mapping.xbase = 0;
+    self->next_time_mapping.b = 0;
+    self->next_time_mapping.num = 1;
+    self->next_time_mapping.den = 1;
 }
 
 static void
@@ -811,6 +856,9 @@ gst_decklink_video_src_got_frame (GstElement * element,
     return;
   }
 
+  if (no_signal)
+    self->no_signal_count++;
+
   if (self->drop_no_signal_frames && no_signal) {
     CaptureFrame f;
     memset (&f, 0, sizeof (f));
@@ -821,6 +869,13 @@ gst_decklink_video_src_got_frame (GstElement * element,
     g_mutex_unlock (&self->lock);
 
     return;
+  }
+
+  if (!no_signal) {
+    if (self->no_signal_count > NO_SIGNL_RESET_COUNT) {
+      gst_decklink_reset_time_mapping(self);
+    }
+    self->no_signal_count = 0;
   }
 
   gst_decklink_video_src_update_time_mapping (self, capture_time, stream_time);
@@ -1523,7 +1578,7 @@ gst_decklink_video_src_open (GstDecklinkVideoSrc * self)
   GST_DEBUG_OBJECT (self, "Opening");
 
   self->input =
-      gst_decklink_acquire_nth_input (self->device_number,
+      gst_decklink_acquire_nth_input (self->device_number, self->persistent_id,
       GST_ELEMENT_CAST (self), FALSE);
   if (!self->input) {
     GST_ERROR_OBJECT (self, "Failed to acquire input");
@@ -1537,6 +1592,7 @@ gst_decklink_video_src_open (GstDecklinkVideoSrc * self)
   g_mutex_lock (&self->input->lock);
   self->input->mode = mode;
   self->input->format = self->caps_format;
+  self->input->auto_format = self->video_format == GST_DECKLINK_VIDEO_FORMAT_AUTO;
   self->input->got_video_frame = gst_decklink_video_src_got_frame;
   self->input->start_streams = gst_decklink_video_src_start_streams;
   g_mutex_unlock (&self->input->lock);
@@ -1558,7 +1614,7 @@ gst_decklink_video_src_close (GstDecklinkVideoSrc * self)
     self->input->start_streams = NULL;
     g_mutex_unlock (&self->input->lock);
 
-    gst_decklink_release_nth_input (self->device_number,
+    gst_decklink_release_nth_input (self->device_number, self->persistent_id,
         GST_ELEMENT_CAST (self), FALSE);
     self->input = NULL;
   }

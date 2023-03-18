@@ -26,18 +26,20 @@
 #include "gstd3d11memory.h"
 #include "gstd3d11device.h"
 #include "gstd3d11utils.h"
+#include "gstd3d11-private.h"
 
 #include <string.h>
 
 /**
  * SECTION:gstd3d11bufferpool
  * @title: GstD3D11BufferPool
- * @short_description: buffer pool for #GstD3D11Memory objects
- * @see_also: #GstBufferPool, #GstGLMemory
+ * @short_description: buffer pool for GstD3D11Memory object
+ * @see_also: #GstBufferPool, #GstD3D11Memory
  *
- * a #GstD3D11BufferPool is an object that allocates buffers with #GstD3D11Memory
+ * This GstD3D11BufferPool is an object that allocates buffers
+ * with #GstD3D11Memory
  *
- * A #GstGLBufferPool is created with gst_d3d11_buffer_pool_new()
+ * Since: 1.22
  */
 
 GST_DEBUG_CATEGORY_STATIC (gst_d3d11_buffer_pool_debug);
@@ -146,6 +148,7 @@ gst_d3d11_buffer_pool_set_config (GstBufferPool * pool, GstStructure * config)
   D3D11_TEXTURE2D_DESC *desc;
   const GstD3D11Format *format;
   gsize offset = 0;
+  guint align = 0;
   gint i;
 
   if (!gst_buffer_pool_config_get_params (config, &caps, NULL, &min_buffers,
@@ -175,30 +178,28 @@ gst_d3d11_buffer_pool_set_config (GstBufferPool * pool, GstStructure * config)
     /* allocate memory with resource format by default */
     priv->d3d11_params =
         gst_d3d11_allocation_params_new (self->device,
-        &info, (GstD3D11AllocationFlags) 0, 0);
+        &info, GST_D3D11_ALLOCATION_FLAG_DEFAULT, 0, 0);
   }
 
   desc = priv->d3d11_params->desc;
+  align = gst_d3d11_dxgi_format_get_alignment (desc[0].Format);
 
   /* resolution of semi-planar formats must be multiple of 2 */
-  if (desc[0].Format == DXGI_FORMAT_NV12 || desc[0].Format == DXGI_FORMAT_P010
-      || desc[0].Format == DXGI_FORMAT_P016) {
-    if (desc[0].Width % 2 || desc[0].Height % 2) {
-      gint width, height;
-      GstVideoAlignment align;
+  if (align != 0 && (desc[0].Width % align || desc[0].Height % align)) {
+    gint width, height;
+    GstVideoAlignment video_align;
 
-      GST_WARNING_OBJECT (self, "Resolution %dx%d is not mutiple of 2, fixing",
-          desc[0].Width, desc[0].Height);
+    GST_WARNING_OBJECT (self, "Resolution %dx%d is not mutiple of %d, fixing",
+        desc[0].Width, desc[0].Height, align);
 
-      width = GST_ROUND_UP_2 (desc[0].Width);
-      height = GST_ROUND_UP_2 (desc[0].Height);
+    width = GST_ROUND_UP_N (desc[0].Width, align);
+    height = GST_ROUND_UP_N (desc[0].Height, align);
 
-      gst_video_alignment_reset (&align);
-      align.padding_right = width - desc[0].Width;
-      align.padding_bottom = height - desc[0].Height;
+    gst_video_alignment_reset (&video_align);
+    video_align.padding_right = width - desc[0].Width;
+    video_align.padding_bottom = height - desc[0].Height;
 
-      gst_d3d11_allocation_params_alignment (priv->d3d11_params, &align);
-    }
+    gst_d3d11_allocation_params_alignment (priv->d3d11_params, &video_align);
   }
 #ifndef GST_DISABLE_GST_DEBUG
   {
@@ -278,7 +279,7 @@ gst_d3d11_buffer_pool_set_config (GstBufferPool * pool, GstStructure * config)
       return FALSE;
     }
 
-    if (!gst_d3d11_memory_get_texture_stride (GST_D3D11_MEMORY_CAST (mem),
+    if (!gst_d3d11_memory_get_resource_stride (GST_D3D11_MEMORY_CAST (mem),
             &stride) || stride < desc[i].Width) {
       GST_ERROR_OBJECT (self, "Failed to calculate stride");
 
@@ -298,8 +299,7 @@ gst_d3d11_buffer_pool_set_config (GstBufferPool * pool, GstStructure * config)
     gst_memory_unref (mem);
   }
 
-  g_assert (priv->d3d11_params->d3d11_format != NULL);
-  format = priv->d3d11_params->d3d11_format;
+  format = &priv->d3d11_params->d3d11_format;
   /* single texture semi-planar formats */
   if (format->dxgi_format != DXGI_FORMAT_UNKNOWN &&
       GST_VIDEO_INFO_N_PLANES (&info) == 2) {
@@ -506,7 +506,7 @@ gst_d3d11_buffer_pool_stop (GstBufferPool * pool)
  *
  * Returns: a #GstBufferPool that allocates buffers with #GstD3D11Memory
  *
- * Since: 1.20
+ * Since: 1.22
  */
 GstBufferPool *
 gst_d3d11_buffer_pool_new (GstD3D11Device * device)
@@ -531,7 +531,7 @@ gst_d3d11_buffer_pool_new (GstD3D11Device * device)
  * #GstD3D11AllocationParams on @config or %NULL if @config doesn't contain
  * #GstD3D11AllocationParams
  *
- * Since: 1.20
+ * Since: 1.22
  */
 GstD3D11AllocationParams *
 gst_buffer_pool_config_get_d3d11_allocation_params (GstStructure * config)
@@ -552,7 +552,7 @@ gst_buffer_pool_config_get_d3d11_allocation_params (GstStructure * config)
  *
  * Sets @params on @config
  *
- * Since: 1.20
+ * Since: 1.22
  */
 void
 gst_buffer_pool_config_set_d3d11_allocation_params (GstStructure * config,

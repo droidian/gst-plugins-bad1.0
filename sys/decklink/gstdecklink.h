@@ -44,13 +44,16 @@
 # ifdef __MINGW32__
 #  define CONVERT_COM_STRING(s) G_STMT_START { BSTR _s = (BSTR)s; s = (char*) malloc(100); wcstombs(s, _s, 100); ::SysFreeString(_s); } G_STMT_END
 #  define FREE_COM_STRING(s) free(s);
+#  define CONVERT_TO_COM_STRING(s) G_STMT_START { char * _s = (char *)s; s = (BSTR) malloc(100); mbstowcs(s, _s, 100); g_free(_s); } G_STMT_END
 # else
 #  define CONVERT_COM_STRING(s) G_STMT_START { BSTR _s = (BSTR)s; s = _com_util::ConvertBSTRToString(_s); ::SysFreeString(_s); } G_STMT_END
 #  define FREE_COM_STRING(s) G_STMT_START { delete[] s; } G_STMT_END
+#  define CONVERT_TO_COM_STRING(s) G_STMT_START { char * _s = (char *)s; s = _com_util::ConvertStringToBSTR(_s); g_free(_s); } G_STMT_END
 # endif /* __MINGW32__ */
 #else
 #define COMSTR_T const char*
 #define CONVERT_COM_STRING(s)
+#define CONVERT_TO_COM_STRING(s)
 #define FREE_COM_STRING(s)
 #define WINAPI
 #endif /* G_OS_WIN32 */
@@ -110,7 +113,154 @@ typedef enum {
   GST_DECKLINK_MODE_NTSC2398_WIDESCREEN,
   GST_DECKLINK_MODE_PAL_WIDESCREEN,
   GST_DECKLINK_MODE_NTSC_P_WIDESCREEN,
-  GST_DECKLINK_MODE_PAL_P_WIDESCREEN
+  GST_DECKLINK_MODE_PAL_P_WIDESCREEN,
+
+  /**
+   * GstDecklinkModes::4kdcip2398:
+   *
+   * Since: 1.22
+   */
+  GST_DECKLINK_MODE_4Kp2398,
+  /**
+   * GstDecklinkModes::4kdcip24:
+   *
+   * Since: 1.22
+   */
+  GST_DECKLINK_MODE_4Kp24,
+  /**
+   * GstDecklinkModes::4kdcip25:
+   *
+   * Since: 1.22
+   */
+  GST_DECKLINK_MODE_4Kp25,
+  /**
+   * GstDecklinkModes::4kdcip2997:
+   *
+   * Since: 1.22
+   */
+  GST_DECKLINK_MODE_4Kp2997,
+  /**
+   * GstDecklinkModes::4kdcip30:
+   *
+   * Since: 1.22
+   */
+  GST_DECKLINK_MODE_4Kp30,
+  /**
+   * GstDecklinkModes::4kdcip50:
+   *
+   * Since: 1.22
+   */
+  GST_DECKLINK_MODE_4Kp50,
+  /**
+   * GstDecklinkModes::4kdcip5994:
+   *
+   * Since: 1.22
+   */
+  GST_DECKLINK_MODE_4Kp5994,
+  /**
+   * GstDecklinkModes::4kdcip60:
+   *
+   * Since: 1.22
+   */
+  GST_DECKLINK_MODE_4Kp60,
+
+  /**
+   * GstDecklinkModes::8kp2398:
+   *
+   * Since: 1.22
+   */
+  GST_DECKLINK_MODE_4320p2398,
+  /**
+   * GstDecklinkModes::8kp24:
+   *
+   * Since: 1.22
+   */
+  GST_DECKLINK_MODE_4320p24,
+  /**
+   * GstDecklinkModes::8kp25:
+   *
+   * Since: 1.22
+   */
+  GST_DECKLINK_MODE_4320p25,
+  /**
+   * GstDecklinkModes::8kp2997:
+   *
+   * Since: 1.22
+   */
+  GST_DECKLINK_MODE_4320p2997,
+  /**
+   * GstDecklinkModes::8kp30:
+   *
+   * Since: 1.22
+   */
+  GST_DECKLINK_MODE_4320p30,
+  /**
+   * GstDecklinkModes::8kp50:
+   *
+   * Since: 1.22
+   */
+  GST_DECKLINK_MODE_4320p50,
+  /**
+   * GstDecklinkModes::8kp5994:
+   *
+   * Since: 1.22
+   */
+  GST_DECKLINK_MODE_4320p5994,
+  /**
+   * GstDecklinkModes::8kp60:
+   *
+   * Since: 1.22
+   */
+  GST_DECKLINK_MODE_4320p60,
+
+  /**
+   * GstDecklinkModes::8kdcip2398:
+   *
+   * Since: 1.22
+   */
+  GST_DECKLINK_MODE_8Kp2398,
+  /**
+   * GstDecklinkModes::8kdcip24:
+   *
+   * Since: 1.22
+   */
+  GST_DECKLINK_MODE_8Kp24,
+  /**
+   * GstDecklinkModes::8kdcip25:
+   *
+   * Since: 1.22
+   */
+  GST_DECKLINK_MODE_8Kp25,
+  /**
+   * GstDecklinkModes::8kdcip2997:
+   *
+   * Since: 1.22
+   */
+  GST_DECKLINK_MODE_8Kp2997,
+  /**
+   * GstDecklinkModes::8kdcip30:
+   *
+   * Since: 1.22
+   */
+  GST_DECKLINK_MODE_8Kp30,
+  /**
+   * GstDecklinkModes::8kdcip50:
+   *
+   * Since: 1.22
+   */
+  GST_DECKLINK_MODE_8Kp50,
+  /**
+   * GstDecklinkModes::8kdcip5994:
+   *
+   * Since: 1.22
+   */
+  GST_DECKLINK_MODE_8Kp5994,
+  /**
+   * GstDecklinkModes::8kdcip60:
+   *
+   * Since: 1.22
+   */
+  GST_DECKLINK_MODE_8Kp60
 } GstDecklinkModeEnum;
 #define GST_TYPE_DECKLINK_MODE (gst_decklink_mode_get_type ())
 GType gst_decklink_mode_get_type (void);
@@ -172,6 +322,14 @@ typedef enum {
 } GstDecklinkProfileId;
 #define GST_TYPE_DECKLINK_PROFILE_ID (gst_decklink_profile_id_get_type ())
 GType gst_decklink_profile_id_get_type (void);
+
+typedef enum {
+  GST_DECKLINK_MAPPING_FORMAT_DEFAULT,
+  GST_DECKLINK_MAPPING_FORMAT_LEVEL_A, /* bmdDeckLinkConfigSMPTELevelAOutput = true */
+  GST_DECKLINK_MAPPING_FORMAT_LEVEL_B, /* bmdDeckLinkConfigSMPTELevelAOutput = false */
+} GstDecklinkMappingFormat;
+#define GST_TYPE_DECKLINK_MAPPING_FORMAT (gst_decklink_mapping_format_get_type ())
+GType gst_decklink_mapping_format_get_type (void);
 
 typedef enum {
   GST_DECKLINK_TIMECODE_FORMAT_RP188VITC1, /*bmdTimecodeRP188VITC1 */
@@ -243,6 +401,7 @@ struct _GstDecklinkOutput {
   IDeckLinkKeyer *keyer;
 
   gchar *hw_serial_number;
+  gint64 persistent_id;
 
   GstClock *clock;
   GstClockTime clock_start_time, clock_last_time, clock_epoch;
@@ -273,6 +432,7 @@ struct _GstDecklinkInput {
   IDeckLinkProfileAttributes *attributes;
 
   gchar *hw_serial_number;
+  gint64 persistent_id;
 
   /* Everything below protected by mutex */
   GMutex lock;
@@ -282,6 +442,7 @@ struct _GstDecklinkInput {
   /* Configured mode or NULL */
   const GstDecklinkMode *mode;
   BMDPixelFormat format;
+  gboolean auto_format;
 
   /* Set by the audio source */
   void (*got_audio_packet) (GstElement *videosrc, IDeckLinkAudioInputPacket * packet, GstClockTime capture_time, GstClockTime stream_time, GstClockTime stream_duration, GstClockTime hardware_time, GstClockTime hardware_duration, gboolean no_signal);
@@ -293,11 +454,11 @@ struct _GstDecklinkInput {
   void (*start_streams) (GstElement *videosrc);
 };
 
-GstDecklinkOutput * gst_decklink_acquire_nth_output (gint n, GstElement * sink, gboolean is_audio);
-void                gst_decklink_release_nth_output (gint n, GstElement * sink, gboolean is_audio);
+GstDecklinkOutput * gst_decklink_acquire_nth_output (gint n, gint64 persistent_id, GstElement * sink, gboolean is_audio);
+void                gst_decklink_release_nth_output (gint n, gint64 persistent_id, GstElement * sink, gboolean is_audio);
 
-GstDecklinkInput *  gst_decklink_acquire_nth_input (gint n, GstElement * src, gboolean is_audio);
-void                gst_decklink_release_nth_input (gint n, GstElement * src, gboolean is_audio);
+GstDecklinkInput *  gst_decklink_acquire_nth_input (gint n, gint64 persistent_id, GstElement * src, gboolean is_audio);
+void                gst_decklink_release_nth_input (gint n, gint64 persistent_id, GstElement * src, gboolean is_audio);
 
 const GstDecklinkMode * gst_decklink_find_mode_for_caps (GstCaps * caps);
 const GstDecklinkMode * gst_decklink_find_mode_and_format_for_caps (GstCaps * caps, BMDPixelFormat * format);
@@ -320,7 +481,7 @@ struct _GstDecklinkDevice
   GstDevice parent;
   gboolean video;
   gboolean capture;
-  guint device_number;
+  gint64 persistent_id;
 };
 
 GType gst_decklink_device_get_type (void);

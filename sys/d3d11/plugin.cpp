@@ -66,37 +66,34 @@
 #include "gstd3d11upload.h"
 #include "gstd3d11download.h"
 #include "gstd3d11convert.h"
-#include "gstd3d11shader.h"
 #include "gstd3d11compositor.h"
-#include "gstd3d11compositorbin.h"
-#ifdef HAVE_DXVA_H
 #include "gstd3d11h264dec.h"
 #include "gstd3d11h265dec.h"
 #include "gstd3d11vp9dec.h"
 #include "gstd3d11vp8dec.h"
 #include "gstd3d11mpeg2dec.h"
 #include "gstd3d11av1dec.h"
-#endif
-#ifdef HAVE_DXGI_DESKTOP_DUP
+#include "gstd3d11deinterlace.h"
+#include "gstd3d11testsrc.h"
+
+#if !GST_D3D11_WINAPI_ONLY_APP
 #include "gstd3d11screencapturesrc.h"
 #include "gstd3d11screencapturedevice.h"
 #endif
-#ifdef HAVE_D3D11_VIDEO_PROC
-#include "gstd3d11deinterlace.h"
-#endif
+
+#include <wrl.h>
+
+/* *INDENT-OFF* */
+using namespace Microsoft::WRL;
+/* *INDENT-ON* */
 
 GST_DEBUG_CATEGORY (gst_d3d11_debug);
-GST_DEBUG_CATEGORY (gst_d3d11_shader_debug);
-GST_DEBUG_CATEGORY (gst_d3d11_converter_debug);
 GST_DEBUG_CATEGORY (gst_d3d11_plugin_utils_debug);
 GST_DEBUG_CATEGORY (gst_d3d11_format_debug);
 GST_DEBUG_CATEGORY (gst_d3d11_device_debug);
 GST_DEBUG_CATEGORY (gst_d3d11_overlay_compositor_debug);
 GST_DEBUG_CATEGORY (gst_d3d11_window_debug);
 GST_DEBUG_CATEGORY (gst_d3d11_video_processor_debug);
-GST_DEBUG_CATEGORY (gst_d3d11_compositor_debug);
-
-#ifdef HAVE_DXVA_H
 GST_DEBUG_CATEGORY (gst_d3d11_decoder_debug);
 GST_DEBUG_CATEGORY (gst_d3d11_h264_dec_debug);
 GST_DEBUG_CATEGORY (gst_d3d11_h265_dec_debug);
@@ -104,15 +101,11 @@ GST_DEBUG_CATEGORY (gst_d3d11_vp9_dec_debug);
 GST_DEBUG_CATEGORY (gst_d3d11_vp8_dec_debug);
 GST_DEBUG_CATEGORY (gst_d3d11_mpeg2_dec_debug);
 GST_DEBUG_CATEGORY (gst_d3d11_av1_dec_debug);
-#endif
+GST_DEBUG_CATEGORY (gst_d3d11_deinterlace_debug);
 
-#ifdef HAVE_DXGI_DESKTOP_DUP
+#if !GST_D3D11_WINAPI_ONLY_APP
 GST_DEBUG_CATEGORY (gst_d3d11_screen_capture_debug);
 GST_DEBUG_CATEGORY (gst_d3d11_screen_capture_device_debug);
-#endif
-
-#ifdef HAVE_D3D11_VIDEO_PROC
-GST_DEBUG_CATEGORY (gst_d3d11_deinterlace_debug);
 #endif
 
 #define GST_CAT_DEFAULT gst_d3d11_debug
@@ -122,13 +115,10 @@ plugin_init (GstPlugin * plugin)
 {
   GstRank video_sink_rank = GST_RANK_PRIMARY;
   D3D_FEATURE_LEVEL max_feature_level = D3D_FEATURE_LEVEL_9_3;
-  guint i;
+  HRESULT hr;
+  ComPtr < IDXGIFactory1 > factory;
 
   GST_DEBUG_CATEGORY_INIT (gst_d3d11_debug, "d3d11", 0, "direct3d 11 plugin");
-  GST_DEBUG_CATEGORY_INIT (gst_d3d11_shader_debug,
-      "d3d11shader", 0, "d3d11shader");
-  GST_DEBUG_CATEGORY_INIT (gst_d3d11_converter_debug,
-      "d3d11converter", 0, "d3d11converter");
   GST_DEBUG_CATEGORY_INIT (gst_d3d11_plugin_utils_debug,
       "d3d11pluginutils", 0, "d3d11 plugin utility functions");
   GST_DEBUG_CATEGORY_INIT (gst_d3d11_overlay_compositor_debug,
@@ -137,14 +127,12 @@ plugin_init (GstPlugin * plugin)
       "d3d11window", 0, "d3d11window");
   GST_DEBUG_CATEGORY_INIT (gst_d3d11_video_processor_debug,
       "d3d11videoprocessor", 0, "d3d11videoprocessor");
-  GST_DEBUG_CATEGORY_INIT (gst_d3d11_compositor_debug,
-      "d3d11compositor", 0, "d3d11compositor element");
 
-  if (!gst_d3d11_shader_init ()) {
-    GST_WARNING ("Cannot initialize d3d11 shader");
+  if (!gst_d3d11_compile_init ()) {
+    GST_WARNING ("Cannot initialize d3d11 compiler");
     return TRUE;
   }
-#ifdef HAVE_DXVA_H
+
   /* DXVA2 API is availble since Windows 8 */
   if (gst_d3d11_is_windows_8_or_greater ()) {
     GST_DEBUG_CATEGORY_INIT (gst_d3d11_decoder_debug,
@@ -161,25 +149,29 @@ plugin_init (GstPlugin * plugin)
         "d3d11mpeg2dec", 0, "Direct3D11 MPEG2 Decoder");
     GST_DEBUG_CATEGORY_INIT (gst_d3d11_av1_dec_debug,
         "d3d11av1dec", 0, "Direct3D11 AV1 Decoder");
+    GST_DEBUG_CATEGORY_INIT (gst_d3d11_deinterlace_debug,
+        "d3d11deinterlace", 0, "Direct3D11 Deinterlacer");
   }
-#endif
 
-#ifdef HAVE_D3D11_VIDEO_PROC
-  GST_DEBUG_CATEGORY_INIT (gst_d3d11_deinterlace_debug,
-      "d3d11deinterlace", 0, "Direct3D11 Deinterlacer");
-#endif
+  hr = CreateDXGIFactory1 (IID_PPV_ARGS (&factory));
+  if (FAILED (hr))
+    return TRUE;
 
   /* Enumerate devices to register decoders per device and to get the highest
    * feature level */
-  /* AMD seems supporting up to 12 cards, and 8 for NVIDIA */
-  for (i = 0; i < 12; i++) {
-    GstD3D11Device *device = NULL;
+  for (guint i = 0;; i++) {
+    ComPtr < IDXGIAdapter1 > adapter;
+    GstD3D11Device *device;
     ID3D11Device *device_handle;
     D3D_FEATURE_LEVEL feature_level;
 
+    hr = factory->EnumAdapters1 (i, &adapter);
+    if (FAILED (hr))
+      break;
+
     device = gst_d3d11_device_new (i, D3D11_CREATE_DEVICE_BGRA_SUPPORT);
     if (!device)
-      break;
+      continue;
 
     device_handle = gst_d3d11_device_get_device_handle (device);
     feature_level = device_handle->GetFeatureLevel ();
@@ -187,33 +179,26 @@ plugin_init (GstPlugin * plugin)
     if (feature_level > max_feature_level)
       max_feature_level = feature_level;
 
-#ifdef HAVE_DXVA_H
     /* DXVA2 API is availble since Windows 8 */
     if (gst_d3d11_is_windows_8_or_greater () &&
         gst_d3d11_device_get_video_device_handle (device)) {
       gboolean legacy = gst_d3d11_decoder_util_is_legacy_device (device);
 
-      gst_d3d11_h264_dec_register (plugin, device, GST_RANK_SECONDARY, legacy);
+      /* avdec_h264 has primary rank, make this higher than it */
+      gst_d3d11_h264_dec_register (plugin,
+          device, GST_RANK_PRIMARY + 1, legacy);
       if (!legacy) {
-        gst_d3d11_h265_dec_register (plugin, device, GST_RANK_SECONDARY);
-        gst_d3d11_vp9_dec_register (plugin, device, GST_RANK_SECONDARY);
-        gst_d3d11_vp8_dec_register (plugin, device, GST_RANK_SECONDARY);
+        /* avdec_h265 has primary rank, make this higher than it */
+        gst_d3d11_h265_dec_register (plugin, device, GST_RANK_PRIMARY + 1);
+        gst_d3d11_vp9_dec_register (plugin, device, GST_RANK_PRIMARY);
+        gst_d3d11_vp8_dec_register (plugin, device, GST_RANK_PRIMARY);
+        /* rust dav1ddec has "primary" rank */
+        gst_d3d11_av1_dec_register (plugin, device, GST_RANK_PRIMARY + 1);
         gst_d3d11_mpeg2_dec_register (plugin, device, GST_RANK_SECONDARY);
-        gst_d3d11_av1_dec_register (plugin, device, GST_RANK_SECONDARY);
       }
-    }
-#endif
 
-#ifdef HAVE_D3D11_VIDEO_PROC
-    /* D3D11 video processor API is availble since Windows 8 */
-    if (gst_d3d11_is_windows_8_or_greater ()) {
-      gboolean hardware;
-
-      g_object_get (device, "hardware", &hardware, NULL);
-      if (hardware)
-        gst_d3d11_deinterlace_register (plugin, device, GST_RANK_MARGINAL);
+      gst_d3d11_deinterlace_register (plugin, device, GST_RANK_MARGINAL);
     }
-#endif
 
     gst_object_unref (device);
   }
@@ -246,11 +231,11 @@ plugin_init (GstPlugin * plugin)
       "d3d11videosink", video_sink_rank, GST_TYPE_D3D11_VIDEO_SINK);
 
   gst_element_register (plugin,
-      "d3d11compositorelement", GST_RANK_NONE, GST_TYPE_D3D11_COMPOSITOR);
+      "d3d11compositor", GST_RANK_SECONDARY, GST_TYPE_D3D11_COMPOSITOR);
   gst_element_register (plugin,
-      "d3d11compositor", GST_RANK_SECONDARY, GST_TYPE_D3D11_COMPOSITOR_BIN);
+      "d3d11testsrc", GST_RANK_NONE, GST_TYPE_D3D11_TEST_SRC);
 
-#ifdef HAVE_DXGI_DESKTOP_DUP
+#if !GST_D3D11_WINAPI_ONLY_APP
   if (gst_d3d11_is_windows_8_or_greater ()) {
     GST_DEBUG_CATEGORY_INIT (gst_d3d11_screen_capture_debug,
         "d3d11screencapturesrc", 0, "d3d11screencapturesrc");

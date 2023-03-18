@@ -797,13 +797,7 @@ gst_h265_parse_process_nal (GstH265Parse * h265parse, GstH265NalUnit * nalu)
       h265parse->state |= GST_H265_PARSE_STATE_GOT_SPS;
       break;
     case GST_H265_NAL_PPS:
-      /* expected state: got-sps */
-      h265parse->state &= GST_H265_PARSE_STATE_GOT_SPS;
-      if (!GST_H265_PARSE_STATE_VALID (h265parse, GST_H265_PARSE_STATE_GOT_SPS))
-        return FALSE;
-
       pres = gst_h265_parser_parse_pps (nalparser, nalu, &pps);
-
 
       /* arranged for a fallback pps.id, so use that one and only warn */
       if (pres != GST_H265_PARSER_OK) {
@@ -960,16 +954,8 @@ gst_h265_parse_process_nal (GstH265Parse * h265parse, GstH265NalUnit * nalu)
       break;
     }
     case GST_H265_NAL_AUD:
-      /* Just accumulate AU Delimiter, whether it's before SPS or not */
-      pres = gst_h265_parser_parse_nal (nalparser, nalu);
-      if (pres != GST_H265_PARSER_OK)
-        return FALSE;
-      break;
     default:
-      /* drop anything before the initial SPS */
-      if (!GST_H265_PARSE_STATE_VALID (h265parse, GST_H265_PARSE_STATE_GOT_SPS))
-        return FALSE;
-
+      /* Just accumulate AU Delimiter, whether it's before SPS or not */
       pres = gst_h265_parser_parse_nal (nalparser, nalu);
       if (pres != GST_H265_PARSER_OK)
         return FALSE;
@@ -1075,6 +1061,10 @@ gst_h265_parse_handle_frame_packetized (GstBaseParse * parse,
       tmp_frame.overhead = frame->overhead;
       tmp_frame.buffer = gst_buffer_copy_region (buffer, GST_BUFFER_COPY_ALL,
           nalu.offset, nalu.size);
+      /* Don't lose timestamp when offset is not 0. */
+      GST_BUFFER_PTS (tmp_frame.buffer) = GST_BUFFER_PTS (buffer);
+      GST_BUFFER_DTS (tmp_frame.buffer) = GST_BUFFER_DTS (buffer);
+      GST_BUFFER_DURATION (tmp_frame.buffer) = GST_BUFFER_DURATION (buffer);
 
       /* Set marker on last packet */
       if (nl + nalu.size == left) {
@@ -2086,6 +2076,7 @@ gst_h265_parse_update_src_caps (GstH265Parse * h265parse, GstCaps * caps)
   gboolean modified = FALSE;
   GstBuffer *buf = NULL;
   GstStructure *s = NULL;
+  gint width, height;
 
   if (G_UNLIKELY (!gst_pad_has_current_caps (GST_BASE_PARSE_SRC_PAD
               (h265parse))))
@@ -2242,7 +2233,6 @@ gst_h265_parse_update_src_caps (GstH265Parse * h265parse, GstCaps * caps)
     if (G_UNLIKELY (modified || h265parse->update_caps)) {
       gint fps_num = h265parse->fps_num;
       gint fps_den = h265parse->fps_den;
-      gint width, height;
       GstClockTime latency = 0;
 
       caps = gst_caps_copy (sink_caps);
@@ -2335,6 +2325,7 @@ gst_h265_parse_update_src_caps (GstH265Parse * h265parse, GstCaps * caps)
     const gchar *mdi_str = NULL;
     const gchar *cll_str = NULL;
     gboolean codec_data_modified = FALSE;
+    GstStructure *st;
 
     gst_caps_set_simple (caps, "parsed", G_TYPE_BOOLEAN, TRUE,
         "stream-format", G_TYPE_STRING,
@@ -2343,11 +2334,32 @@ gst_h265_parse_update_src_caps (GstH265Parse * h265parse, GstCaps * caps)
         gst_h265_parse_get_string (h265parse, FALSE, h265parse->align), NULL);
 
     gst_h265_parse_get_par (h265parse, &par_n, &par_d);
-    if (par_n != 0 && par_d != 0 &&
+
+    width = 0;
+    height = 0;
+    st = gst_caps_get_structure (caps, 0);
+    gst_structure_get_int (st, "width", &width);
+    gst_structure_get_int (st, "height", &height);
+
+    /* If no resolution info, do not consider aspect ratio */
+    if (par_n != 0 && par_d != 0 && width > 0 && height > 0 &&
         (!s || !gst_structure_has_field (s, "pixel-aspect-ratio"))) {
-      GST_INFO_OBJECT (h265parse, "PAR %d/%d", par_n, par_d);
+      gint new_par_d = par_d;
+      /* Special case for some encoders which provide an 1:2 pixel aspect ratio
+       * for HEVC interlaced content, possibly to work around decoders that don't
+       * support field-based interlacing. Add some defensive checks to check for
+       * a "common" aspect ratio. */
+      if (par_n == 1 && par_d == 2
+          && gst_h265_parse_is_field_interlaced (h265parse)
+          && !gst_video_is_common_aspect_ratio (width, height, par_n, par_d)
+          && gst_video_is_common_aspect_ratio (width, height, 1, 1)) {
+        GST_WARNING_OBJECT (h265parse, "PAR 1/2 makes the aspect ratio of "
+            "a %d x %d frame uncommon. Switching to 1/1", width, height);
+        new_par_d = 1;
+      }
+      GST_INFO_OBJECT (h265parse, "PAR %d/%d", par_n, new_par_d);
       gst_caps_set_simple (caps, "pixel-aspect-ratio", GST_TYPE_FRACTION,
-          par_n, par_d, NULL);
+          par_n, new_par_d, NULL);
     }
 
     /* set profile and level in caps */

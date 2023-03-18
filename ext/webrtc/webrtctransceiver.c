@@ -148,17 +148,21 @@ webrtc_transceiver_finalize (GObject * object)
 {
   WebRTCTransceiver *trans = WEBRTC_TRANSCEIVER (object);
 
-  if (trans->stream)
-    gst_object_unref (trans->stream);
-  trans->stream = NULL;
+  gst_clear_object (&trans->stream);
+  gst_clear_object (&trans->ulpfecdec);
+  gst_clear_object (&trans->ulpfecenc);
+  gst_clear_object (&trans->redenc);
 
   if (trans->local_rtx_ssrc_map)
     gst_structure_free (trans->local_rtx_ssrc_map);
   trans->local_rtx_ssrc_map = NULL;
 
-  gst_caps_replace (&trans->last_configured_caps, NULL);
+  gst_caps_replace (&trans->last_retrieved_caps, NULL);
+  gst_caps_replace (&trans->last_send_configured_caps, NULL);
 
-  gst_event_replace (&trans->ssrc_event, NULL);
+  g_free (trans->pending_mid);
+
+  gst_event_replace (&trans->tos_event, NULL);
 
   G_OBJECT_CLASS (parent_class)->finalize (object);
 }

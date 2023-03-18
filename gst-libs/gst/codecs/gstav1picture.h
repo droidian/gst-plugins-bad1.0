@@ -22,6 +22,7 @@
 
 #include <gst/codecs/codecs-prelude.h>
 #include <gst/codecparsers/gstav1parser.h>
+#include <gst/video/video.h>
 
 G_BEGIN_DECLS
 
@@ -66,6 +67,7 @@ struct _GstAV1Tile
  */
 struct _GstAV1Picture
 {
+  /*< private >*/
   GstMiniObject parent;
 
   /* From GstVideoCodecFrame */
@@ -73,11 +75,18 @@ struct _GstAV1Picture
 
   GstAV1FrameHeaderOBU frame_hdr;
 
+  /* from OBU header */
+  guint8 temporal_id;
+  guint8 spatial_id;
+
   /* copied from parser */
   guint32 display_frame_id;
   gboolean show_frame;
   gboolean showable_frame;
   gboolean apply_grain;
+
+  /* decoder input state if this picture is discont point */
+  GstVideoCodecState *discont_state;
 
   gpointer user_data;
   GDestroyNotify notify;
@@ -110,7 +119,7 @@ gst_av1_picture_replace (GstAV1Picture ** old_picture,
 }
 
 static inline void
-gst_av1_picture_clear (GstAV1Picture ** picture)
+gst_clear_av1_picture (GstAV1Picture ** picture)
 {
   if (picture && *picture) {
     gst_av1_picture_unref (*picture);

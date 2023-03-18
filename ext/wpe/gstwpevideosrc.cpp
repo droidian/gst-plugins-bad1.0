@@ -53,7 +53,7 @@
  * Saves the first 50 video frames generated for the GStreamer website as PNG files in /tmp.
  *
  * ```shell
- * gst-play-1.0 --videosink gtkglsink wpe://https://gstreamer.freedesktop.org
+ * gst-play-1.0 --videosink gtkglsink web+https://gstreamer.freedesktop.org
  * ```
  * Shows the GStreamer website homepage as played with GstPlayer in a GTK+ window.
  *
@@ -84,6 +84,7 @@
 #include <config.h>
 #endif
 
+#include "gstwpe.h"
 #include "gstwpevideosrc.h"
 #include <gst/gl/gl.h>
 #include <gst/gl/egl/gstglmemoryegl.h>
@@ -110,6 +111,7 @@ enum
 {
   SIGNAL_CONFIGURE_WEB_VIEW,
   SIGNAL_LOAD_BYTES,
+  SIGNAL_RUN_JAVASCRIPT,
   LAST_SIGNAL
 };
 static guint gst_wpe_video_src_signals[LAST_SIGNAL] = { 0 };
@@ -128,6 +130,9 @@ struct _GstWpeVideoSrc
   gint64 n_frames;              /* total frames sent */
 
   WPEView *view;
+
+  GArray *touch_points;
+  struct wpe_input_touch_event_raw *last_touch;
 
   GMutex lock;
 };
@@ -456,6 +461,15 @@ gst_wpe_video_src_configure_web_view (GstWpeVideoSrc * src,
 }
 
 static void
+gst_wpe_video_src_run_javascript (GstWpeVideoSrc * src, const gchar * script)
+{
+  if (src->view && GST_STATE (GST_ELEMENT_CAST (src)) > GST_STATE_NULL) {
+    GST_INFO_OBJECT (src, "running javascript");
+    src->view->runJavascript (script);
+  }
+}
+
+static void
 gst_wpe_video_src_load_bytes (GstWpeVideoSrc * src, GBytes * bytes)
 {
   if (src->view && GST_STATE (GST_ELEMENT_CAST (src)) > GST_STATE_NULL) {
@@ -550,6 +564,49 @@ gst_wpe_video_src_get_property (GObject * object, guint prop_id, GValue * value,
   }
 }
 
+static void
+_set_touch_point (struct wpe_input_touch_event_raw * point,
+    GstEvent * event, enum wpe_input_touch_event_type type, guint id, gdouble x,
+    gdouble y)
+{
+
+  point->time = GST_TIME_AS_MSECONDS (GST_EVENT_TIMESTAMP (event));
+  point->type = type;
+  point->id = (int) id;
+  point->x = (int32_t) x;
+  point->y = (int32_t) y;
+}
+
+static uint32_t
+_gst_modifiers_to_wpe (GstEvent * ev)
+{
+  GstNavigationModifierType modifier_state;
+  uint32_t modifiers = 0;
+
+  if (gst_navigation_event_parse_modifier_state (ev, &modifier_state)) {
+    if (modifier_state & GST_NAVIGATION_MODIFIER_CONTROL_MASK)
+      modifiers |= wpe_input_keyboard_modifier_control;
+    if (modifier_state & GST_NAVIGATION_MODIFIER_SHIFT_MASK)
+      modifiers |= wpe_input_keyboard_modifier_shift;
+    if (modifier_state & GST_NAVIGATION_MODIFIER_MOD1_MASK)
+      modifiers |= wpe_input_keyboard_modifier_alt;
+    if (modifier_state & GST_NAVIGATION_MODIFIER_META_MASK)
+      modifiers |= wpe_input_keyboard_modifier_meta;
+    if (modifier_state & GST_NAVIGATION_MODIFIER_BUTTON1_MASK)
+      modifiers |= wpe_input_pointer_modifier_button1;
+    if (modifier_state & GST_NAVIGATION_MODIFIER_BUTTON2_MASK)
+      modifiers |= wpe_input_pointer_modifier_button2;
+    if (modifier_state & GST_NAVIGATION_MODIFIER_BUTTON3_MASK)
+      modifiers |= wpe_input_pointer_modifier_button3;
+    if (modifier_state & GST_NAVIGATION_MODIFIER_BUTTON4_MASK)
+      modifiers |= wpe_input_pointer_modifier_button4;
+    if (modifier_state & GST_NAVIGATION_MODIFIER_BUTTON5_MASK)
+      modifiers |= wpe_input_pointer_modifier_button5;
+  }
+
+  return modifiers;
+}
+
 static gboolean
 gst_wpe_video_src_event (GstBaseSrc * base_src, GstEvent * event)
 {
@@ -559,6 +616,7 @@ gst_wpe_video_src_event (GstBaseSrc * base_src, GstEvent * event)
   if (src->view && GST_EVENT_TYPE (event) == GST_EVENT_NAVIGATION) {
     const gchar *key;
     gint button;
+    guint touch_id;
     gdouble x, y, delta_x, delta_y;
 
     GST_DEBUG_OBJECT (src, "Processing event %" GST_PTR_FORMAT, event);
@@ -568,13 +626,23 @@ gst_wpe_video_src_event (GstBaseSrc * base_src, GstEvent * event)
         if (gst_navigation_event_parse_key_event (event, &key)) {
           /* FIXME: This is wrong... The GstNavigation API should pass
              hardware-level information, not high-level keysym strings */
-          uint32_t keysym =
+          gunichar *unichar;
+          glong items_written;
+          uint32_t keysym;
+          struct wpe_input_keyboard_event wpe_event = { 0 };
+
+          unichar = g_utf8_to_ucs4_fast (key, -1, &items_written);
+          if (items_written == 1)
+            keysym = (uint32_t) xkb_utf32_to_keysym (*unichar);
+          else
+            keysym =
               (uint32_t) xkb_keysym_from_name (key, XKB_KEYSYM_NO_FLAGS);
-          struct wpe_input_keyboard_event wpe_event;
+
           wpe_event.key_code = keysym;
           wpe_event.pressed =
               gst_navigation_event_get_type (event) ==
               GST_NAVIGATION_EVENT_KEY_PRESS;
+          wpe_event.modifiers = _gst_modifiers_to_wpe (event);
           src->view->dispatchKeyboardEvent (wpe_event);
           ret = TRUE;
         }
@@ -588,17 +656,7 @@ gst_wpe_video_src_event (GstBaseSrc * base_src, GstEvent * event)
           wpe_event.type = wpe_input_pointer_event_type_button;
           wpe_event.x = (int) x;
           wpe_event.y = (int) y;
-          if (button == 1) {
-            wpe_event.modifiers = wpe_input_pointer_modifier_button1;
-          } else if (button == 2) {
-            wpe_event.modifiers = wpe_input_pointer_modifier_button2;
-          } else if (button == 3) {
-            wpe_event.modifiers = wpe_input_pointer_modifier_button3;
-          } else if (button == 4) {
-            wpe_event.modifiers = wpe_input_pointer_modifier_button4;
-          } else if (button == 5) {
-            wpe_event.modifiers = wpe_input_pointer_modifier_button5;
-          }
+          wpe_event.modifiers = _gst_modifiers_to_wpe (event);
           wpe_event.button = button;
           wpe_event.state =
               gst_navigation_event_get_type (event) ==
@@ -614,6 +672,7 @@ gst_wpe_video_src_event (GstBaseSrc * base_src, GstEvent * event)
           wpe_event.type = wpe_input_pointer_event_type_motion;
           wpe_event.x = (int) x;
           wpe_event.y = (int) y;
+          wpe_event.modifiers = _gst_modifiers_to_wpe (event);
           src->view->dispatchPointerEvent (wpe_event);
           ret = TRUE;
         }
@@ -637,10 +696,91 @@ gst_wpe_video_src_event (GstBaseSrc * base_src, GstEvent * event)
           ret = TRUE;
         }
         break;
+      case GST_NAVIGATION_EVENT_TOUCH_DOWN:
+        if (gst_navigation_event_parse_touch_event (event, &touch_id, &x, &y,
+              NULL)) {
+          struct wpe_input_touch_event_raw *point = g_new
+              (struct wpe_input_touch_event_raw, 1);
+
+          _set_touch_point (point, event, wpe_input_touch_event_type_down,
+              touch_id, x, y);
+          src->touch_points = g_array_append_vals(src->touch_points, point, 1);
+          src->last_touch = point;
+          ret = TRUE;
+        }
+        break;
+      case GST_NAVIGATION_EVENT_TOUCH_MOTION:
+        if (gst_navigation_event_parse_touch_event (event, &touch_id, &x, &y,
+              NULL)) {
+          struct wpe_input_touch_event_raw *touch_points;
+          guint idx;
+
+          touch_points = (struct wpe_input_touch_event_raw *)
+              src->touch_points->data;
+          for (idx = 0; idx < src->touch_points->len; idx++) {
+            if (touch_points[idx].id == (int32_t) touch_id) {
+              _set_touch_point (&touch_points[idx], event,
+                  wpe_input_touch_event_type_motion, touch_id, x, y);
+              src->last_touch = &touch_points[idx];
+              break;
+            }
+          }
+          ret = TRUE;
+        }
+        break;
+      case GST_NAVIGATION_EVENT_TOUCH_UP:
+        if (gst_navigation_event_parse_touch_up_event (event, &touch_id, &x,
+              &y)) {
+          struct wpe_input_touch_event_raw *touch_points;
+          guint idx;
+
+          touch_points = (struct wpe_input_touch_event_raw *)
+              src->touch_points->data;
+          for (idx = 0; idx < src->touch_points->len; idx++) {
+            if (touch_points[idx].id == (int32_t) touch_id) {
+              _set_touch_point (&touch_points[idx], event,
+                  wpe_input_touch_event_type_up, touch_id, x, y);
+              src->last_touch = &touch_points[idx];
+              break;
+            }
+          }
+          ret = TRUE;
+        }
+        break;
+      case GST_NAVIGATION_EVENT_TOUCH_FRAME:
+        if (src->last_touch && src->touch_points->len > 0)
+        {
+          struct wpe_input_touch_event_raw *touch_points;
+          struct wpe_input_touch_event wpe_event;
+          guint idx;
+
+          wpe_event.touchpoints =
+              (struct wpe_input_touch_event_raw *) src->touch_points->data;
+          wpe_event.touchpoints_length = src->touch_points->len;
+          wpe_event.type = src->last_touch->type;
+          wpe_event.id = src->last_touch->id;
+          wpe_event.modifiers = _gst_modifiers_to_wpe (event);
+          wpe_event.time = src->last_touch->time;
+          src->view->dispatchTouchEvent (wpe_event);
+
+          touch_points = (struct wpe_input_touch_event_raw *)
+              src->touch_points->data;
+          for (idx = 0; idx < src->touch_points->len; idx++) {
+            if (touch_points[idx].type == wpe_input_touch_event_type_up ||
+                touch_points[idx].type == wpe_input_touch_event_type_null) {
+              g_array_remove_index_fast(src->touch_points, idx);
+              idx--;
+            }
+          }
+          src->last_touch = NULL;
+          ret = TRUE;
+        }
+        break;
+      case GST_NAVIGATION_EVENT_TOUCH_CANCEL:
+        break;
       default:
         break;
     }
-    /* FIXME: No touch events handling support in GstNavigation */
   }
 
   if (!ret) {
@@ -655,9 +795,11 @@ static void
 gst_wpe_video_src_init (GstWpeVideoSrc * src)
 {
   src->draw_background = DEFAULT_DRAW_BACKGROUND;
+  src->location = g_strdup (DEFAULT_LOCATION);
 
   gst_base_src_set_live (GST_BASE_SRC_CAST (src), TRUE);
 
+  src->touch_points = g_array_sized_new (FALSE, FALSE, sizeof (void *), 10);
   g_mutex_init (&src->lock);
 }
 
@@ -668,6 +810,7 @@ gst_wpe_video_src_finalize (GObject * object)
 
   g_free (src->location);
   g_clear_pointer (&src->bytes, g_bytes_unref);
+  g_array_unref (src->touch_points);
   g_mutex_clear (&src->lock);
 
   G_OBJECT_CLASS (parent_class)->finalize (object);
@@ -690,7 +833,7 @@ gst_wpe_video_src_class_init (GstWpeVideoSrcClass * klass)
   g_object_class_install_property (gobject_class, PROP_LOCATION,
       g_param_spec_string ("location", "location",
           "The URL to display",
-          "", (GParamFlags) (G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS)));
+          DEFAULT_LOCATION, (GParamFlags) (G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS)));
   g_object_class_install_property (gobject_class, PROP_DRAW_BACKGROUND,
       g_param_spec_boolean ("draw-background", "Draws the background",
           "Whether to draw the WebView background", DEFAULT_DRAW_BACKGROUND,
@@ -746,4 +889,20 @@ gst_wpe_video_src_class_init (GstWpeVideoSrcClass * klass)
       static_cast < GSignalFlags > (G_SIGNAL_RUN_LAST | G_SIGNAL_ACTION),
       G_CALLBACK (gst_wpe_video_src_load_bytes), NULL, NULL, NULL,
       G_TYPE_NONE, 1, G_TYPE_BYTES);
+
+  /**
+   * GstWpeSrc::run-javascript:
+   * @src: the object which received the signal
+   * @script: the script to run
+   *
+   * Asynchronously run script in the context of the current page on the
+   * internal webView.
+   *
+   * Since: 1.22
+   */
+    gst_wpe_video_src_signals[SIGNAL_RUN_JAVASCRIPT] =
+      g_signal_new_class_handler ("run-javascript", G_TYPE_FROM_CLASS (klass),
+      static_cast < GSignalFlags > (G_SIGNAL_RUN_LAST | G_SIGNAL_ACTION),
+      G_CALLBACK (gst_wpe_video_src_run_javascript), NULL, NULL, NULL,
+      G_TYPE_NONE, 1, G_TYPE_STRING);
 }

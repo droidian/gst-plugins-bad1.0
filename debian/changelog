@@ -1,3 +1,61 @@
+gst-plugins-bad1.0 (1.22.0-4) unstable; urgency=medium
+
+  * Team upload
+  * debian/rules: Disable vulkan on non-linux architectures
+  * Disable zxing element on architectures where opencv doesn't build
+
+ -- Laurent Bigonville <bigon@debian.org>  Mon, 27 Feb 2023 23:59:59 +0100
+
+gst-plugins-bad1.0 (1.22.0-3) unstable; urgency=medium
+
+  * The new Intel Quick Sync Video plugin is amd64-only
+    so only enable it there
+  * Bump minimum libzxingcore-dev to 1.4.0
+  * Enable wpe on all non-Linux architectures
+  * Release to unstable
+
+ -- Jeremy Bicha <jbicha@ubuntu.com>  Sat, 28 Jan 2023 14:23:11 -0500
+
+gst-plugins-bad1.0 (1.22.0-2) experimental; urgency=medium
+
+  * Disable Intel Quick Sync Video plugin (there is a build issue with it)
+  * Adjust some other configure & install rules
+
+ -- Jeremy Bicha <jbicha@ubuntu.com>  Sat, 28 Jan 2023 11:51:52 -0500
+
+gst-plugins-bad1.0 (1.22.0-1) experimental; urgency=medium
+
+  * Team upload
+  * New upstream release
+  * debian/rules: Set -Dauto_features=enabled
+    and explicitly disable several things that aren't buildable in Debian
+  * Build-Depend on glslc, gstreamer1.0-tools, libdirectfb-dev, liblrdf0-dev,
+    libneon27-dev, libvulkan-dev, & libxkbcommon-x11-dev
+  * debian/control: Bump minimum gstreamer, glib, libnice, and meson
+  * Update debian/libgstreamer-plugins-bad1.0-0.install
+  * Set Rules-Requires-Root: no
+  * Bump Standards-Version to 4.6.2
+
+ -- Jeremy Bicha <jbicha@ubuntu.com>  Fri, 27 Jan 2023 17:50:14 -0500
+
+gst-plugins-bad1.0 (1.20.5-1) unstable; urgency=medium
+
+  * Team upload
+  * New upstream release
+  * Add debian/upstream/signing-key.asc and update debian/watch to use it
+  * Update standards version to 4.6.1, no changes needed
+  * Remove fields on binary packages that duplicate source
+
+ -- Jeremy Bicha <jbicha@ubuntu.com>  Thu, 05 Jan 2023 12:05:53 -0500
+
+gst-plugins-bad1.0 (1.20.4-1) unstable; urgency=medium
+
+  * Team upload
+  * New upstream release
+  * Refresh Skip-failing-tests.patch
+
+ -- Jeremy Bicha <jbicha@ubuntu.com>  Mon, 05 Dec 2022 10:54:29 -0500
+
 gst-plugins-bad1.0 (1.20.3-2) unstable; urgency=medium
 
   * Update patch to skip flaky camerabin test too (Closes: #1014264)
@@ -2405,4 +2463,3 @@ gst-plugins-bad0.10 (0.10.0+cvs20060214-1) unstable; urgency=low
   * Initial release.
 
  -- Joe Wreschnig <piman@debian.org>  Tue, 14 Feb 2006 13:22:33 -0600
-

@@ -152,47 +152,6 @@ struct _GstWebRTCRTPReceiverClass
 GST_WEBRTC_API
 GstWebRTCRTPReceiver *      gst_webrtc_rtp_receiver_new                 (void);
 
-
-/**
- * GstWebRTCICETransport:
- */
-struct _GstWebRTCICETransport
-{
-  GstObject                          parent;
-
-  GstWebRTCICERole                   role;
-  GstWebRTCICEComponent              component;
-
-  GstWebRTCICEConnectionState        state;
-  GstWebRTCICEGatheringState         gathering_state;
-
-  /* Filled by subclasses */
-  GstElement                        *src;
-  GstElement                        *sink;
-
-  gpointer                          _padding[GST_PADDING];
-};
-
-struct _GstWebRTCICETransportClass
-{
-  GstObjectClass               parent_class;
-
-  gboolean                  (*gather_candidates)        (GstWebRTCICETransport * transport);
-
-  gpointer                  _padding[GST_PADDING];
-};
-
-GST_WEBRTC_API
-void            gst_webrtc_ice_transport_connection_state_change    (GstWebRTCICETransport * ice,
-                                                                     GstWebRTCICEConnectionState new_state);
-GST_WEBRTC_API
-void            gst_webrtc_ice_transport_gathering_state_change     (GstWebRTCICETransport * ice,
-                                                                     GstWebRTCICEGatheringState new_state);
-GST_WEBRTC_API
-void            gst_webrtc_ice_transport_selected_pair_change       (GstWebRTCICETransport * ice);
-GST_WEBRTC_API
-void            gst_webrtc_ice_transport_new_candidate              (GstWebRTCICETransport * ice, guint stream_id, GstWebRTCICEComponent component, gchar * attr);
-
 /**
  * GstWebRTCDTLSTransport:
  */
@@ -263,8 +222,8 @@ struct _GstWebRTCDataChannelClass
 {
   GObjectClass        parent_class;
 
-  void              (*send_data)   (GstWebRTCDataChannel * channel, GBytes *data);
-  void              (*send_string) (GstWebRTCDataChannel * channel, const gchar *str);
+  gboolean          (*send_data)   (GstWebRTCDataChannel * channel, GBytes *data, GError ** error);
+  gboolean          (*send_string) (GstWebRTCDataChannel * channel, const gchar *str, GError ** error);
   void              (*close)       (GstWebRTCDataChannel * channel);
 
   gpointer           _padding[GST_PADDING];

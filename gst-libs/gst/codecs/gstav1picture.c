@@ -36,6 +36,9 @@ _gst_av1_picture_free (GstAV1Picture * picture)
   if (picture->notify)
     picture->notify (picture->user_data);
 
+  if (picture->discont_state)
+    gst_video_codec_state_unref (picture->discont_state);
+
   g_free (picture);
 }
 
@@ -160,7 +163,7 @@ gst_av1_dpb_clear (GstAV1Dpb * dpb)
   g_return_if_fail (dpb != NULL);
 
   for (i = 0; i < GST_AV1_NUM_REF_FRAMES; i++)
-    gst_av1_picture_clear (&dpb->pic_list[i]);
+    gst_clear_av1_picture (&dpb->pic_list[i]);
 }
 
 /**

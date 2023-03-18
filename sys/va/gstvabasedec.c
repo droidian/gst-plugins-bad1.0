@@ -20,14 +20,33 @@
 
 #include "gstvabasedec.h"
 
-#include "gstvaallocator.h"
+#include <gst/va/gstva.h>
+#include <gst/va/gstvavideoformat.h>
+
 #include "gstvacaps.h"
-#include "gstvapool.h"
-#include "gstvautils.h"
-#include "gstvavideoformat.h"
 
 #define GST_CAT_DEFAULT (base->debug_category)
 #define GST_VA_BASE_DEC_GET_PARENT_CLASS(obj) (GST_VA_BASE_DEC_GET_CLASS(obj)->parent_decoder_class)
+
+static void
+gst_va_base_dec_get_property (GObject * object, guint prop_id,
+    GValue * value, GParamSpec * pspec)
+{
+  GstVaBaseDec *self = GST_VA_BASE_DEC (object);
+
+  switch (prop_id) {
+    case GST_VA_DEC_PROP_DEVICE_PATH:{
+      if (!(self->display && GST_IS_VA_DISPLAY_DRM (self->display))) {
+        g_value_set_string (value, NULL);
+        return;
+      }
+      g_object_get_property (G_OBJECT (self->display), "path", value);
+      break;
+    }
+    default:
+      G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
+  }
+}
 
 static gboolean
 gst_va_base_dec_open (GstVideoDecoder * decoder)
@@ -39,6 +58,8 @@ gst_va_base_dec_open (GstVideoDecoder * decoder)
   if (!gst_va_ensure_element_data (decoder, klass->render_device_path,
           &base->display))
     return FALSE;
+
+  g_object_notify (G_OBJECT (decoder), "device-path");
 
   if (!g_atomic_pointer_get (&base->decoder)) {
     GstVaDecoder *va_decoder;
@@ -67,6 +88,8 @@ gst_va_base_dec_close (GstVideoDecoder * decoder)
   gst_clear_object (&base->decoder);
   gst_clear_object (&base->display);
 
+  g_object_notify (G_OBJECT (decoder), "device-path");
+
   return TRUE;
 }
 
@@ -78,9 +101,8 @@ gst_va_base_dec_stop (GstVideoDecoder * decoder)
   if (!gst_va_decoder_close (base->decoder))
     return FALSE;
 
-  if (base->output_state)
-    gst_video_codec_state_unref (base->output_state);
-  base->output_state = NULL;
+  g_clear_pointer (&base->output_state, gst_video_codec_state_unref);
+  g_clear_pointer (&base->input_state, gst_video_codec_state_unref);
 
   if (base->other_pool)
     gst_buffer_pool_set_active (base->other_pool, FALSE);
@@ -206,6 +228,7 @@ _create_allocator (GstVaBaseDec * base, GstCaps * caps)
     GArray *surface_formats =
         gst_va_decoder_get_surface_formats (base->decoder);
     allocator = gst_va_allocator_new (base->display, surface_formats);
+    gst_va_allocator_set_hacks (allocator, base->hacks);
   }
 
   return allocator;
@@ -259,12 +282,22 @@ _decide_allocation_for_video_crop (GstVideoDecoder * decoder,
   guint size = 0, min, max;
   GstVaBaseDec *base = GST_VA_BASE_DEC (decoder);
   gboolean ret = TRUE;
+  gboolean dont_use_other_pool = FALSE;
   GstCaps *va_caps = NULL;
 
   /* If others provide a valid allocator, just use it. */
   if (gst_query_get_n_allocation_params (query) > 0) {
     gst_query_parse_nth_allocation_param (query, 0, &other_allocator,
         &other_params);
+    GstVaDisplay *display;
+
+    display = gst_va_allocator_peek_display (other_allocator);
+    /* We should not use allocator and pool from other display. */
+    if (display != base->display) {
+      gst_clear_object (&other_allocator);
+      dont_use_other_pool = TRUE;
+    }
+
     update_allocator = TRUE;
   } else {
     gst_allocation_params_init (&other_params);
@@ -274,6 +307,8 @@ _decide_allocation_for_video_crop (GstVideoDecoder * decoder,
   if (gst_query_get_n_allocation_pools (query) > 0) {
     gst_query_parse_nth_allocation_pool (query, 0, &other_pool, &size, &min,
         &max);
+    if (dont_use_other_pool)
+      gst_clear_object (&other_pool);
 
     min += base->min_buffers;
     size = MAX (size, GST_VIDEO_INFO_SIZE (info));
@@ -329,7 +364,8 @@ _decide_allocation_for_video_crop (GstVideoDecoder * decoder,
     gst_buffer_pool_config_add_option (other_config,
         GST_BUFFER_POOL_OPTION_VIDEO_META);
 
-    gst_buffer_pool_config_set_va_allocation_params (other_config, 0);
+    gst_buffer_pool_config_set_va_allocation_params (other_config, 0,
+        GST_VA_FEATURE_AUTO);
 
     if (!gst_buffer_pool_set_config (other_pool, other_config)) {
       ret = FALSE;
@@ -366,7 +402,7 @@ _decide_allocation_for_video_crop (GstVideoDecoder * decoder,
       gst_buffer_pool_config_set_va_alignment (config, &base->valign);
 
     gst_buffer_pool_config_set_va_allocation_params (config,
-        VA_SURFACE_ATTRIB_USAGE_HINT_DECODER);
+        VA_SURFACE_ATTRIB_USAGE_HINT_DECODER, GST_VA_FEATURE_AUTO);
 
     if (!gst_buffer_pool_set_config (pool, config)) {
       ret = FALSE;
@@ -454,6 +490,7 @@ gst_va_base_dec_decide_allocation (GstVideoDecoder * decoder, GstQuery * query)
   guint size = 0, min, max;
   gboolean update_pool = FALSE, update_allocator = FALSE;
   gboolean has_videometa, has_video_crop_meta;
+  gboolean dont_use_other_pool = FALSE;
   gboolean ret = TRUE;
 
   g_assert (base->min_buffers > 0);
@@ -481,13 +518,20 @@ gst_va_base_dec_decide_allocation (GstVideoDecoder * decoder, GstQuery * query)
   }
 
   if (gst_query_get_n_allocation_params (query) > 0) {
+    GstVaDisplay *display;
+
     gst_query_parse_nth_allocation_param (query, 0, &allocator, &other_params);
-    if (allocator && !(GST_IS_VA_DMABUF_ALLOCATOR (allocator)
-            || GST_IS_VA_ALLOCATOR (allocator))) {
+    display = gst_va_allocator_peek_display (allocator);
+    if (!display) {
       /* save the allocator for the other pool */
       other_allocator = allocator;
       allocator = NULL;
+    } else if (display != base->display) {
+      /* The allocator and pool belong to other display, we should not use. */
+      gst_clear_object (&allocator);
+      dont_use_other_pool = TRUE;
     }
+
     update_allocator = TRUE;
   } else {
     gst_allocation_params_init (&other_params);
@@ -503,6 +547,8 @@ gst_va_base_dec_decide_allocation (GstVideoDecoder * decoder, GstQuery * query)
             "may need other pool for copy frames %" GST_PTR_FORMAT, pool);
         other_pool = pool;
         pool = NULL;
+      } else if (dont_use_other_pool) {
+        gst_clear_object (&pool);
       }
     }
 
@@ -538,7 +584,7 @@ gst_va_base_dec_decide_allocation (GstVideoDecoder * decoder, GstQuery * query)
       gst_buffer_pool_config_set_va_alignment (config, &base->valign);
 
     gst_buffer_pool_config_set_va_allocation_params (config,
-        VA_SURFACE_ATTRIB_USAGE_HINT_DECODER);
+        VA_SURFACE_ATTRIB_USAGE_HINT_DECODER, GST_VA_FEATURE_AUTO);
 
     if (!gst_buffer_pool_set_config (pool, config)) {
       ret = FALSE;
@@ -615,10 +661,41 @@ gst_va_base_dec_set_context (GstElement * element, GstContext * context)
       (element))->set_context (element, context);
 }
 
+static gboolean
+gst_va_base_dec_negotiate (GstVideoDecoder * decoder)
+{
+  GstVaBaseDec *base = GST_VA_BASE_DEC (decoder);
+
+  /* Ignore downstream renegotiation request. */
+  if (!base->need_negotiation)
+    return TRUE;
+
+  base->need_negotiation = FALSE;
+
+  if (!gst_va_decoder_config_is_equal (base->decoder, base->profile,
+          base->rt_format, base->width, base->height)) {
+    if (gst_va_decoder_is_open (base->decoder) &&
+        !gst_va_decoder_close (base->decoder))
+      return FALSE;
+    if (!gst_va_decoder_open (base->decoder, base->profile, base->rt_format))
+      return FALSE;
+    if (!gst_va_decoder_set_frame_size (base->decoder, base->width,
+            base->height))
+      return FALSE;
+  }
+
+  if (!gst_va_base_dec_set_output_state (base))
+    return FALSE;
+
+  return GST_VIDEO_DECODER_CLASS (GST_VA_BASE_DEC_GET_PARENT_CLASS (decoder))
+      ->negotiate (decoder);
+}
+
 void
 gst_va_base_dec_init (GstVaBaseDec * base, GstDebugCategory * cat)
 {
   base->debug_category = cat;
+  gst_video_info_init (&base->output_info);
 }
 
 void
@@ -627,6 +704,7 @@ gst_va_base_dec_class_init (GstVaBaseDecClass * klass, GstVaCodecs codec,
     GstCaps * doc_src_caps, GstCaps * doc_sink_caps)
 {
   GstPadTemplate *sink_pad_templ, *src_pad_templ;
+  GObjectClass *object_class = G_OBJECT_CLASS (klass);
   GstElementClass *element_class = GST_ELEMENT_CLASS (klass);
   GstVideoDecoderClass *decoder_class = GST_VIDEO_DECODER_CLASS (klass);
 
@@ -653,6 +731,8 @@ gst_va_base_dec_class_init (GstVaBaseDecClass * klass, GstVaCodecs codec,
     gst_caps_unref (doc_src_caps);
   }
 
+  object_class->get_property = gst_va_base_dec_get_property;
+
   element_class->set_context = GST_DEBUG_FUNCPTR (gst_va_base_dec_set_context);
 
   decoder_class->open = GST_DEBUG_FUNCPTR (gst_va_base_dec_open);
@@ -663,36 +743,82 @@ gst_va_base_dec_class_init (GstVaBaseDecClass * klass, GstVaCodecs codec,
   decoder_class->sink_query = GST_DEBUG_FUNCPTR (gst_va_base_dec_sink_query);
   decoder_class->decide_allocation =
       GST_DEBUG_FUNCPTR (gst_va_base_dec_decide_allocation);
+  decoder_class->negotiate = GST_DEBUG_FUNCPTR (gst_va_base_dec_negotiate);
+
+  g_object_class_install_property (object_class, GST_VA_DEC_PROP_DEVICE_PATH,
+      g_param_spec_string ("device-path", "Device Path",
+          "DRM device path", NULL, G_PARAM_READABLE | G_PARAM_STATIC_STRINGS));
+}
+
+/* XXX: if chroma has not an available format, the first format is
+ * returned, relying on an hypothetical internal CSC */
+static GstVideoFormat
+_find_video_format_from_chroma (const GValue * formats, guint chroma_type)
+{
+  GstVideoFormat fmt;
+  guint i, num_values;
+
+  if (!formats)
+    return GST_VIDEO_FORMAT_UNKNOWN;
+
+  if (G_VALUE_HOLDS_STRING (formats)) {
+    return gst_video_format_from_string (g_value_get_string (formats));
+  } else if (GST_VALUE_HOLDS_LIST (formats)) {
+    GValue *val, *first_val = NULL;
+
+    num_values = gst_value_list_get_size (formats);
+    for (i = 0; i < num_values; i++) {
+      val = (GValue *) gst_value_list_get_value (formats, i);
+      if (!val)
+        continue;
+      if (!first_val)
+        first_val = val;
+      fmt = gst_video_format_from_string (g_value_get_string (val));
+      if (gst_va_chroma_from_video_format (fmt) == chroma_type)
+        return fmt;
+    }
+
+    if (first_val)
+      return gst_video_format_from_string (g_value_get_string (first_val));
+  }
+
+  return GST_VIDEO_FORMAT_UNKNOWN;
 }
 
 static GstVideoFormat
-_default_video_format_from_chroma (guint chroma_type)
+_caps_video_format_from_chroma (GstCaps * caps, GstCapsFeatures * features,
+    guint chroma_type)
 {
-  switch (chroma_type) {
-      /* 4:2:0 */
-    case VA_RT_FORMAT_YUV420:
-      return GST_VIDEO_FORMAT_NV12;
-    case VA_RT_FORMAT_YUV420_10:
-      return GST_VIDEO_FORMAT_P010_10LE;
-    case VA_RT_FORMAT_YUV420_12:
-      return GST_VIDEO_FORMAT_P012_LE;
-      /* 4:2:2 */
-    case VA_RT_FORMAT_YUV422:
-      return GST_VIDEO_FORMAT_UYVY;
-    case VA_RT_FORMAT_YUV422_10:
-      return GST_VIDEO_FORMAT_Y210;
-    case VA_RT_FORMAT_YUV422_12:
-      return GST_VIDEO_FORMAT_Y212_LE;
-      /* 4:4:4 */
-    case VA_RT_FORMAT_YUV444:
-      return GST_VIDEO_FORMAT_VUYA;
-    case VA_RT_FORMAT_YUV444_10:
-      return GST_VIDEO_FORMAT_Y410;
-    case VA_RT_FORMAT_YUV444_12:
-      return GST_VIDEO_FORMAT_Y412_LE;
-    default:
-      return GST_VIDEO_FORMAT_UNKNOWN;
+  guint i, num_structures;
+  GstCapsFeatures *feats;
+  GstStructure *structure;
+  const GValue *format;
+
+  num_structures = gst_caps_get_size (caps);
+  for (i = 0; i < num_structures; i++) {
+    feats = gst_caps_get_features (caps, i);
+    if (!gst_caps_features_is_equal (feats, features))
+      continue;
+    structure = gst_caps_get_structure (caps, i);
+    format = gst_structure_get_value (structure, "format");
+    return _find_video_format_from_chroma (format, chroma_type);
   }
+
+  return GST_VIDEO_FORMAT_UNKNOWN;
+}
+
+static GstVideoFormat
+_default_video_format_from_chroma (GstVaBaseDec * base,
+    GstCapsFeatures * features, guint chroma_type)
+{
+  GstCaps *tmpl_caps;
+  GstVideoFormat ret = GST_VIDEO_FORMAT_UNKNOWN;
+
+  tmpl_caps = gst_pad_get_pad_template_caps (GST_VIDEO_DECODER_SRC_PAD (base));
+  ret = _caps_video_format_from_chroma (tmpl_caps, features, chroma_type);
+  gst_caps_unref (tmpl_caps);
+
+  return ret;
 }
 
 /* Check whether the downstream supports VideoMeta; if not, we need to
@@ -718,7 +844,6 @@ gst_va_base_dec_get_preferred_format_and_caps_features (GstVaBaseDec * base,
   GstCaps *peer_caps, *preferred_caps = NULL;
   GstCapsFeatures *features;
   GstStructure *structure;
-  const GValue *v_format;
   guint num_structures, i;
   gboolean is_any;
 
@@ -760,54 +885,36 @@ gst_va_base_dec_get_preferred_format_and_caps_features (GstVaBaseDec * base,
   if (gst_caps_is_empty (preferred_caps)) {
     if (capsfeatures)
       *capsfeatures = NULL;     /* system memory */
-    if (format)
-      *format = _default_video_format_from_chroma (base->rt_format);
+    if (format) {
+      *format = _default_video_format_from_chroma (base,
+          GST_CAPS_FEATURES_MEMORY_SYSTEM_MEMORY, base->rt_format);
+    }
     goto bail;
   }
 
-  if (capsfeatures) {
-    features = gst_caps_get_features (preferred_caps, 0);
-    if (features) {
-      *capsfeatures = gst_caps_features_copy (features);
-
-      if (is_any
-          && !gst_caps_features_is_equal (features,
-              GST_CAPS_FEATURES_MEMORY_SYSTEM_MEMORY)
-          && !_downstream_has_video_meta (base, preferred_caps)) {
-        GST_INFO_OBJECT (base, "Downstream reports ANY caps but without"
-            " VideoMeta support; fallback to system memory.");
-        gst_caps_features_free (*capsfeatures);
-        *capsfeatures = NULL;
-      }
-    } else {
-      *capsfeatures = NULL;
-    }
+  /* Use the first structure/feature is caps because is the
+   * "preferred" one */
+  features = gst_caps_get_features (preferred_caps, 0);
+  if (!features) {
+    features = GST_CAPS_FEATURES_MEMORY_SYSTEM_MEMORY;
+  } else if (is_any
+      && !gst_caps_features_is_equal (features,
+          GST_CAPS_FEATURES_MEMORY_SYSTEM_MEMORY)
+      && !_downstream_has_video_meta (base, preferred_caps)) {
+    GST_INFO_OBJECT (base, "Downstream reports ANY caps but without"
+        " VideoMeta support; fallback to system memory.");
+    features = GST_CAPS_FEATURES_MEMORY_SYSTEM_MEMORY;
   }
 
-  if (!format)
-    goto bail;
 
-  structure = gst_caps_get_structure (preferred_caps, 0);
-  v_format = gst_structure_get_value (structure, "format");
-  if (!v_format)
-    *format = _default_video_format_from_chroma (base->rt_format);
-  else if (G_VALUE_HOLDS_STRING (v_format))
-    *format = gst_video_format_from_string (g_value_get_string (v_format));
-  else if (GST_VALUE_HOLDS_LIST (v_format)) {
-    guint num_values = gst_value_list_get_size (v_format);
-    for (i = 0; i < num_values; i++) {
-      GstVideoFormat fmt;
-      const GValue *v_fmt = gst_value_list_get_value (v_format, i);
-      if (!v_fmt)
-        continue;
-      fmt = gst_video_format_from_string (g_value_get_string (v_fmt));
-      if (gst_va_chroma_from_video_format (fmt) == base->rt_format) {
-        *format = fmt;
-        break;
-      }
-    }
-    if (i == num_values)
-      *format = _default_video_format_from_chroma (base->rt_format);
+  if (capsfeatures)
+    *capsfeatures = gst_caps_features_copy (features);
+
+  /* Use the format from chroma and available format for selected
+   * capsfeature */
+  if (format) {
+    *format = _default_video_format_from_chroma (base, features,
+        base->rt_format);
   }
 
 bail:
@@ -902,7 +1009,7 @@ gst_va_base_dec_copy_output_buffer (GstVaBaseDec * base,
 
   src_vinfo = &base->output_state->info;
   gst_video_info_set_format (&dest_vinfo, GST_VIDEO_INFO_FORMAT (src_vinfo),
-      base->width, base->height);
+      GST_VIDEO_INFO_WIDTH (src_vinfo), GST_VIDEO_INFO_HEIGHT (src_vinfo));
 
   ret = gst_buffer_pool_acquire_buffer (base->other_pool, &buffer, NULL);
   if (ret != GST_FLOW_OK)
@@ -927,8 +1034,8 @@ gst_va_base_dec_copy_output_buffer (GstVaBaseDec * base,
   } else {
     /* gst_video_frame_copy can crop this, but does not know, so let
      * make it think it's all right */
-    GST_VIDEO_INFO_WIDTH (&src_frame.info) = base->width;
-    GST_VIDEO_INFO_HEIGHT (&src_frame.info) = base->height;
+    GST_VIDEO_INFO_WIDTH (&src_frame.info) = GST_VIDEO_INFO_WIDTH (src_vinfo);
+    GST_VIDEO_INFO_HEIGHT (&src_frame.info) = GST_VIDEO_INFO_HEIGHT (src_vinfo);
 
     if (!gst_video_frame_copy (&dest_frame, &src_frame)) {
       gst_video_frame_unmap (&src_frame);
@@ -950,4 +1057,96 @@ fail:
 
   GST_ERROR_OBJECT (base, "Failed copy output buffer.");
   return FALSE;
+}
+
+gboolean
+gst_va_base_dec_process_output (GstVaBaseDec * base, GstVideoCodecFrame * frame,
+    GstVideoCodecState * input_state, GstVideoBufferFlags buffer_flags)
+{
+  GstVideoDecoder *vdec = GST_VIDEO_DECODER (base);
+
+  if (input_state) {
+
+    g_assert (GST_VIDEO_INFO_WIDTH (&input_state->info) ==
+        GST_VIDEO_INFO_WIDTH (&base->input_state->info)
+        && GST_VIDEO_INFO_HEIGHT (&input_state->info) ==
+        GST_VIDEO_INFO_HEIGHT (&input_state->info));
+
+    g_clear_pointer (&base->input_state, gst_video_codec_state_unref);
+    base->input_state = gst_video_codec_state_ref (input_state);
+
+    base->need_negotiation = TRUE;
+    if (!gst_video_decoder_negotiate (vdec)) {
+      GST_ERROR_OBJECT (base, "Could not re-negotiate with updated state");
+      return GST_FLOW_ERROR;
+    }
+  }
+
+  if (base->copy_frames)
+    gst_va_base_dec_copy_output_buffer (base, frame);
+
+  if (buffer_flags != 0) {
+#ifndef GST_DISABLE_GST_DEBUG
+    gboolean interlaced =
+        (buffer_flags & GST_VIDEO_BUFFER_FLAG_INTERLACED) != 0;
+    gboolean tff = (buffer_flags & GST_VIDEO_BUFFER_FLAG_TFF) != 0;
+
+    GST_TRACE_OBJECT (base,
+        "apply buffer flags 0x%x (interlaced %d, top-field-first %d)",
+        buffer_flags, interlaced, tff);
+#endif
+    GST_BUFFER_FLAG_SET (frame->output_buffer, buffer_flags);
+  }
+
+  return TRUE;
+}
+
+GstFlowReturn
+gst_va_base_dec_prepare_output_frame (GstVaBaseDec * base,
+    GstVideoCodecFrame * frame)
+{
+  GstVideoDecoder *vdec = GST_VIDEO_DECODER (base);
+
+  if (base->need_negotiation) {
+    if (!gst_video_decoder_negotiate (vdec)) {
+      GST_ERROR_OBJECT (base, "Failed to negotiate with downstream");
+      return GST_FLOW_NOT_NEGOTIATED;
+    }
+  }
+
+  if (frame)
+    return gst_video_decoder_allocate_output_frame (vdec, frame);
+  return GST_FLOW_OK;
+}
+
+gboolean
+gst_va_base_dec_set_output_state (GstVaBaseDec * base)
+{
+  GstVideoDecoder *decoder = GST_VIDEO_DECODER (base);
+  GstVideoFormat format = GST_VIDEO_FORMAT_UNKNOWN;
+  GstCapsFeatures *capsfeatures = NULL;
+  GstVideoInfo *info = &base->output_info;
+
+  if (base->output_state)
+    gst_video_codec_state_unref (base->output_state);
+
+  gst_va_base_dec_get_preferred_format_and_caps_features (base, &format,
+      &capsfeatures);
+  if (format == GST_VIDEO_FORMAT_UNKNOWN)
+    return FALSE;
+
+  base->output_state =
+      gst_video_decoder_set_interlaced_output_state (decoder, format,
+      GST_VIDEO_INFO_INTERLACE_MODE (info), GST_VIDEO_INFO_WIDTH (info),
+      GST_VIDEO_INFO_HEIGHT (info), base->input_state);
+
+  /* set caps feature */
+  base->output_state->caps = gst_video_info_to_caps (&base->output_state->info);
+  if (capsfeatures)
+    gst_caps_set_features_simple (base->output_state->caps, capsfeatures);
+
+  GST_INFO_OBJECT (base, "Negotiated caps %" GST_PTR_FORMAT,
+      base->output_state->caps);
+
+  return TRUE;
 }
