@@ -70,6 +70,7 @@
 #include "corevideobuffer.h"
 #include "vtutil.h"
 #include <gst/pbutils/codec-utils.h>
+#include <sys/sysctl.h>
 
 #define VTENC_DEFAULT_BITRATE     0
 #define VTENC_DEFAULT_FRAME_REORDERING TRUE
@@ -201,8 +202,7 @@ static GstStaticCaps sink_caps =
 GST_STATIC_CAPS (GST_VIDEO_CAPS_MAKE ("{ NV12, I420 }"));
 #else
 static GstStaticCaps sink_caps =
-GST_STATIC_CAPS (GST_VIDEO_CAPS_MAKE
-    ("{ AYUV64, UYVY, NV12, I420, ARGB64_BE }"));
+GST_STATIC_CAPS (GST_VIDEO_CAPS_MAKE ("{ AYUV64, UYVY, NV12, I420 }"));
 #endif
 
 
@@ -231,9 +231,37 @@ gst_vtenc_base_init (GstVTEncClass * klass)
 
   {
     GstCaps *caps = gst_static_caps_get (&sink_caps);
-    /* RGBA64_LE is kCVPixelFormatType_64RGBALE, only available on macOS 11.3+ */
-    if (GST_VTUTIL_HAVE_64ARGBALE)
-      caps = gst_vtutil_caps_append_video_format (caps, "RGBA64_LE");
+#ifndef HAVE_IOS
+    gboolean enable_argb = TRUE;
+    int retval;
+    char cpu_name[30];
+    size_t cpu_len = 30;
+
+    if (__builtin_available (macOS 13.0, *)) {
+      /* Can't negate a __builtin_available check */
+    } else {
+      /* Disable ARGB64/RGBA64 if we're on M1 Pro/Max and macOS < 13.0 
+       * due to a bug within VideoToolbox which causes encoding to fail. */
+      retval = sysctlbyname ("machdep.cpu.brand_string", &cpu_name, &cpu_len,
+          NULL, 0);
+
+      if (retval == 0 &&
+          (strstr (cpu_name, "M1 Pro") != NULL ||
+              strstr (cpu_name, "M1 Max") != NULL)) {
+        GST_WARNING
+            ("Disabling ARGB64/RGBA64 caps due to a bug in VideoToolbox "
+            "on M1 Pro/Max running macOS < 13.0.");
+        enable_argb = FALSE;
+      }
+    }
+
+    if (enable_argb) {
+      caps = gst_vtutil_caps_append_video_format (caps, "ARGB64_BE");
+      /* RGBA64_LE is kCVPixelFormatType_64RGBALE, only available on macOS 11.3+ */
+      if (GST_VTUTIL_HAVE_64RGBALE)
+        caps = gst_vtutil_caps_append_video_format (caps, "RGBA64_LE");
+    }
+#endif
     gst_element_class_add_pad_template (element_class,
         gst_pad_template_new ("sink", GST_PAD_SINK, GST_PAD_ALWAYS, caps));
   }
@@ -1208,11 +1236,22 @@ gst_vtenc_create_session (GstVTEnc * self)
   const GstVTEncoderDetails *codec_details =
       GST_VTENC_CLASS_GET_CODEC_DETAILS (G_OBJECT_GET_CLASS (self));
 
+  /* Apple's M1 hardware encoding fails when provided with an interlaced ProRes source.
+   * It's most likely a bug in VideoToolbox, as no such limitation has been officially mentioned anywhere.
+   * For now let's disable HW encoding entirely when such case occurs. */
+  gboolean enable_hw = !(GST_VIDEO_INFO_IS_INTERLACED (&self->video_info)
+      && codec_details->format_id == GST_kCMVideoCodecType_Some_AppleProRes);
+
+  if (!enable_hw)
+    GST_WARNING_OBJECT (self,
+        "Interlaced content detected, disabling HW-accelerated encoding due to https://gitlab.freedesktop.org/gstreamer/gstreamer/-/issues/1429");
+
   encoder_spec =
       CFDictionaryCreateMutable (NULL, 0, &kCFTypeDictionaryKeyCallBacks,
       &kCFTypeDictionaryValueCallBacks);
   gst_vtutil_dict_set_boolean (encoder_spec,
-      kVTVideoEncoderSpecification_EnableHardwareAcceleratedVideoEncoder, true);
+      kVTVideoEncoderSpecification_EnableHardwareAcceleratedVideoEncoder,
+      enable_hw);
   if (codec_details->require_hardware)
     gst_vtutil_dict_set_boolean (encoder_spec,
         kVTVideoEncoderSpecification_RequireHardwareAcceleratedVideoEncoder,
@@ -1706,7 +1745,7 @@ gst_vtenc_encode_frame (GstVTEnc * self, GstVideoCodecFrame * frame)
           pixel_format_type = kCVPixelFormatType_4444AYpCbCr16;
           break;
         case GST_VIDEO_FORMAT_RGBA64_LE:
-          if (GST_VTUTIL_HAVE_64ARGBALE)
+          if (GST_VTUTIL_HAVE_64RGBALE)
             pixel_format_type = kCVPixelFormatType_64RGBALE;
           else
             /* Codepath will never be hit on macOS older than Big Sur (11.3) */
