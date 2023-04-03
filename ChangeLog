@@ -1,3 +1,462 @@
+=== release 1.22.1 ===
+
+2023-03-04 13:42:32 +0000  Tim-Philipp Müller <tim@centricular.com>
+
+	* NEWS:
+	* RELEASE:
+	* gst-plugins-bad.doap:
+	* meson.build:
+	  Release 1.22.1
+
+2023-02-23 14:14:57 +0100  Piotr Brzeziński <piotr@centricular.com>
+
+	* sys/applemedia/meson.build:
+	* sys/applemedia/vtdec.c:
+	* sys/applemedia/vtdec.h:
+	  vtdec: Correctly retrieve reorder queue length from SPS
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/4110>
+
+2023-03-01 06:36:15 +1100  Jan Schmidt <jan@centricular.com>
+
+	* sys/applemedia/avfvideosrc.m:
+	  avfvideosrc: Fix description and trailing whitespace
+	  Minor fix to mention that the element is also useful on MacOS,
+	  and remove some trailing whitespace
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/4096>
+
+2023-03-01 06:32:19 +1100  Jan Schmidt <jan@centricular.com>
+
+	* sys/applemedia/avfvideosrc.m:
+	  avfvideosrc: Don't wait on main thread for permissions request
+	  Recursively invoking the NSMainLoop can cause crashes in
+	  applications that don't expect it. Instead of waiting for
+	  permission to be granted, move the wait later - until we
+	  actually need device permissions when starting the capture
+	  session. That moves the wait into the streaming thread
+	  instead of the application thread that's setting the pipeline
+	  state to READY.
+	  Instead of a manual state change implementation to open
+	  and close the device, use the basesrc start/stop methods that
+	  are intended for the purpose.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/4096>
+
+2023-02-28 15:26:45 +0100  Piotr Brzeziński <piotr@centricular.com>
+
+	* sys/applemedia/vtenc.c:
+	  vtenc: Fix checking for certain CPU variants when running in VMs
+	  These checks were introduced to prevent exposing ARGB64/RGBA64 in the caps
+	  when running on M1 Pro/Max with macOS <13 because of a bug in VideoToolbox.
+	  Unfortunately, the initial buffer size of 15 is too short when running
+	  in a VM - the CPU brand string there looks like "Apple M1 Pro (Virtual)",
+	  which due to its length causes sysctlbyname to return -1, resulting in
+	  broken formats still showing up in the caps.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/4082>
+
+2023-01-28 02:32:13 +0900  Seungha Yang <seungha@centricular.com>
+
+	* tools/gst-transcoder.c:
+	  tools: Make sure UTF-8 encoded command line arguments on Windows
+	  On Windows, arguments passed in main() are system codepage
+	  encoded and might not be valid UTF-8 string.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/4072>
+
+2023-02-20 03:20:46 +0900  Seungha Yang <seungha@centricular.com>
+
+	* sys/nvcodec/gstnvencoder.cpp:
+	  nvencoder: Fix b-frame encoding on Linux
+	  On Windows, Win32 event handle is used to wait for encoded output,
+	  but it's not available on Linux. We should delay bitstream locking
+	  if encoder returns "need-more-input"
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/4008>
+
+2023-02-22 00:47:09 +0900  Seungha Yang <seungha@centricular.com>
+
+	* gst/videoparsers/gsth265parse.c:
+	* tests/check/elements/h265parse.c:
+	  h265parse: Always set profile on src caps
+	  h265parse should provide profile for autoplugging
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/4068>
+
+2023-02-24 21:58:00 +0800  He Junyan <junyan.he@intel.com>
+
+	* sys/va/gstjpegdecoder.c:
+	  jpegdecoder: fail early if no input caps have been provided
+	  The jpegdecoder class does not implement the ->parse() virtual function,
+	  and we always need to add the jpegparse element before it. So we should
+	  set_needs_format of the decoder to TRUE, then if no parse before it, it
+	  can fail with a "not-negotiated" error early, rather than go on and
+	  generate unexpected error.
+	  Fixes: https://gitlab.freedesktop.org/gstreamer/gstreamer/-/issues/1829
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/4066>
+
+2023-02-24 21:49:27 +0800  He Junyan <junyan.he@intel.com>
+
+	* gst-libs/gst/codecs/gstav1decoder.c:
+	  av1decoder: fail early if no input caps have been provided
+	  The av1decoder class does not implement the ->parse() virtual function,
+	  and we always need to add the av1parse element before it. So we should
+	  set_needs_format of the decoder to TRUE, then if no parse before it, it
+	  can fail with a "not-negotiated" error early, rather than go on and
+	  generate unexpected error.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/4066>
+
+2023-02-24 21:38:48 +0800  He Junyan <junyan.he@intel.com>
+
+	* gst-libs/gst/codecs/gstvp9decoder.c:
+	  vp9decoder: fail early if no input caps have been provided
+	  The vp9decoder class does not implement the ->parse() virtual function,
+	  and we always need to add the vp9parse element before it. So we should
+	  set_needs_format of the decoder to TRUE, then if no parse before it, it
+	  can fail with a "not-negotiated" error early, rather than go on and
+	  generate unexpected error.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/4066>
+
+2023-02-24 21:27:27 +0800  He Junyan <junyan.he@intel.com>
+
+	* gst-libs/gst/codecs/gstvp8decoder.c:
+	  vp8decoder: fail early if no input caps have been provided
+	  The vp8decoder class does not implement the ->parse() virtual function,
+	  it can only accepts frame aligned data. If some element such as filesrc
+	  feed it with unaligned data, the behaviour is undecided. So we should
+	  set_needs_format of the decoder to TRUE, then it can fail with a
+	  "not-negotiated" error early, rather than go on and generate unexpected
+	  error.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/4066>
+
+2023-02-24 21:12:40 +0800  He Junyan <junyan.he@intel.com>
+
+	* gst-libs/gst/codecs/gstmpeg2decoder.c:
+	  mpeg2decoder: fail early if no input caps have been provided
+	  The mpeg2decoder class does not implement the ->parse() virtual function,
+	  and we always need to add the mpegvideoparse element before it. So we should
+	  set_needs_format of the decoder to TRUE, then if no parse before it, it
+	  can fail with a "not-negotiated" error early, rather than go on and
+	  generate unexpected error.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/4066>
+
+2023-02-24 21:09:31 +0800  He Junyan <junyan.he@intel.com>
+
+	* gst-libs/gst/codecs/gsth264decoder.c:
+	  h264decoder: fail early if no input caps have been provided
+	  The h264decoder class does not implement the ->parse() virtual function,
+	  and we always need to add the h264parse element before it. So we should
+	  set_needs_format of the decoder to TRUE, then if no parse before it, it
+	  can fail with a "not-negotiated" error early, rather than go on and
+	  generate unexpected error.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/4066>
+
+2023-02-24 20:15:20 +0800  He Junyan <junyan.he@intel.com>
+
+	* gst-libs/gst/codecs/gsth265decoder.c:
+	  h265decoder: fail early if no input caps have been provided
+	  The h265decoder class does not implement the ->parse() virtual function,
+	  and we always need to add the h265parse element before it. So we should
+	  set_needs_format of the decoder to TRUE, then if no parse before it, it
+	  can fail with a "not-negotiated" error early, rather than go on and
+	  generate unexpected error.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/4066>
+
+2023-01-27 12:45:10 +0100  Robert Rosengren <robertr@axis.com>
+
+	* ext/curl/gstcurlhttpsrc.c:
+	  curlhttpsrc: Add curl anyauth option
+	  Add curl anyauth option to support http request to endpoints not using
+	  only basic authentication (as default in curl). Also aligning with
+	  curlhttpsink that already uses this option.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/4065>
+
+2023-02-22 15:18:12 +0100  Célestin Marot <c.marot@intopix.com>
+
+	* sys/d3d11/gstd3d11overlaycompositor.cpp:
+	  d3d11overlaycompositor: fix texture width and height
+	  The dimension of the overlay texture directly corresponds to the size of the overlay **buffer** which is given by its video meta.
+	  The dimension at which the overlay should be displayed directly correspond to the overlay `render_width`and `render_height`.
+	  This match the behavior of glimagesink
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/4053>
+
+2023-02-22 11:52:38 +0000  Tim-Philipp Müller <tim@centricular.com>
+
+	* po/fur.po:
+	  gst-plugins-bad: update translations
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/4041>
+
+2023-02-16 15:03:25 +0800  Mengkejiergeli Ba <mengkejiergeli.ba@intel.com>
+
+	* gst-libs/gst/va/gstvaallocator.c:
+	  vaallocator: Check return value from va_sync_surface
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/4007>
+
+2023-02-09 16:54:16 +0800  Mengkejiergeli Ba <mengkejiergeli.ba@intel.com>
+
+	* sys/va/gstvaav1dec.c:
+	* sys/va/gstvabaseenc.c:
+	* sys/va/gstvabasetransform.c:
+	* sys/va/gstvaencoder.c:
+	* sys/va/gstvah264enc.c:
+	  va: Fix some code defects
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/4007>
+
+2022-12-22 10:17:42 +0000  Philippe Normand <philn@igalia.com>
+
+	* ext/wpe/WPEThreadedView.cpp:
+	* ext/wpe/wpe-extension/gstwpeextension.c:
+	  wpe: Logging fixes for the WebExtension
+	  Using logging macros without a `GST_CAT_DEFAULT` in scope leads to critical
+	  warnings.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/4022>
+
+2023-02-21 15:19:35 +1100  Matthew Waters <matthew@centricular.com>
+
+	* ext/closedcaption/gstccconverter.c:
+	  ccconverter: don't debug a potentially freed filter caps
+	  Fixes a use-after-free
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/4013>
+
+2023-02-21 00:27:27 +0900  Seungha Yang <seungha@centricular.com>
+
+	* sys/d3d11/gstd3d11videosink.cpp:
+	* sys/d3d11/gstd3d11window.cpp:
+	* sys/d3d11/gstd3d11window.h:
+	* sys/d3d11/gstd3d11window_win32.cpp:
+	  d3d11videosink: Fix rendering on external handle
+	  Partial revert of the commit 068a5c1053ae05b3c7747243948447e764d25aa6.
+	  That introduced size mismatch between internal and external HWND
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/4010>
+
+2023-02-19 12:01:59 +0100  Víctor Manuel Jáquez Leal <vjaquez@igalia.com>
+
+	* sys/va/gstvah265enc.c:
+	  vah265enc: Use helper to update properties.
+	  This is a continuation of the original patch by
+	  Mengkejiergeli Ba <mengkejiergeli.ba@intel.com>
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/4009>
+
+2023-02-14 10:29:00 +0800  Mengkejiergeli Ba <mengkejiergeli.ba@intel.com>
+
+	* gst-libs/gst/codecparsers/gstav1parser.c:
+	* gst-libs/gst/codecparsers/gsth265parser.c:
+	  av1parser, h265parser: Fix some code defects
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/4003>
+
+2023-02-07 04:58:04 +1100  Jan Schmidt <jan@centricular.com>
+
+	* ext/webrtc/gstwebrtcstats.c:
+	  webrtc: Calculate the jitter for remote-inbound-rtp stats
+	  Populate the clock-rate in the internal stats structure, so
+	  it can be used by the _get_stats_from_remote_rtp_source_stats()
+	  method to calculate remote receivers' jitter.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/3994>
+
+2023-02-01 10:44:26 +1100  Jan Schmidt <jan@centricular.com>
+
+	* ext/webrtc/gstwebrtcstats.c:
+	  webrtcbin: Report full codec-stats for source pads
+	  Use the current caps for webrtcbin srcpads, as received_caps
+	  are only stored for sink pads based on incoming caps events.
+	  Makes it so that webrtcbin stats reports contain fuller
+	  codec information.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/3994>
+
+2023-02-17 14:56:20 +0800  Yinhang Liu <yinhang.liu@intel.com>
+
+	* sys/msdk/gstmsdk.c:
+	  msdkav1enc: fix the category for msdkav1enc debug
+	  The msdkav1enc debug initialized with gst_msdkav1dec_debug,
+	  fix this.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/3991>
+
+2023-02-16 01:36:41 +0900  Seungha Yang <seungha@centricular.com>
+
+	* gst/codectimestamper/gstcodectimestamper.c:
+	  codectimestamper: Fix timestamping on sequence update
+	  ... and enhance debug logging.
+	  Keep internal timestamp offsets on drain, no reason to reset them
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/3987>
+
+2023-02-15 09:45:28 +0800  Mengkejiergeli Ba <mengkejiergeli.ba@intel.com>
+
+	* gst-libs/gst/codecparsers/gsth264bitwriter.c:
+	* gst-libs/gst/codecparsers/gsth265bitwriter.c:
+	  codecparsers: {h264,h265}bitwriter: Remove redundant condition checks
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/3978>
+
+2023-02-12 23:17:41 +0900  Seungha Yang <seungha@centricular.com>
+
+	* sys/amfcodec/gstamfav1enc.cpp:
+	  amfav1enc: Set stream-format on caps
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/3961>
+
+2023-02-12 23:12:21 +0900  Seungha Yang <seungha@centricular.com>
+
+	* docs/plugins/gst_plugins_cache.json:
+	* sys/qsv/gstqsvav1enc.cpp:
+	  qsvav1enc: Set stream-format on caps
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/3961>
+
+2023-02-07 16:25:02 +0100  Piotr Brzeziński <piotr@centricular.com>
+
+	* sys/applemedia/vtdec.c:
+	* sys/applemedia/vtenc.c:
+	* sys/applemedia/vtutil.h:
+	  vtenc/vtdec: Fix typo in RGBA64_LE availability define
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/3962>
+
+2023-02-07 16:04:22 +0100  Piotr Brzeziński <piotr@centricular.com>
+
+	* sys/applemedia/vtenc.c:
+	  vtenc: Disable ARGB/RGBA64 caps on M1 Pro/Max with macOS <13
+	  Fixes #1358.
+	  Passing ARGB64/RGBA64 to vtenc caused the encoding to fail
+	  when running on M1 Pro/Max variants with macOS 12.x, so let's
+	  remove these formats from caps when such scenario is detected.
+	  This issue appears to have been fixed OS-side in macOS 13.0.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/3962>
+
+2023-02-09 18:51:30 +0100  Piotr Brzeziński <piotr@centricular.com>
+
+	* sys/applemedia/vtdec.c:
+	  vtdec: Fix not waiting for async frames when flushing
+	  This was causing incorrect output when seeking, especially
+	  when used with a multithreaded source like `videotestsrc n-threads=2`.
+	  It should now correctly wait for frames still being processed by VT
+	  while vtdec is flushing.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/3937>
+
+2023-02-10 12:52:17 +0100  Alessandro Bono <alessandro.bono369@gmail.com>
+
+	* sys/win32ipc/protocol/win32ipcutils.cpp:
+	  win32ipcutils: Add missing include
+	  We are using std::isspace() with one parameter. That function is defined
+	  in the cctype header.
+	  ```
+	  win32ipcutils.cpp(34): error C2672: 'std::isspace': no matching overloaded function found
+	  win32ipcutils.cpp(34): error C2780: 'bool std::isspace(_Elem,const std::locale &)': expects 2 arguments - 1 provided
+	  ```
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/3936>
+
+2023-02-06 15:26:48 +0200  Sebastian Dröge <sebastian@centricular.com>
+
+	* gst-libs/gst/codecparsers/gstav1parser.c:
+	  av1parser: Don't consider unknown metadata OBUs a bitstream error
+	  Just don't parse them.
+	  Fixes https://gitlab.freedesktop.org/gstreamer/gstreamer/-/issues/1774
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/3924>
+
+2023-02-07 08:49:24 +0100  Edward Hervey <edward@centricular.com>
+
+	* ext/closedcaption/gstceaccoverlay.c:
+	  closedcaption: Don't leak caps event
+	  All events that we handle should be unreffed
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/3906>
+
+2023-02-03 22:10:12 +0900  Seungha Yang <seungha@centricular.com>
+
+	* sys/nvcodec/gstnvencoder.cpp:
+	* sys/nvcodec/gstnvencoder.h:
+	* sys/nvcodec/gstnvh264encoder.cpp:
+	* sys/nvcodec/gstnvh265encoder.cpp:
+	  nvencoder: Fix min buffers parameter of allocation query in auto GPU mode
+	  At the time when propose_allocation() get called, encoder session
+	  would not be initialized yet.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/3891>
+
+2023-01-19 11:03:09 +0800  He Junyan <junyan.he@intel.com>
+
+	* sys/va/gstvah264dec.c:
+	  va: Avoid the array index overflow when filling 8x8 scaling list.
+	  The VA API has not defined the scaling list entries for U/V planes
+	  for the 4:4:4 stream. In fact, we do not meet the 4:4:4 format output
+	  for H264 so far, and scaling list is not used frequently, so we just
+	  print out some warning and ignore these scaling list values.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/3877>
+
+2022-11-09 20:20:35 +0100  Piotr Brzeziński <piotr@centricular.com>
+
+	* sys/applemedia/vtenc.c:
+	  vtenc: Disable HW acceleration for interlaced ProRes
+	  Due to a bug in the VT API, attempting to encode interlaced content
+	  with ProRes results in an error, halting the pipeline instead of
+	  gracefully falling back to software encoding.
+	  Should be removed in the future if Apple ever fixes this issue.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/3878>
+
+2023-02-01 17:26:57 +0200  Sebastian Dröge <sebastian@centricular.com>
+
+	* docs/plugins/gst_plugins_cache.json:
+	* ext/aom/gstav1dec.c:
+	* ext/aom/gstav1enc.c:
+	  aom: Include stream-format and alignment in the AV1 caps
+	  The decoder does not work with arbitrary alignment and annexb stream
+	  format and the encoder can give the information that it outputs
+	  obu-stream/tu to downstream.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/3873>
+
+2023-02-02 05:04:48 +0900  Seungha Yang <seungha@centricular.com>
+
+	* sys/nvcodec/gstnvvp9dec.c:
+	  nvvp9dec: Fix return value
+	  It should return GstFlowReturn value, not boolean
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/3874>
+
+2023-01-27 15:54:48 -0300  Thibault Saunier <tsaunier@igalia.com>
+
+	* gst/transcode/gsturitranscodebin.c:
+	  uritranscodebin: Fix unref of NULL
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/3837>
+
+2022-12-30 00:49:27 +0900  Seungha Yang <seungha@centricular.com>
+
+	* gst/mpegdemux/gstmpegdemux.c:
+	  mpegpsdemux: Ignore DTS if PTS < DTS
+	  It's possibly timestamp rollover case. But PTS < DTS is already
+	  invalid case anyway.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/3836>
+
+2023-01-24 23:26:50 +0900  Seungha Yang <seungha@centricular.com>
+
+	* sys/wasapi2/gstwasapi2ringbuffer.cpp:
+	  wasapi2src: Fix loopback capture on Windows 10 Anniversary Update
+	  ... or older. Work around an OS bug that loopback capture
+	  device doesn't notify event.
+	  Fixes: https://gitlab.freedesktop.org/gstreamer/gstreamer/-/issues/1738
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/3820>
+
+2023-01-04 17:30:47 +0100  Víctor Manuel Jáquez Leal <vjaquez@igalia.com>
+
+	* gst-libs/gst/vulkan/gstvkmemory.c:
+	  vulkan: memory: Flush non coherent memory after write.
+	  Spec 7.1.3:
+	  If a memory object does not have the VK_MEMORY_PROPERTY_HOST_COHERENT_BIT
+	  property, then vkFlushMappedMemoryRanges must be called in order to guarantee
+	  that writes to the memory object from the host are made available to the host
+	  domain, where they can be further made available to the device domain via a
+	  domain operation. Similarly, vkInvalidateMappedMemoryRanges must be called to
+	  guarantee that writes which are available to the host domain are made visible to
+	  host operations.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/3817>
+
+2023-01-24 11:26:02 +0530  Nirbheek Chauhan <nirbheek@centricular.com>
+
+	* sys/nvcodec/plugin.c:
+	  nvcodec: Log readable errors when initializing CUDA
+	  It is really difficult for people to figure out why nvcodec has
+	  0 features. Even the debug log is cryptic. Also make sure the errors
+	  go to the ERROR log level, which is more likely to be enabled by
+	  default.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/3813>
+
+2023-01-24 11:16:38 +0530  Nirbheek Chauhan <nirbheek@centricular.com>
+
+	* sys/nvcodec/plugin.c:
+	  nvcodec: Fix reporting of CuDeviceGetCount error
+	  cuda_ret is was always going to be CUDA_SUCCESS in the error log.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/3813>
+
+2023-01-25 16:46:42 +0000  Tim-Philipp Müller <tim@centricular.com>
+
+	* meson.build:
+	  Back to development
+
 === release 1.22.0 ===
 
 2023-01-23 19:29:34 +0000  Tim-Philipp Müller <tim@centricular.com>
