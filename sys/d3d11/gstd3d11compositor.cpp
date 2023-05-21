@@ -320,6 +320,7 @@ struct _GstD3D11Compositor
   GstD3D11Device *device;
 
   GstBuffer *fallback_buf;
+  GstCaps *negotiated_caps;
 
   GstD3D11CompositorQuad *checker_background;
   /* black/white/transparent */
@@ -356,6 +357,7 @@ enum
 #define DEFAULT_PAD_GAMMA_MODE GST_VIDEO_GAMMA_MODE_NONE
 #define DEFAULT_PAD_PRIMARIES_MODE GST_VIDEO_PRIMARIES_MODE_NONE
 
+static void gst_d3d11_compositor_pad_dispose (GObject * object);
 static void gst_d3d11_compositor_pad_set_property (GObject * object,
     guint prop_id, const GValue * value, GParamSpec * pspec);
 static void gst_d3d11_compositor_pad_get_property (GObject * object,
@@ -380,6 +382,7 @@ gst_d3d11_compositor_pad_class_init (GstD3D11CompositorPadClass * klass)
   GParamFlags param_flags = (GParamFlags)
       (G_PARAM_READWRITE | GST_PARAM_CONTROLLABLE | G_PARAM_STATIC_STRINGS);
 
+  object_class->dispose = gst_d3d11_compositor_pad_dispose;
   object_class->set_property = gst_d3d11_compositor_pad_set_property;
   object_class->get_property = gst_d3d11_compositor_pad_get_property;
 
@@ -465,6 +468,17 @@ gst_d3d11_compositor_pad_init (GstD3D11CompositorPad * pad)
   pad->desc = blend_templ[DEFAULT_PAD_OPERATOR];
   pad->gamma_mode = DEFAULT_PAD_GAMMA_MODE;
   pad->primaries_mode = DEFAULT_PAD_PRIMARIES_MODE;
+}
+
+static void
+gst_d3d11_compositor_pad_dispose (GObject * object)
+{
+  GstD3D11CompositorPad *self = GST_D3D11_COMPOSITOR_PAD (object);
+
+  gst_clear_object (&self->convert);
+  GST_D3D11_CLEAR_COM (self->blend);
+
+  G_OBJECT_CLASS (parent_pad_class)->dispose (object);
 }
 
 static void
@@ -751,6 +765,9 @@ gst_d3d11_compositor_pad_check_frame_obscured (GstVideoAggregatorPad * pad,
    *     The optional pad property for scaling the frame (if zero, the video is
    *     left unscaled)
    */
+
+  if (cpad->alpha == 0)
+    return TRUE;
 
   gst_d3d11_compositor_pad_get_output_size (cpad, GST_VIDEO_INFO_PAR_N (info),
       GST_VIDEO_INFO_PAR_D (info), &width, &height, &x_offset, &y_offset);
@@ -1208,14 +1225,11 @@ static void
 gst_d3d11_compositor_release_pad (GstElement * element, GstPad * pad)
 {
   GstD3D11Compositor *self = GST_D3D11_COMPOSITOR (element);
-  GstD3D11CompositorPad *cpad = GST_D3D11_COMPOSITOR_PAD (pad);
 
   GST_DEBUG_OBJECT (self, "Releasing pad %s:%s", GST_DEBUG_PAD_NAME (pad));
 
   gst_child_proxy_child_removed (GST_CHILD_PROXY (self), G_OBJECT (pad),
       GST_OBJECT_NAME (pad));
-
-  gst_d3d11_compositor_pad_clear_resource (self, cpad, nullptr);
 
   GST_ELEMENT_CLASS (parent_class)->release_pad (element, pad);
 }
@@ -1251,6 +1265,7 @@ gst_d3d11_compositor_stop (GstAggregator * agg)
 
   g_clear_pointer (&self->checker_background, gst_d3d11_compositor_quad_free);
   gst_clear_object (&self->device);
+  gst_clear_caps (&self->negotiated_caps);
 
   return GST_AGGREGATOR_CLASS (parent_class)->stop (agg);
 }
@@ -1616,6 +1631,11 @@ gst_d3d11_compositor_negotiated_src_caps (GstAggregator * agg, GstCaps * caps)
     return FALSE;
   }
 
+  if (self->negotiated_caps && gst_caps_is_equal (self->negotiated_caps, caps)) {
+    GST_DEBUG_OBJECT (self, "Negotiated caps is not changed");
+    goto done;
+  }
+
   features = gst_caps_get_features (caps, 0);
   if (features
       && gst_caps_features_contains (features,
@@ -1672,6 +1692,9 @@ gst_d3d11_compositor_negotiated_src_caps (GstAggregator * agg, GstCaps * caps)
     gst_object_unref (pool);
   }
 
+  gst_caps_replace (&self->negotiated_caps, caps);
+
+done:
   return GST_AGGREGATOR_CLASS (parent_class)->negotiated_src_caps (agg, caps);
 }
 

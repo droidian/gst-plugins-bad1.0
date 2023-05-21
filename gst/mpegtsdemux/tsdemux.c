@@ -1545,6 +1545,7 @@ create_pad_for_stream (MpegTSBase * base, MpegTSBaseStream * bstream,
               channels = channel_config_code ? (channel_config_code & 0x0f) : 2;
               if (channel_config_code == 0 || channel_config_code == 0x80) {
                 /* Dual Mono */
+                channels = 2;
                 mapping_family = 255;
                 if (channel_config_code == 0) {
                   stream_count = 1;
@@ -1601,11 +1602,12 @@ create_pad_for_stream (MpegTSBase * base, MpegTSBaseStream * bstream,
                   guint8 stream_count_minus_one, coupled_stream_count;
                   gint stream_count_minus_one_len, coupled_stream_count_len;
                   gint channel_mapping_len, i;
+                  guint remaining_bytes;
 
+                  remaining_bytes = gst_byte_reader_get_remaining (&br);
                   gst_bit_reader_init (&breader,
                       gst_byte_reader_get_data_unchecked
-                      (&br, gst_byte_reader_get_remaining
-                          (&br)), gst_byte_reader_get_remaining (&br));
+                      (&br, remaining_bytes), remaining_bytes);
 
                   stream_count_minus_one_len = ceil (_gst_log2 (channels));
                   if (!gst_bit_reader_get_bits_uint8 (&breader,
