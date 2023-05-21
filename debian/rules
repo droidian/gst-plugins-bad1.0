@@ -2,16 +2,14 @@
 
 include /usr/share/dpkg/default.mk
 
+export DEB_BUILD_MAINT_OPTIONS = hardening=+all
+export DEB_LDFLAGS_MAINT_APPEND = -Wl,-O1 -Wl,-z,defs
 export HOME=$(CURDIR)/fake-home
 
 # debian package version
 version=$(shell dpkg-parsechangelog | grep ^Version: | cut -d ' ' -f 2)
 # upstream version
 gst_version=$(shell echo $(version) | cut -d '-' -f 1)
-
-CFLAGS += -Wno-error
-CXXFLAGS += -Wno-error
-LDFLAGS += -Wl,-z,defs -Wl,-O1
 
 # Let's decide the package name and url depending on the distribution
 DISTRO = "$(shell dpkg-vendor --query vendor)"
