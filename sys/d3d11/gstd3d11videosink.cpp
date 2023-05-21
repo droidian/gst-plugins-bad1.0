@@ -834,6 +834,7 @@ gst_d3d11_video_sink_update_window (GstD3D11VideoSink * self, GstCaps * caps)
     if (ret == GST_FLOW_FLUSHING) {
       GstD3D11CSLockGuard lk (&self->lock);
       GST_WARNING_OBJECT (self, "Couldn't prepare window but we are flushing");
+      gst_d3d11_window_unprepare (self->window);
       gst_clear_object (&self->window);
       gst_object_unref (window);
 
@@ -1227,8 +1228,6 @@ gst_d3d11_video_sink_unlock_stop (GstBaseSink * sink)
   if (self->window)
     gst_d3d11_window_unlock_stop (self->window);
 
-  gst_clear_buffer (&self->prepared_buffer);
-
   return TRUE;
 }
 
@@ -1440,6 +1439,8 @@ gst_d3d11_video_sink_show_frame (GstVideoSink * sink, GstBuffer * buf)
 
     ret = GST_FLOW_ERROR;
   }
+
+  gst_clear_buffer (&self->prepared_buffer);
 
   return ret;
 }
