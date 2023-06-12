@@ -1,3 +1,10 @@
+gst-plugins-bad1.0 (1.22.3-2) unstable; urgency=medium
+
+  * Team upload
+  * Release to unstable
+
+ -- Jeremy Bícha <jbicha@ubuntu.com>  Mon, 12 Jun 2023 14:38:43 -0400
+
 gst-plugins-bad1.0 (1.22.3-1) experimental; urgency=medium
 
   * Team upload
