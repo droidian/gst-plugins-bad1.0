@@ -352,7 +352,6 @@ gst_cc_converter_transform_caps (GstBaseTransform * base,
 
     tmp = gst_caps_intersect_full (filter, res, GST_CAPS_INTERSECT_FIRST);
     gst_caps_unref (res);
-    gst_caps_unref (filter);
     res = tmp;
   }
 
@@ -362,6 +361,8 @@ gst_cc_converter_transform_caps (GstBaseTransform * base,
       direction == GST_PAD_SRC ? "src" : "sink", caps);
   GST_DEBUG_OBJECT (self, "filter %" GST_PTR_FORMAT, filter);
   GST_DEBUG_OBJECT (self, "to %" GST_PTR_FORMAT, res);
+
+  gst_clear_caps (&filter);
 
   return res;
 }
@@ -589,6 +590,11 @@ can_take_buffer (GstCCConverter * self,
 
   output_time_cmp = gst_util_fraction_compare (input_frame_n, input_frame_d,
       output_frame_n, output_frame_d);
+
+  if (output_time_cmp == 0) {
+    self->output_frames = 0;
+    self->input_frames = 0;
+  }
 
   in_fps_entry = cdp_fps_entry_from_fps (self->in_fps_n, self->in_fps_d);
   if (!in_fps_entry || in_fps_entry->fps_n == 0)
@@ -1453,6 +1459,11 @@ can_generate_output (GstCCConverter * self)
 
   output_time_cmp = gst_util_fraction_compare (input_frame_n, input_frame_d,
       output_frame_n, output_frame_d);
+
+  if (output_time_cmp == 0) {
+    self->output_frames = 0;
+    self->input_frames = 0;
+  }
 
   /* if the next output frame is at or before the current input frame */
   if (output_time_cmp >= 0)

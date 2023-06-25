@@ -1,3 +1,35 @@
+gst-plugins-bad1.0 (1.22.3-2) unstable; urgency=medium
+
+  * Team upload
+  * Release to unstable
+
+ -- Jeremy Bícha <jbicha@ubuntu.com>  Mon, 12 Jun 2023 14:38:43 -0400
+
+gst-plugins-bad1.0 (1.22.3-1) experimental; urgency=medium
+
+  * Team upload
+
+  [ Jeremy Bícha ]
+  * New upstream release
+  * debian/rules: Enable all hardening flags
+
+  [ Laurent Bigonville ]
+  * debian/rules: Disable dvb element on non-linux architectures
+
+ -- Jeremy Bícha <jbicha@ubuntu.com>  Sun, 21 May 2023 08:31:50 -0400
+
+gst-plugins-bad1.0 (1.22.1-1) experimental; urgency=medium
+
+  * Team upload
+
+  [ Jeremy Bicha ]
+  * New upstream bugfix release
+
+  [ Laurent Bigonville ]
+  * debian/rules: Explicitly disable wayland on non-linux architectures
+
+ -- Laurent Bigonville <bigon@debian.org>  Tue, 28 Feb 2023 15:18:04 +0100
+
 gst-plugins-bad1.0 (1.22.0-4) unstable; urgency=medium
 
   * Team upload

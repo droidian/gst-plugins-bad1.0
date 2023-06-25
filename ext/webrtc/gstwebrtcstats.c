@@ -792,6 +792,9 @@ _get_codec_stats_from_pad (GstWebRTCBin * webrtc, GstPad * pad,
 
   if (wpad->received_caps)
     caps = gst_caps_ref (wpad->received_caps);
+  else
+    caps = gst_pad_get_current_caps (pad);
+
   GST_DEBUG_OBJECT (pad, "Pad caps are: %" GST_PTR_FORMAT, caps);
   if (caps && gst_caps_is_fixed (caps)) {
     GstStructure *caps_s = gst_caps_get_structure (caps, 0);
@@ -974,6 +977,7 @@ _get_stats_from_pad (GstWebRTCBin * webrtc, GstPad * pad, GstStructure * s)
       ts_stats.source_stats->n_values, ts_stats.stream->transport);
 
   ts_stats.s = s;
+  ts_stats.clock_rate = clock_rate;
 
   transport_stream_find_ssrc_map_item (ts_stats.stream, &ts_stats,
       (FindSsrcMapFunc) webrtc_stats_get_from_transport);

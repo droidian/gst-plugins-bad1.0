@@ -1200,11 +1200,13 @@ _calculate_coded_size (GstVaH264Enc * self)
         BitDepthC = 10;
         MbWidthC = 8;
         MbHeightC = 8;
+        break;
       case VA_RT_FORMAT_YUV422_10:
         BitDepthY = 10;
         BitDepthC = 10;
         MbWidthC = 8;
         MbHeightC = 16;
+        break;
       case VA_RT_FORMAT_YUV444_10:
         BitDepthY = 10;
         BitDepthC = 10;
@@ -2534,7 +2536,7 @@ static void
 _insert_ref_pic_list_modification (GstH264SliceHdr * slice_hdr,
     GstVaH264EncFrame * list[16], guint list_num, gboolean is_asc)
 {
-  GstVaH264EncFrame *list_by_pic_num[16] = { };
+  GstVaH264EncFrame *list_by_pic_num[16] = { NULL, };
   guint modification_num, i;
   GstH264RefPicListModification *ref_pic_list_modification = NULL;
   gint pic_num_diff, pic_num_lx_pred;
@@ -2714,7 +2716,7 @@ static gboolean
 _add_aud (GstVaH264Enc * self, GstVaH264EncFrame * frame)
 {
   GstVaBaseEnc *base = GST_VA_BASE_ENC (self);
-  guint8 aud_data[8] = { };
+  guint8 aud_data[8] = { 0, };
   guint size;
   guint8 primary_pic_type = 0;
 
