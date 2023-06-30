@@ -2155,7 +2155,7 @@ gst_h265_parse_update_src_caps (GstH265Parse * h265parse, GstCaps * caps)
     }
 
     /* 0/1 is set as the default in the codec parser */
-    if (vui->timing_info_present_flag) {
+    if (vui->timing_info_present_flag && !h265parse->framerate_from_caps) {
       gint fps_num = 0, fps_den = 1;
 
       if (!(sps->fps_num == 0 && sps->fps_den == 1)) {
@@ -2166,15 +2166,19 @@ gst_h265_parse_update_src_caps (GstH265Parse * h265parse, GstCaps * caps)
         fps_num = sps->vui_params.time_scale;
         fps_den = sps->vui_params.num_units_in_tick;
 
-        if (gst_h265_parse_is_field_interlaced (h265parse)
-            && h265parse->parsed_framerate) {
+        if (gst_h265_parse_is_field_interlaced (h265parse)) {
           gint new_fps_num, new_fps_den;
 
-          gst_util_fraction_multiply (fps_num, fps_den, 1, 2, &new_fps_num,
-              &new_fps_den);
-          fps_num = new_fps_num;
-          fps_den = new_fps_den;
-          h265parse->parsed_framerate = FALSE;
+          if (!gst_util_fraction_multiply (fps_num, fps_den, 1, 2, &new_fps_num,
+                  &new_fps_den)) {
+            GST_WARNING_OBJECT (h265parse, "Error calculating the new framerate"
+                " - integer overflow; setting it to 0/1");
+            fps_num = 0;
+            fps_den = 1;
+          } else {
+            fps_num = new_fps_num;
+            fps_den = new_fps_den;
+          }
         }
       }
 
@@ -2197,7 +2201,6 @@ gst_h265_parse_update_src_caps (GstH265Parse * h265parse, GstCaps * caps)
             h265parse->parsed_par_n, h265parse->parsed_par_d);
         modified = TRUE;
       }
-
     }
 
     if (vui->video_signal_type_present_flag &&
@@ -2251,7 +2254,7 @@ gst_h265_parse_update_src_caps (GstH265Parse * h265parse, GstCaps * caps)
       gst_caps_set_simple (caps, "width", G_TYPE_INT, width,
           "height", G_TYPE_INT, height, NULL);
 
-      h265parse->parsed_framerate = FALSE;
+      h265parse->framerate_from_caps = FALSE;
       /* upstream overrides */
       if (s && gst_structure_has_field (s, "framerate"))
         gst_structure_get_fraction (s, "framerate", &fps_num, &fps_den);
@@ -2269,9 +2272,9 @@ gst_h265_parse_update_src_caps (GstH265Parse * h265parse, GstCaps * caps)
             &h265parse->parsed_fps_d);
         gst_base_parse_set_frame_rate (GST_BASE_PARSE (h265parse),
             fps_num, fps_den, 0, 0);
-        val = sps->profile_tier_level.interlaced_source_flag ? GST_SECOND / 2 :
+        val = gst_h265_parse_is_field_interlaced (h265parse) ? GST_SECOND / 2 :
             GST_SECOND;
-        h265parse->parsed_framerate = TRUE;
+        h265parse->framerate_from_caps = TRUE;
 
         /* If we know the frame duration, and if we are not in one of the zero
          * latency pattern, add one frame of latency */
