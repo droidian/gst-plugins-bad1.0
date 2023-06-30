@@ -1,3 +1,255 @@
+=== release 1.22.4 ===
+
+2023-06-20 17:42:25 +0100  Tim-Philipp Müller <tim@centricular.com>
+
+	* NEWS:
+	* RELEASE:
+	* gst-plugins-bad.doap:
+	* meson.build:
+	  Release 1.22.4
+
+2023-06-13 14:25:04 +0300  Sebastian Dröge <sebastian@centricular.com>
+
+	* gst/dvdspu/gstspu-pgs.c:
+	  dvdspu: Avoid integer overflow when checking if enough data is available
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/4899>
+
+2023-06-13 14:23:47 +0300  Sebastian Dröge <sebastian@centricular.com>
+
+	* gst/dvdspu/gstspu-pgs.c:
+	  dvdspu: Make sure enough data is allocated for the available data
+	  If the size read from the stream is smaller than the currently available
+	  data then the size is bogus and the data should simply be discarded.
+	  Fixes ZDI-CAN-20994
+	  Fixes https://gitlab.freedesktop.org/gstreamer/gstreamer/-/issues/2660
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/4899>
+
+2023-04-18 09:59:36 +0200  Andoni Morales Alastruey <amorales@fluendo.com>
+
+	* sys/applemedia/vtenc.c:
+	* sys/applemedia/vtenc.h:
+	  vtenc: remove duplicated framerate and size variables
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/4888>
+
+2023-03-30 15:38:22 +0200  Andoni Morales Alastruey <amorales@fluendo.com>
+
+	* sys/applemedia/meson.build:
+	* sys/applemedia/vtdec.h:
+	* sys/applemedia/vtenc.c:
+	* sys/applemedia/vtenc.h:
+	* tests/validate/meson.build:
+	* tests/validate/vtenc/vtenc_h264.validatetest:
+	* tests/validate/vtenc/vtenc_h264/flow-expectations/log-enc-src-expected:
+	* tests/validate/vtenc/vtenc_h264_b_frames.validatetest:
+	* tests/validate/vtenc/vtenc_h264_b_frames/flow-expectations/log-enc-src-expected:
+	* tests/validate/vtenc/vtenc_h265.validatetest:
+	* tests/validate/vtenc/vtenc_h265/flow-expectations/log-enc-src-expected:
+	* tests/validate/vtenc/vtenc_h265_b_frames.validatetest:
+	* tests/validate/vtenc/vtenc_h265_b_frames/flow-expectations/log-enc-src-expected:
+	  vtenc: apply DTS offset to ensure DTS <= PTS
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/4888>
+
+2023-03-23 20:04:49 -0400  Nicolas Dufresne <nicolas.dufresne@collabora.com>
+
+	* gst/videoparsers/gsth265parse.c:
+	  h265parse: Don't override upstream framerate
+	  The framerate should only be replaced (and corrected for alternating field)
+	  when it is parsed from the bitstream. Otherwise, the upstream framerate
+	  from caps should be trusted and assumed correct.
+	  Related to gst-plugins-bad!2020
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/4352>
+
+2023-03-23 20:02:16 -0400  Nicolas Dufresne <nicolas.dufresne@collabora.com>
+
+	* gst/videoparsers/gsth265parse.c:
+	* gst/videoparsers/gsth265parse.h:
+	  h265parse: Rename parsed_framerate to framerate_from_caps
+	  That meaning of parsed_framerate is ambigious, it is set whenever the
+	  framerate has been parsed from caps, which can be confused with being
+	  parsed from the bitstream. Rename this as framerate_from_caps.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/4352>
+
+2023-02-15 13:10:39 +0800  Mengkejiergeli Ba <mengkejiergeli.ba@intel.com>
+
+	* gst/videoparsers/gsth265parse.c:
+	  h265parse: Fix to check returned value
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/4352>
+
+2023-05-11 15:28:35 +0200  Michael Olbrich <m.olbrich@pengutronix.de>
+
+	* gst/sdp/gstsdpdemux.c:
+	  sdpdemux: ensure that only one srcpad is created per stream
+	  If two senders use the same multicast IP and port then new_session_pad()
+	  may try to add a srcpad to the same stream twice.
+	  stream->srcpad is updated but gst_element_add_pad() fails the second
+	  time. As a result stream->srcpad points to a deleted object and
+	  access in gst_sdp_demux_stream_free() fails with a segfault.
+	  Just ignore the second pad. Nothing useful can be done with it anyway.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/4873>
+
+2023-06-11 22:22:36 +0200  Marek Vasut <marex@denx.de>
+
+	* sys/kms/gstkmssink.c:
+	  kmssink: Add ST STM32 LTDC auto-detection
+	  Add STM32 LTDC controller into list of auto-detected modules.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/4872>
+
+2023-06-11 22:22:25 +0200  Marek Vasut <marex@denx.de>
+
+	* sys/kms/gstkmssink.c:
+	  kmssink: Add NXP i.MX8M Plus LCDIFv3 auto-detection
+	  Add i.MX8M Plus LCDIFv3 controller into list of auto-detected modules.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/4872>
+
+2023-04-28 22:25:11 +0800  He Junyan <junyan.he@intel.com>
+
+	* sys/va/gstvah265enc.c:
+	  va: h265enc: map the mbbrc to correct enum value in get_property()
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/4870>
+
+2023-04-28 22:26:34 +0800  He Junyan <junyan.he@intel.com>
+
+	* sys/va/gstvah264enc.c:
+	  va: h264enc: map the mbbrc to correct enum value in get_property()
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/4870>
+
+2023-06-14 10:08:51 +0200  François Laignel <francois@centricular.com>
+
+	* ext/srtp/gstsrtpdec.c:
+	  srtpdec: fix Got data flow before segment event
+	  A race condition can occur in `srtpdec` during the READY -> NULL transition:
+	  an RTCP buffer can make its way to `gst_srtp_dec_chain` while the element is
+	  partially stopped, resulting in the following critical warning:
+	  > Got data flow before segment event
+	  The problematic sequence is the following:
+	  1. An RTCP buffer is being handled by the chain function for the
+	  `rtcp_sinkpad`. Since, this is the first buffer, we try pushing the sticky
+	  events to `rtcp_srcpad`.
+	  2. At the same moment, the element is being transitioned from PAUSED to READY.
+	  3. While checking and pushing the sticky events for `rtcp_srcpad`, we reach the
+	  Segment event. For this, we try to get it from the "otherpad", in this case
+	  `rtp_srcpad`. In the problematic case, `rtp_srcpad` has already been
+	  deactivated so its sticky events have been cleared. We won't be pushing any
+	  Segment event to `rtcp_srcpad`.
+	  4. We return to the chain function for `rtcp_sinkpad` and try pushing the
+	  buffer to `rtcp_srcpad` for which deactivation hasn't started yet, hence the
+	  "Got data flow before segment event".
+	  This commit:
+	  - Adds a boolean return value to `gst_srtp_dec_push_early_events`: in case the
+	  Segment event can't be retrieved, `gst_srtp_dec_chain` can return  an error
+	  instead of calling `gst_pad_push`.
+	  - Replaces the obsolete `gst_pad_set_caps` with `gst_pad_push_event`. The
+	  additional preconditions checked by previous function are guaranteed here
+	  since we push a fixed Caps which was built in the same function.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/4860>
+
+2023-06-15 11:11:39 +0200  François Laignel <francois@centricular.com>
+
+	* ext/srtp/gstsrtpdec.c:
+	  srtpdec: backport for fix assertion 'parent->numsinkpads <= 1' failed
+	  Commit 96450f4c uses the new function `gst_element_decorate_stream_id` which
+	  was introduced by 39633967 in 1.23.
+	  This commit backports 96450f4c with a simplified version of
+	  `gst_element_decorate_stream_id_internal` as a private srtpdec function.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/4860>
+
+2023-06-15 01:36:25 +0900  Seungha Yang <seungha@centricular.com>
+
+	* sys/d3dvideosink/d3dvideosink.c:
+	  d3dvideosink: Fix navigation event leak
+	  Fixing regression introduced in 6c2f6c3bd4dd525eb02c6d7000e84b76663d3daf
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/4868>
+
+2023-06-13 01:29:14 +0100  Tim-Philipp Müller <tim@centricular.com>
+
+	* gst/asfmux/gstasfobjects.c:
+	  asfmux: fix potentially unaligned write on 32-bit ARM
+	  Fixes #2665
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/4855>
+
+2023-06-01 15:16:47 +0300  Sebastian Dröge <sebastian@centricular.com>
+
+	* sys/decklink/gstdecklink.h:
+	  decklink: Implement Windows string conversion with common API between MinGW and MSVC
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/4786>
+
+2023-06-01 15:17:26 +0300  Sebastian Dröge <sebastian@centricular.com>
+
+	* sys/decklink/gstdecklink.h:
+	  decklink: Add some newlines in long defines
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/4786>
+
+2023-05-31 23:44:42 +0300  Maksym Khomenko <maksym.khomenko@skelia.partners>
+
+	* sys/decklink/gstdecklink.h:
+	  decklink: Calculate string size before malloc
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/4786>
+
+2023-05-30 15:27:21 +0300  Sebastian Dröge <sebastian@centricular.com>
+
+	* sys/decklink/gstdecklink.h:
+	  decklink: Use the macOS version of the SDK on macOS and not the Linux one
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/4786>
+
+2023-05-30 13:23:28 +0300  Sebastian Dröge <sebastian@centricular.com>
+
+	* sys/decklink/gstdecklink.h:
+	  decklink: Free SDK strings after usage on Linux
+	  While they're const char* they still need to be freed like on Windows
+	  and macOS and would be leaked otherwise.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/4786>
+
+2023-05-30 13:22:44 +0300  Sebastian Dröge <sebastian@centricular.com>
+
+	* sys/decklink/gstdecklink.h:
+	  decklink: Correctly handle SDK strings on macOS
+	  They're CFStringRef* and not plain NUL-terminated char* C strings.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/4786>
+
+2023-05-26 13:26:42 +0100  Colin Kinloch <colin.kinloch@collabora.com>
+
+	* ext/gtk/gstgtkwaylandsink.c:
+	* gst-libs/gst/wayland/gstwlwindow.c:
+	  waylandsink: Emit "map" signal boarder surface is ready
+	  This allows gtkwaylandsink to queue a draw of its gtk widget at the
+	  correct time, avoiding a race.
+	  Signed-off-by: Colin Kinloch <colin.kinloch@collabora.com>
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/4754>
+
+2023-05-25 17:02:24 +0200  Jan Alexander Steffens (heftig) <jan.steffens@ltnglobal.com>
+
+	* ext/fdkaac/gstfdkaacdec.c:
+	  fdkaacdec: Support up to 5 rear channels
+	  The `switch (n_rear)` supports up to 5 rear channels, but our channel
+	  set only had space for 3. Size the set properly to fix this.
+	  This didn't actually cause any memory unsafety as `PUSH_CHAN` would stop
+	  incrementing `n_rear` if the channel set is already full.
+	  Thanks to @alatiera for noticing this.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/4740>
+
+2023-05-24 22:12:51 +0900  Seungha Yang <seungha@centricular.com>
+
+	* sys/d3d11/gstd3d11videosink.cpp:
+	  d3d11videosink: Fix error on pause and play
+	  The show_frame() can be called without prepare() call on paused to
+	  playing state change. Thus the prepared buffer should not be cleared
+	  on show_frame()
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/4714>
+
+2023-05-18 09:27:29 -0400  Thibault Saunier <tsaunier@igalia.com>
+
+	* gst/debugutils/gsttestsrcbin.c:
+	  testsrcbin: Remove spurious caps unref
+	  Caps are cleared at the end of the function
+	  Fixes https://gitlab.freedesktop.org/gstreamer/gstreamer/-/issues/2575
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/4685>
+
+2023-05-19 12:36:19 +0100  Tim-Philipp Müller <tim@centricular.com>
+
+	* meson.build:
+	  Back to development
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/4679>
+
 === release 1.22.3 ===
 
 2023-05-19 09:23:19 +0100  Tim-Philipp Müller <tim@centricular.com>
