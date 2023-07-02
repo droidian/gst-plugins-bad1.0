@@ -72,7 +72,6 @@ usr/lib/*/gstreamer-1.0/libgstmusepack.so
 usr/lib/*/gstreamer-1.0/libgstmxf.so
 usr/lib/*/gstreamer-1.0/libgstnetsim.so
 usr/lib/*/gstreamer-1.0/libgstneonhttpsrc.so
-usr/lib/*/gstreamer-1.0/libgstnvcodec.so
 usr/lib/*/gstreamer-1.0/libgstopenaptx.so
 usr/lib/*/gstreamer-1.0/libgstopenal.so
 usr/lib/*/gstreamer-1.0/libgstopenexr.so
