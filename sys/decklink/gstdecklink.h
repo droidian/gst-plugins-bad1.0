@@ -28,33 +28,58 @@
 
 #include <stdint.h>
 
-#ifdef G_OS_UNIX
-#include "linux/DeckLinkAPI.h"
-#endif
-
 #ifdef G_OS_WIN32
 #include "win/DeckLinkAPI.h"
 
 #include <stdio.h>
-#include <comutil.h>
 
 #define bool BOOL
 #define COMSTR_T BSTR
-/* MinGW does not have comsuppw.lib, so no _com_util::ConvertBSTRToString */
-# ifdef __MINGW32__
-#  define CONVERT_COM_STRING(s) G_STMT_START { BSTR _s = (BSTR)s; s = (char*) malloc(100); wcstombs(s, _s, 100); ::SysFreeString(_s); } G_STMT_END
-#  define FREE_COM_STRING(s) free(s);
-#  define CONVERT_TO_COM_STRING(s) G_STMT_START { char * _s = (char *)s; s = (BSTR) malloc(100); mbstowcs(s, _s, 100); g_free(_s); } G_STMT_END
-# else
-#  define CONVERT_COM_STRING(s) G_STMT_START { BSTR _s = (BSTR)s; s = _com_util::ConvertBSTRToString(_s); ::SysFreeString(_s); } G_STMT_END
-#  define FREE_COM_STRING(s) G_STMT_START { delete[] s; } G_STMT_END
-#  define CONVERT_TO_COM_STRING(s) G_STMT_START { char * _s = (char *)s; s = _com_util::ConvertStringToBSTR(_s); g_free(_s); } G_STMT_END
-# endif /* __MINGW32__ */
-#else
+#define CONVERT_COM_STRING(s) G_STMT_START { \
+  BSTR _s = (BSTR)s; \
+  int _s_length = ::SysStringLen(_s); \
+  int _length = ::WideCharToMultiByte(CP_ACP, 0, (wchar_t*)_s, _s_length, NULL, 0, NULL, NULL); \
+  s = (char *) malloc(_length); \
+  ::WideCharToMultiByte(CP_ACP, 0, (wchar_t*)_s, _s_length, s, _length, NULL, NULL); \
+  ::SysFreeString(_s); \
+} G_STMT_END
+#define FREE_COM_STRING(s) free(s);
+#define CONVERT_TO_COM_STRING(s) G_STMT_START { \
+  char * _s = (char *)s; \
+  int _s_length = strlen((char*)_s); \
+  int _length = ::MultiByteToWideChar(CP_ACP, 0, (char*)_s, _s_length, NULL, 0); \
+  s = ::SysAllocStringLen(NULL, _length); \
+  ::MultiByteToWideChar(CP_ACP, 0, (char*)_s, _s_length, s, _length); \
+  g_free(_s); \
+} G_STMT_END
+#elif defined(__APPLE__)
+#include "osx/DeckLinkAPI.h"
+
+#define COMSTR_T CFStringRef
+#define CONVERT_COM_STRING(s) G_STMT_START { \
+  CFStringRef _s = (CFStringRef)s; \
+  CFIndex _length; \
+  CFStringGetBytes(_s, CFRangeMake(0, CFStringGetLength(_s)), kCFStringEncodingUTF8, 0, FALSE, NULL, 0, &_length); \
+  _length += 1; \
+  s = (char *) malloc(_length); \
+  CFStringGetCString(_s, s, _length, kCFStringEncodingUTF8); \
+  CFRelease(_s); \
+} G_STMT_END
+#define FREE_COM_STRING(s) free(s);
+#define CONVERT_TO_COM_STRING(s) G_STMT_START { \
+  char * _s = (char *)s; \
+  s = CFStringCreateWithCString(kCFAllocatorDefault, _s, kCFStringEncodingUTF8); \
+  g_free(_s); \
+} G_STMT_END
+#define WINAPI
+#else /* Linux */
+#include "linux/DeckLinkAPI.h"
+
 #define COMSTR_T const char*
 #define CONVERT_COM_STRING(s)
 #define CONVERT_TO_COM_STRING(s)
-#define FREE_COM_STRING(s)
+/* While this is a const char*, the string still has to be freed */
+#define FREE_COM_STRING(s) free(s);
 #define WINAPI
 #endif /* G_OS_WIN32 */
 

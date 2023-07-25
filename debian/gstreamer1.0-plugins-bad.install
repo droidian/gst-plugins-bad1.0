@@ -12,6 +12,7 @@ usr/lib/*/gstreamer-1.0/libgstaudiolatency.so
 usr/lib/*/gstreamer-1.0/libgstaudiomixmatrix.so
 usr/lib/*/gstreamer-1.0/libgstaudiovisualizers.so
 usr/lib/*/gstreamer-1.0/libgstautoconvert.so
+usr/lib/*/gstreamer-1.0/libgstavtp.so
 usr/lib/*/gstreamer-1.0/libgstbayer.so
 usr/lib/*/gstreamer-1.0/libgstbs2b.so
 usr/lib/*/gstreamer-1.0/libgstbz2.so
