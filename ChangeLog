@@ -1,3 +1,387 @@
+=== release 1.22.6 ===
+
+2023-09-20 18:10:57 +0100  Tim-Philipp Müller <tim@centricular.com>
+
+	* NEWS:
+	* RELEASE:
+	* gst-plugins-bad.doap:
+	* meson.build:
+	  Release 1.22.6
+
+2023-08-10 15:47:03 +0300  Sebastian Dröge <sebastian@centricular.com>
+
+	* gst/mxf/mxfd10.c:
+	  mxfdemux: Check number of channels for AES3 audio
+	  Only up to 8 channels are allowed and using a higher number would cause
+	  integer overflows when copying the data, and lead to out of bound
+	  writes.
+	  Also check that each buffer is at least 4 bytes long to avoid another
+	  overflow.
+	  Fixes ZDI-CAN-21661, CVE-2023-40475
+	  Fixes https://gitlab.freedesktop.org/gstreamer/gstreamer/-/issues/2897
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/5365>
+
+2023-08-10 15:45:01 +0300  Sebastian Dröge <sebastian@centricular.com>
+
+	* gst/mxf/mxfup.c:
+	  mxfdemux: Fix integer overflow causing out of bounds writes when handling invalid uncompressed video
+	  Check ahead of time when parsing the track information whether
+	  width, height and bpp are valid and usable without overflows.
+	  Fixes ZDI-CAN-21660, CVE-2023-40474
+	  Fixes https://gitlab.freedesktop.org/gstreamer/gstreamer/-/issues/2896
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/5365>
+
+2023-08-09 12:49:19 -0400  Nicolas Dufresne <nicolas.dufresne@collabora.com>
+
+	* gst-libs/gst/codecparsers/gsth265parser.c:
+	  h265parser: Fix possible overflow using max_sub_layers_minus1
+	  This fixes a possible overflow that can be triggered by an invalid value of
+	  max_sub_layers_minus1 being set in the bitstream. The bitstream uses 3 bits,
+	  but the allowed range is 0 to 6 only.
+	  Fixes ZDI-CAN-21768, CVE-2023-40476
+	  Fixes https://gitlab.freedesktop.org/gstreamer/gstreamer/-/issues/2895
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/5366>
+
+2023-09-11 18:12:28 +0200  Hugues Fruchet <hugues.fruchet@foss.st.com>
+
+	* gst-libs/gst/wayland/gstwlwindow.c:
+	  waylandsink: Fix cropping for video with non-square aspect ratio
+	  Padding of unaligned content is still visible at right with some aspect-ratio.
+	  Fix this by giving the original content resolution to wp_viewport_set_source()
+	  instead of pixel aspect ratio scaled one.
+	  Fixes !5259
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/5360>
+
+2023-09-14 01:18:59 +0900  Seungha Yang <seungha@centricular.com>
+
+	* gst-libs/gst/codecs/gsth264decoder.c:
+	* gst-libs/gst/codecs/gsth264picture.h:
+	  h264decoder: Update latency dynamically
+	  The actual number of reorder frames is unknown
+	  unless frame reordering is disabled
+	  (e.g., POC type 2 or constrained-* profiles).
+	  Also derived maximum DPB size or max_num_reorder_frames in VUI
+	  is not the upper bound of output delay.
+	  Fixes: https://gitlab.freedesktop.org/gstreamer/gstreamer/-/issues/2702
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/5341>
+
+2023-08-16 13:43:56 +0000  L. E. Segovia <amy@amyspark.me>
+
+	* sys/applemedia/avsamplevideosink.m:
+	  applemedia: Also fix inconsistent pixel format definition for NV12
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/5203>
+
+2023-08-15 21:45:56 +0000  L. E. Segovia <amy@amyspark.me>
+
+	* sys/applemedia/coremediabuffer.c:
+	* sys/applemedia/corevideobuffer.c:
+	  applemedia: Fix pixel format for I420
+	  In Intel Macs, using full range 8-bit 4:2:0 YCbCr results in a failure on
+	  initialization. I've validated this to be the correct pixel format with FFmpeg:
+	  https://github.com/FFmpeg/FFmpeg/blob/8653dcaf7d665b15b40ea9a560c8171b0914a882/libavutil/hwcontext_videotoolbox.c#L45
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/5203>
+
+2023-08-24 12:12:09 +0200  Víctor Manuel Jáquez Leal <vjaquez@igalia.com>
+
+	* sys/va/gstvadecoder.c:
+	* sys/va/gstvadisplay_priv.c:
+	  va: Fix in error logs functions mismatches
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/5340>
+
+2023-09-15 11:06:52 +1000  Matthew Waters <matthew@centricular.com>
+
+	* sys/androidmedia/gstamcvideoenc.c:
+	  androidmedia/enc: handle codec-data before popping GstVideoCodecFrames
+	  Issue is that when amc was producing a codec-data buffer, a
+	  GstVideoCodecFrame was being popped off the internal queue.  This meant
+	  that the codec-data was being associated with the first input frame and
+	  the second (first encoded buffer) output buffer with the second input
+	  frame.  At the end (assuming one input produces one output which seems
+	  to hold in my testing and how the encoder is currently implemented)
+	  there would be an input frame missing and would be pushed without any
+	  timing information.  This would lead to e.g. muxers rejecting the buffer
+	  without PTS and failing to mux.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/5335>
+
+2023-09-15 11:06:07 +1000  Matthew Waters <matthew@centricular.com>
+
+	* sys/androidmedia/gstamc-constants.h:
+	* sys/androidmedia/gstamcvideoenc.c:
+	  androidmedia/enc: add fixme log about partial frames
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/5335>
+
+2023-09-16 03:13:33 +0900  Seungha Yang <seungha@centricular.com>
+
+	* gst-libs/gst/codecparsers/gstav1parser.c:
+	  av1parser: Fix segmentation params update
+	  Even if the segmentation feature value is not updated,
+	  the parsed "segmentation_update_map" and "segmentation_temporal_update"
+	  values should not be cleared as it's referenced during lower
+	  level bitstream parsing. Also, don't use assert() in parser
+	  unless it's clearly impossible condition.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/5336>
+
+2023-08-24 17:40:42 +0200  Jan Alexander Steffens (heftig) <jan.steffens@ltnglobal.com>
+
+	* gst/rtmp2/rtmp/rtmpclient.c:
+	  rtmp2: Allow NULL flash version, omitting the field
+	  rtmpsink omits it by default. Allow us to do the same.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/5248>
+
+2023-09-05 14:15:04 +0200  Thomas Schneider <thomas.schneider@voliro.ch>
+
+	* sys/androidmedia/gstamc.c:
+	  androidmedia: fix hevc codec profile registration
+	  Fix the codec registration logic such that all supported
+	  profiles are available instead of just the first in the
+	  list.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/5313>
+
+2023-09-03 13:21:30 +0000  Akihiro Sagawa <sagawa.aki@gmail.com>
+
+	* gst-libs/gst/codecparsers/gstmpegvideoparser.c:
+	  codecparsers: Fix MPEG-1 aspect ratio table
+	  The values defined in ISO/IEC 11172-2 are different from those used so far.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/5300>
+
+2023-08-29 14:55:03 -0400  Nicolas Dufresne <nicolas.dufresne@collabora.com>
+
+	* gst-libs/gst/wayland/gstwlwindow.c:
+	  waylandsink: Crop surfaces to their display width height
+	  Setting the surface source rectangle has been omitted so far. As a side effect
+	  surface created with padded width/height are being scaled down. Fix this using
+	  the viewporter source rectangle configuration. This can later be enhanced
+	  to support crop meta.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/5298>
+
+2023-08-28 20:58:22 +0900  Seungha Yang <seungha@centricular.com>
+
+	* sys/d3d11/gstd3d11convert.cpp:
+	  d3d11convert: Passthrough allocation query on same caps
+	  Since d3d11convert and its variant elements does not enable basetransform's
+	  passthrough, passthrough allocation query needs to be handled
+	  manually in order to respect downstream element's min/max buffer
+	  requirement.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/5297>
+
+2023-08-23 19:27:43 +0900  Seungha Yang <seungha@centricular.com>
+
+	* sys/nvcodec/gstnvencoder.cpp:
+	  nvencoder: Fix negotiation error when interlace-mode is unspecified
+	  Use GST_PAD_SET_ACCEPT_INTERSECT() to accept caps without interlace-mode
+	  field
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/5240>
+
+2023-08-23 18:07:31 +0900  Seungha Yang <seungha@centricular.com>
+
+	* sys/win32ipc/protocol/win32ipcpipeserver.cpp:
+	  win32ipc: Fix pipe handle leak
+	  Named pipe handle must be closed if it's no longer needed
+	  Fixes: https://gitlab.freedesktop.org/gstreamer/gstreamer/-/issues/2923
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/5231>
+
+2023-08-22 02:57:24 +0900  Seungha Yang <seungha@centricular.com>
+
+	* gst/videoparsers/gsth265parse.c:
+	* tests/check/elements/h265parse.c:
+	  h265parse: Allow partially broken hvcC data
+	  Ignores parsing error on the last nalu of the array if the nalu type
+	  is not VPS/SPS/PPS
+	  Fixes: https://gitlab.freedesktop.org/gstreamer/gstreamer/-/issues/2905
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/5220>
+
+2023-08-18 18:21:18 +1000  Jan Schmidt <jan@centricular.com>
+
+	* ext/mdns/gstmicrodnsdevice.c:
+	  mdns: Fix a crash on context error
+	  Make sure not to free the microdns provider context until the
+	  device provider asks it to stop. Fixes a crash if there is
+	  an error (such as MDNS port being busy) that makes the
+	  mdns listener exit early.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/5207>
+
+2023-08-18 09:27:36 +0200  Guillaume Desmottes <guillaume.desmottes@onestream.live>
+
+	* gst/rtmp2/gstrtmp2sink.c:
+	  rtmp2sink: fix crash if message conversion failed
+	  The message pointer is not set so we can't display it in logs.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/5202>
+
+2023-08-08 01:29:40 +0900  Seungha Yang <seungha@centricular.com>
+
+	* ext/hls/gsthlssink2.c:
+	  hlssink2: Always use forward slash separator
+	  g_build_filename() will insert back slash on Windows, and resulting
+	  playlist will contain media segment path with back slash if
+	  "playlist-root" property is specified
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/5161>
+
+2023-08-05 01:39:29 +1000  Jan Schmidt <jan@centricular.com>
+
+	* gst/audiolatency/gstaudiolatency.c:
+	  audiolatency: Fix event refcounting bug handling latency events
+	  Fix a refcounting bug introduced in
+	  https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/5146
+	  If upstream returns FALSE when processing a latency event, it will
+	  be unreffed an extra time
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/5152>
+
+2023-08-04 17:25:26 +1000  Jan Schmidt <jan@centricular.com>
+
+	* gst/audiolatency/gstaudiolatency.c:
+	  audiolatency: Forward latency query and event upstream
+	  Make sure the pipeline still configures the latency that it would configure
+	  if audiolatency was not in the pipeline.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/5152>
+
+2023-07-19 18:08:32 -0500  Ryan Pavlik <ryan.pavlik@collabora.com>
+
+	* sys/androidmedia/gstjniutils.c:
+	  androidmedia: Add more null checks (of env) to JNI utilities
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/5142>
+
+2023-07-22 10:42:39 +0100  Philippe Normand <philn@igalia.com>
+
+	* gst/transcode/gsttranscodebin.c:
+	  transcodebin: Fixes for upstream selectable support
+	  The upstream selectable query was not performed in all situations where we
+	  handle the stream-start event. This could potentially lead to unlinked pads
+	  between decodebin3 and encodebin later on.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/5141>
+
+2023-07-19 18:08:32 -0500  Ryan Pavlik <ryan.pavlik@collabora.com>
+
+	* sys/androidmedia/gstjniutils.c:
+	  androidmedia: Add more null checks to JNI utilities
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/5136>
+
+2023-07-28 14:02:22 -0500  Ryan Pavlik <ryan.pavlik@collabora.com>
+
+	* sys/androidmedia/gstamcvideodec.c:
+	  androidmedia: Fix typo
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/5136>
+
+2023-07-19 18:08:16 -0500  Ryan Pavlik <ryan.pavlik@collabora.com>
+
+	* sys/androidmedia/gst-android-hardware-camera.c:
+	  androidmedia: Clear err if we don't have an optional camera field/constant
+	  Fixes startup on devices where those fields/constants are not found.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/5136>
+
+2023-07-26 16:45:18 -0500  Ryan Pavlik <ryan.pavlik@collabora.com>
+
+	* ext/webrtc/gstwebrtcbin.c:
+	  webrtc: Fix docs for create-data-channel action signal
+	  Initial line of the doc comment was incorrect, so the nicely written
+	  docs were not being extracted.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/5134>
+
+2023-07-20 16:57:47 +0100  Tim-Philipp Müller <tim@centricular.com>
+
+	* meson.build:
+	  Back to development
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/5082>
+
+=== release 1.22.5 ===
+
+2023-07-20 15:22:48 +0100  Tim-Philipp Müller <tim@centricular.com>
+
+	* NEWS:
+	* RELEASE:
+	* gst-plugins-bad.doap:
+	* meson.build:
+	  Release 1.22.5
+
+2023-02-19 10:41:51 +0100  Víctor Manuel Jáquez Leal <vjaquez@igalia.com>
+
+	* gst/jpegformat/gstjpegparse.c:
+	  jpegparse: Warn only malformed data in APP data.
+	  It's only malformed data in APP when its length is less than 6 chars,
+	  because it should have at least an id string. Otherwise, if the id string
+	  is not handled, no warning is raised, only a debug message noticing it.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/5053>
+
+2023-02-15 19:02:35 +0100  Víctor Manuel Jáquez Leal <vjaquez@igalia.com>
+
+	* gst/jpegformat/gstjpegparse.c:
+	  jpegparse: Parse AVI1 tag in app0.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/5053>
+
+2023-02-12 16:11:34 +0800  He Junyan <junyan.he@intel.com>
+
+	* sys/va/gstjpegdecoder.c:
+	  va: jpegdecoder: Do not check SOS state when parsing DRI marker.
+	  According to spec, the JPEG_MARKER_DRI(Restart interval definition)
+	  marker can come before the SOS marker. So we should not check the SOS
+	  state when parsing the DRI marker.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/5053>
+
+2023-07-11 21:41:46 +0200  Carlos Rafael Giani <crg7475@mailbox.org>
+
+	* meson.build:
+	  gl: Take into account viv-fb vs. viv_fb naming in meson scripts
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/4959>
+
+2023-05-16 21:24:44 +1000  Matthew Waters <matthew@centricular.com>
+
+	* meson.build:
+	  gl: provide a pkg-config/gir file for the viv-fb backend
+	  Required to be able to generate coherent bindings for window system
+	  specific APIs due to limitations in gobject-introspection.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/4959>
+
+2023-03-26 16:40:28 +0100  Tim-Philipp Müller <tim@centricular.com>
+
+	* ext/teletextdec/gstteletextdec.c:
+	* sys/winks/gstksvideodevice.c:
+	* sys/winks/kshelpers.c:
+	* tools/gst-app-maker:
+	  taglist, plugins: fix compiler warnings with GLib >= 2.76
+	  Fix compiler warnings about not using the return value when
+	  freeing the GString segment with g_string_free(.., FALSE):
+	  ignoring return value of ‘g_string_free_and_steal’ declared with attribute ‘warn_unused_result’
+	  which we get with newer GLib versions. These were all harmless.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/5015>
+
+2023-06-27 05:09:49 +0900  Seungha Yang <seungha@centricular.com>
+
+	* gst-libs/gst/d3d11/gstd3d11bufferpool.cpp:
+	* tests/check/libs/d3d11memory.c:
+	* tests/check/meson.build:
+	  d3d11bufferpool: Fix heavy CPU usage in case of fixed-size pool
+	  There's no reason to release GstMemory manually at all.
+	  If we do release GstMemory, corresponding GstBuffer will be
+	  discarded by GstBufferPool baseclass because the size is changed
+	  to zero.
+	  Actual cause of heavy CPU usage in case of fixed-size pool
+	  (i.e., decoder output buffer pool) and if we remove GstMemory from
+	  GstBuffer is that GstBufferPool baseclass is doing busy wait in acquire_buffer()
+	  for some reason. That needs to be investigated though, discarding
+	  and re-alloc every GstBuffer is not ideal already.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/4943>
+
+2023-07-10 12:03:25 +0100  Philippe Normand <philn@igalia.com>
+
+	* ext/webrtc/gstwebrtcbin.c:
+	* tests/check/elements/webrtcbin.c:
+	  webrtcbin: Prevent critical warning when creating an additional data channel
+	  The max_channels value wasn't clamped to 65534 in all situations.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/5012>
+
+2023-06-30 18:30:46 +0100  Philippe Normand <philn@igalia.com>
+
+	* ext/webrtc/gstwebrtcstats.c:
+	  webrtcstats: Properly report IceCandidate type
+	  strcmp returns a positive value if s1 is greater than s2, while we actually
+	  needed to check equality here.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/4957>
+
+2023-06-20 19:10:38 +0100  Tim-Philipp Müller <tim@centricular.com>
+
+	* meson.build:
+	  Back to development
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/4907>
+
 === release 1.22.4 ===
 
 2023-06-20 17:42:25 +0100  Tim-Philipp Müller <tim@centricular.com>

@@ -7110,6 +7110,10 @@ gst_webrtc_bin_create_data_channel (GstWebRTCBin * webrtc, const gchar * label,
     g_object_get (webrtc->priv->sctp_transport, "max-channels", &max_channels,
         NULL);
 
+    if (max_channels <= 0) {
+      max_channels = 65534;
+    }
+
     g_return_val_if_fail (id <= max_channels, NULL);
   }
 
@@ -8941,7 +8945,7 @@ gst_webrtc_bin_class_init (GstWebRTCBinClass * klass)
       G_CALLBACK (gst_webrtc_bin_add_turn_server), NULL, NULL, NULL,
       G_TYPE_BOOLEAN, 1, G_TYPE_STRING);
 
-  /*
+  /**
    * GstWebRTCBin::create-data-channel:
    * @object: the #GstWebRTCBin
    * @label: the label for the data channel
