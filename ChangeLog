@@ -1,3 +1,403 @@
+=== release 1.22.7 ===
+
+2023-11-13 11:04:22 +0000  Tim-Philipp Müller <tim@centricular.com>
+
+	* NEWS:
+	* RELEASE:
+	* gst-plugins-bad.doap:
+	* meson.build:
+	  Release 1.22.7
+
+2023-10-20 00:09:57 +0300  Sebastian Dröge <sebastian@centricular.com>
+
+	* gst/mxf/mxfdemux.c:
+	* gst/mxf/mxfdemux.h:
+	  mxfdemux: Store GstMXFDemuxEssenceTrack in their own fixed allocation
+	  Previously they were stored inline inside a GArray, but as references to
+	  the tracks were stored in various other places although the array could
+	  still be updated (and reallocated!), this could lead to dangling
+	  references in various places.
+	  Instead now store them in a GPtrArray in their own allocation so each
+	  track's memory position stays fixed.
+	  Fixes ZDI-CAN-22299
+	  Fixes https://gitlab.freedesktop.org/gstreamer/gstreamer/-/issues/3055
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/5638>
+
+2023-10-04 11:14:38 +0200  Benjamin Gaignard <benjamin.gaignard@collabora.com>
+
+	* gst-libs/gst/codecparsers/gstav1parser.c:
+	  codecparsers: av1: Clip max tile rows and cols values
+	  Clip tile rows and cols to 64 as describe in AV1 specification.
+	  Fixes ZDI-CAN-22226 / CVE-2023-44429
+	  Fixes https://gitlab.freedesktop.org/gstreamer/gstreamer/-/issues/3015
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/5637>
+
+2023-10-06 13:49:15 +0200  Guillaume Desmottes <guillaume.desmottes@onestream.live>
+
+	* gst/audiobuffersplit/gstaudiobuffersplit.c:
+	  audiobuffersplit: disable max-silence-time if set to 0
+	  According to the property documentation max-silence-time is supposed to be
+	  disabled when set to 0 but it was not.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/5632>
+
+2023-05-26 17:38:13 +0000  Balló György <ballogyor@gmail.com>
+
+	* gst-libs/gst/wayland/meson.build:
+	  gstwayland: Don't depend on wayland-protocols
+	  wayland-protocols are needed to build gstwayland, but not for dependent projects.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/5618>
+
+2023-11-04 19:36:06 +0900  Seungha Yang <seungha@centricular.com>
+
+	* sys/wasapi2/gstwasapi2client.cpp:
+	* sys/wasapi2/gstwasapi2client.h:
+	* sys/wasapi2/gstwasapi2device.c:
+	  wasapi2device: Ignore activation failed device
+	  Enumerates all devices even if activation error is detected
+	  Fixes: https://gitlab.freedesktop.org/gstreamer/gstreamer/-/issues/3090
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/5609>
+
+2023-10-28 22:55:04 +0800  He Junyan <junyan.he@intel.com>
+
+	* docs/plugins/gst_plugins_cache.json:
+	* ext/libde265/libde265-dec.c:
+	  libde265dec: Only decode the main profile
+	  The src caps of the libde265 is now fixed to I420, and so if the
+	  stream is other format, such as 4:4:4 or 10 bits format, the pipeline
+	  will crash because the dowstream element accesses the video buffer as
+	  I420 format.
+	  We now restrain the input caps to "main" profile, which only contains
+	  4:2:0 8 bits stream.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/5596>
+
+2023-11-04 03:16:47 +0100  Marek Vasut <marex@denx.de>
+
+	* sys/v4l2codecs/gstv4l2decoder.c:
+	  v4l2codecs: Avoid QBUF/DQBUF struct timeval .tv_usec wrap-around at frame 1000000
+	  When decoding stream using hardware V4L2 decoder element, in any of the
+	  currently supported formats, the decoding will fail once frame number
+	  1000000 is reached. The reported error clearly indicates a wrap-around
+	  occured, instead of receiving decoded frame 1000000, frame 0 is received
+	  from the hardware V4L2 decoder driver.
+	  The problem is actually not in the driver itself, but rather in gstreamer,
+	  which uses `struct v4l2_buffer` member `.timestamp` in a special way. The
+	  timestamp of buffers with encoded data added to the SINK (input) queue of
+	  the driver is copied by the driver into matching buffers with decoded data
+	  added to the SOURCE (output) queue of the driver. In fact, the timestamp
+	  is not a timestamp at all, but rather in this special case, only part of
+	  it is used as an incrementing frame counter.
+	  The `.timestamp` is of type `struct timeval`, which is defined in
+	  `sys/time.h` [1]. Only the `tv_usec` member of this structure is used
+	  for the incrementing frame counter. However, suseconds_t tv_usec [2]
+	  may be limited to range [-1, 1000000]:
+	  "
+	  [XSI] The type suseconds_t shall be a signed integer type capable of
+	  storing values at least in the range [-1, 1000000].
+	  "
+	  Therefore, once frame 1000000 is reached, a rollover occurs and decoding
+	  fails.
+	  Fix this by using both `struct timeval` members, `.tv_sec` and `.tv_usec`
+	  with matching modular arithmetic, this way the failure would occur again
+	  just short of 2^84 frames, which should be plenty.
+	  [1] https://pubs.opengroup.org/onlinepubs/9699919799/basedefs/sys_time.h.html
+	  [2] https://pubs.opengroup.org/onlinepubs/9699919799/basedefs/sys_types.h.html
+	  A test case using stateless hardware h264 decoder, the WARN/ERROR output
+	  in gstreamer log indicates a failure occurred. With this change, that
+	  error no longer occurs and the WARN/ERROR are not present:
+	  ```
+	  pc$ gst-launch-1.0 videotestsrc num-buffers=1001001 pattern=6 ! \
+	  video/x-raw,width=16,height=16,format=I420 ! \
+	  x264enc ! filesink location=/tmp/test.h264
+	  dut$ GST_DEBUG="*:3" gst-launch-1.0 filesrc location=/tmp/test.h264 ! \
+	  h264parse ! v4l2slh264dec ! fakesink
+	  ...
+	  0:03:51.393677606 12111     0x370df400 WARN      \
+	  v4l2codecs-decoder gstv4l2decoder.c:1157:gst_v4l2_request_set_done:<v4l2decoder2> \
+	  Requested frame 1000000, but driver returned frame 0.
+	  0:03:51.394140597 12111     0x370df400 WARN      \
+	  v4l2codecs-decoder gstv4l2decoder.c:1157:gst_v4l2_request_set_done:<v4l2decoder2> \
+	  Requested frame 1000001, but driver returned frame 1.
+	  0:03:51.394425216 12111     0x370df400 WARN      \
+	  v4l2codecs-decoder gstv4l2decoder.c:1157:gst_v4l2_request_set_done:<v4l2decoder2> \
+	  Requested frame 1000002, but driver returned frame 2.
+	  0:03:51.394665211 12111     0x370df400 WARN      \
+	  v4l2codecs-decoder gstv4l2decoder.c:1157:gst_v4l2_request_set_done:<v4l2decoder2> \
+	  Requested frame 1000003, but driver returned frame 3.
+	  0:03:51.394785833 12111     0x370df400 WARN      \
+	  v4l2codecs-h264dec gstv4l2codech264dec.c:1059:gst_v4l2_codec_h264_dec_output_picture:<v4l2slh264dec0> \
+	  error: Failed to decode frame 1000000
+	  ERROR: from element /GstPipeline:pipeline0/v4l2slh264dec:v4l2slh264dec0: Failed to decode frame 1000000
+	  ```
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/5603>
+
+2023-10-31 17:59:32 +0100  Kalev Lember <klember@redhat.com>
+
+	* ext/openh264/gstopenh264dec.cpp:
+	* ext/openh264/gstopenh264enc.cpp:
+	  openh264: Fail gracefully if openh264 encoder/decoder creation fails
+	  This can happen with the dummy "noopenh264" library that the freedesktop
+	  flatpak runtime ships, and Fedora is planning on shipping as well. In
+	  both cases the dummy implementation gets replaced with the actual
+	  openh264 library that's downloaded directly from Cisco, but just to be
+	  on safe side, this patch makes it careful to check the return values to
+	  avoid crashing if the underlying library hasn't been swapped out yet.
+	  The patch is taken from freedesktop-sdk and was originally written by
+	  Valentin David <valentin.david@codethink.co.uk>.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/5586>
+
+2023-10-25 21:37:24 +0900  Seungha Yang <seungha@centricular.com>
+
+	* sys/wasapi2/gstwasapi2ringbuffer.cpp:
+	  wasapi2: Don't use global volume control object
+	  ISimpleAudioVolume controls volume of corresponding audio session
+	  and there would be only single input/output audio session
+	  in case of share-mode, which means that it controls audio volume of the
+	  process. Instead, use IAudioStreamVolume interface which controls
+	  volume of the stream.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/5579>
+
+2023-10-29 22:42:52 +0900  Seungha Yang <seungha@centricular.com>
+
+	* sys/d3d11/gstd3d11window_win32.cpp:
+	  d3d11videosink: Fix window switching in case of fullscreen mode
+	  Other Windows applications allow window switching even when
+	  an application window is in fullscreen mode. Also fixing
+	  regression introduced in 15248d8b84db9e79e6d4587b212b12ca82fc4a6b
+	  which makes restored window is always located at topmost
+	  since we do not call SetWindowPos() anymore when restoring
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/5578>
+
+2023-10-28 01:23:36 +0900  Seungha Yang <seungha@centricular.com>
+
+	* sys/d3d11/gstd3d11screencapturesrc.cpp:
+	  d3d11screencapturesrc: Fix mouse cursor blending
+	  Ignore alpha component of source (mouse cursor texture)
+	  when blending alpha channel, otherwise the background area of source
+	  (which has zeros) will be written to render target. Then it will result
+	  in black rectangle if output texture is converted to premultiplied alpha
+	  texture
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/5577>
+
+2023-10-25 23:19:51 +0900  Seungha Yang <seungha@centricular.com>
+
+	* sys/mediafoundation/gstmfvideoencoder.cpp:
+	  mfvideoencoder: Fix typo in template caps
+	  Fixes: https://gitlab.freedesktop.org/gstreamer/gstreamer/-/issues/3058
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/5556>
+
+2023-10-10 10:39:55 +0200  Jan Alexander Steffens (heftig) <jan.steffens@ltnglobal.com>
+
+	* gst/mpegtsmux/gstatscmux.c:
+	* gst/mpegtsmux/tsmux/tsmuxstream.c:
+	* gst/mpegtsmux/tsmux/tsmuxstream.h:
+	  tsmux: Fix default get_es_descrs_func
+	  `tsmux_stream_default_get_es_descrs` is missing the `user_data`
+	  parameter and shouldn't be cast to `TsMuxStreamGetESDescriptorsFunc`.
+	  Prefer not casting at all to make sure we don't miss such an issue.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/5516>
+
+2023-10-10 10:22:44 +0200  Jan Alexander Steffens (heftig) <jan.steffens@ltnglobal.com>
+
+	* gst/mpegtsmux/gstatscmux.c:
+	* gst/mpegtsmux/tsmux/tsmux.c:
+	* gst/mpegtsmux/tsmux/tsmux.h:
+	  tsmux: Fix default new_stream_func
+	  `tsmux_stream_new` is missing the `user_data` parameter and shouldn't be
+	  cast to `TsMuxNewStreamFunc`.
+	  Prefer not casting at all to make sure we don't miss such an issue.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/5516>
+
+2023-10-10 10:12:44 +0200  Jan Alexander Steffens (heftig) <jan.steffens@ltnglobal.com>
+
+	* gst/mpegtsmux/tsmux/tsmuxstream.h:
+	  tsmux: Add missing include
+	  We need `GstMpegtsPMTStream` here.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/5516>
+
+2023-10-17 00:57:56 +0200  Jan Alexander Steffens (heftig) <jan.steffens@ltnglobal.com>
+
+	* gst/mpegtsmux/tsmux/tsmux.c:
+	  tsmux: Simplify tsmux_section_write_packet
+	  - Don't try to make the parameters match `GHFunc`. Use a dedicated
+	  callback for `g_hash_table_foreach`.
+	  - Don't try to be clever with buffer memories. We're allocating a full
+	  packet anyway, might as well memcpy and save on a lot of complexity.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/5516>
+
+2023-10-17 00:54:38 +0200  Jan Alexander Steffens (heftig) <jan.steffens@ltnglobal.com>
+
+	* gst/mpegtsmux/tsmux/tsmux.c:
+	  tsmux: tsmux_packet_out should always consume its buffer
+	  Consuming the buffer only when successful is an antipattern and easily
+	  leads to leaks.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/5516>
+
+2023-10-16 23:54:20 +0200  Jan Alexander Steffens (heftig) <jan.steffens@ltnglobal.com>
+
+	* gst/mpegtsmux/tsmux/tsmux.c:
+	  tsmux: Don't memset in pad_stream when writing a PCR packet
+	  tsmux_write_ts_header will write a stuffing adaptation field, so we
+	  don't need to prefill the buffer.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/5516>
+
+2023-10-16 23:52:48 +0200  Jan Alexander Steffens (heftig) <jan.steffens@ltnglobal.com>
+
+	* gst/mpegtsmux/tsmux/tsmux.c:
+	  tsmux: Move out parameters of tsmux_write_ts_header
+	  Move them to the end of the parameter list and also allow passing NULLs
+	  to ignore the payload information, but assert that the payload length is
+	  zero in this case.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/5516>
+
+2023-10-16 23:50:16 +0200  Jan Alexander Steffens (heftig) <jan.steffens@ltnglobal.com>
+
+	* gst/mpegtsmux/tsmux/tsmux.c:
+	  tsmux: Fix two more uses of gst_buffer_map
+	  The buffers should be used for writing.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/5516>
+
+2023-10-16 15:41:48 +0200  Jan Alexander Steffens (heftig) <jan.steffens@ltnglobal.com>
+
+	* gst/mpegtsmux/tsmux/tsmux.c:
+	  tsmux: Fix error handling in pad_stream
+	  Don't leak the map or the buffer if we encounter an error.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/5513>
+
+2023-10-16 15:31:04 +0200  Jan Alexander Steffens (heftig) <jan.steffens@ltnglobal.com>
+
+	* gst/mpegtsmux/tsmux/tsmux.c:
+	  tsmux: Fill padding packets with stuffing bytes
+	  Instead of leaving it uncleared, emitting probably old packet data but
+	  potentially also random or sensitive application data.
+	  Also fix the mapping mode.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/5513>
+
+2023-10-17 14:56:34 -0400  Nicolas Dufresne <nicolas.dufresne@collabora.com>
+
+	* sys/v4l2codecs/gstv4l2codech265dec.c:
+	  v4l2codecs: h265: Fix entry_point_offsets array leak
+	  This array was being leaked.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/5503>
+
+2023-10-17 12:42:59 -0400  Detlev Casanova <detlev.casanova@collabora.com>
+
+	* gst-libs/gst/codecs/gsth265decoder.c:
+	  codecs: h265: Do not free slice header before using it
+	  The v4l2codecs H.265 decoder uses the
+	  GstH265SliceHdr::entry_point_offset_minus1 array so make sure that it is not
+	  freed before decoding the frame.
+	  Before this patch, some H.265 input would segfault in
+	  gst_v4l2_codec_h265_dec_fill_slice_params() when executing the line:
+	  guint32 entry_point_offset = slice_hdr->entry_point_offset_minus1[i] + 1;
+	  Make sure that the array is not freed before using it.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/5503>
+
+2023-10-12 16:25:59 +0530  Rahul T R <r-ravikumar@ti.com>
+
+	* sys/kms/gstkmssink.c:
+	  kmssink: Add TIDSS auto-detection
+	  Add Texas Instruments TIDSS display controller into list of
+	  auto-detected modules.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/5486>
+
+2023-10-15 20:30:22 +0900  Seungha Yang <seungha@centricular.com>
+
+	* gst-libs/gst/d3d11/gstd3d11converter.cpp:
+	  d3d11converter: Fix 10/12bits planar output
+	  Simple division can result in 10/12bits overflow.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/5484>
+
+2023-10-12 02:26:07 +0900  Seungha Yang <seungha@centricular.com>
+
+	* sys/d3d11/gstd3d11window_win32.cpp:
+	  d3d11videosink: Fix rendering with initial fullscreen state
+	  Change fullscreen mode once the swapchain is fully configured
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/5466>
+
+2023-10-11 23:29:04 +0900  Seungha Yang <seungha@centricular.com>
+
+	* sys/d3d11/gstd3d11window_win32.cpp:
+	  d3d11videosink: Fix toggling between fullscreen and maximized
+	  Use GetWindowPlacement() and SetWindowPlacement() APIs
+	  to remember and restore window status, such as maximized, position,
+	  restore position, etc.
+	  Fixes: https://gitlab.freedesktop.org/gstreamer/gstreamer/-/issues/3016
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/5466>
+
+2023-10-10 15:43:07 -0400  Nicolas Dufresne <nicolas.dufresne@collabora.com>
+
+	* sys/v4l2codecs/gstv4l2format.c:
+	  v4l2codecs: Fix tiled formats stride conversion
+	  While adding arbitrary tile support, a round up operation was badly
+	  converter. This caused the Y component of the stride to be 0. This
+	  eventually lead to a crash in glupoad preceded by the following
+	  assertion.
+	  gst_gl_buffer_allocation_params_new: assertion 'alloc_size > 0' failed
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/5463>
+
+2023-10-09 19:09:15 +0900  Seungha Yang <seungha@centricular.com>
+
+	* sys/decklink/gstdecklink.h:
+	  decklink: Fix broken COM string conversion
+	  WideCharToMultiByte return is the string length without null terminate
+	  character if passed "cchWideChar" does not include the null terminate
+	  character size. Instead of passing the exact string length, pass -1 so that
+	  the API can understand the input string is null terminated already and
+	  returned value from the API includes the character.
+	  Fixes: https://gitlab.freedesktop.org/gstreamer/gstreamer/-/issues/3023
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/5446>
+
+2023-10-05 13:34:14 +0800  James Oliver <james.oliver@icetana.com.au>
+
+	* sys/nvcodec/gstnvh265encoder.cpp:
+	  nvh265encoder: fix bounds for auto-select GPU enumeration
+	  Fixes the bounds-check for encoder auto-select GPU enumeration to be
+	  between 0-7 instead of 0-6. This should allow 8-GPU machines to work
+	  with nvautogpuh265enc for the last enumerated GPU.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/5439>
+
+2023-10-05 13:29:49 +0800  James Oliver <james.oliver@icetana.com.au>
+
+	* sys/nvcodec/gstnvh264encoder.cpp:
+	  nvh264encoder: fix bounds for auto-select GPU enumeration
+	  Fixes the bounds-check for encoder auto-select GPU enumeration to be
+	  between 0-7 instead of 0-6. This should allow 8-GPU machines to work
+	  with nvautogpuh264enc for the last enumerated GPU.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/5439>
+
+2023-09-27 12:33:39 +0200  Philippe Normand <philn@igalia.com>
+
+	* gst/inter/gstinteraudiosink.c:
+	  interaudiosink: Ensure adapters don't store buffers with audio meta
+	  The interaudiosrc might take buffers of different sizes from the audio adapter,
+	  so keeping metas consistency would be an issue. So the sink now strips the audio
+	  metas away and the src adds them back (for non-interleaved layouts only) when
+	  taking buffers from the adapter.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/5416>
+
+2023-09-13 15:11:32 +0100  Philippe Normand <philn@igalia.com>
+
+	* gst/inter/gstinteraudiosrc.c:
+	  interaudiosrc: Add audio meta to buffers containing non-interleaved samples
+	  Without this a downstream audioconverter wouldn't be able to map the
+	  GstAudioBuffer prior to conversion.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/5416>
+
+2023-09-27 01:12:01 +0900  Seungha Yang <seungha@centricular.com>
+
+	* sys/d3d11/gstd3d11decoder.cpp:
+	  d3d11decoder: Fix crash on negotiate() when decoder is not configured
+	  The negotiate() can be called by GstVideoDecoder baseclass on GAP event,
+	  and decoder helper object might not be configured at the time
+	  when negotiate() is called.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/5401>
+
+2023-09-20 19:41:00 +0100  Tim-Philipp Müller <tim@centricular.com>
+
+	* meson.build:
+	  Back to development
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/5371>
+
 === release 1.22.6 ===
 
 2023-09-20 18:10:57 +0100  Tim-Philipp Müller <tim@centricular.com>
