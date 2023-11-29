@@ -1,7 +1,13 @@
-gst-plugins-bad1.0 (1.22.6-1) UNRELEASED; urgency=medium
+gst-plugins-bad1.0 (1.22.7-1) UNRELEASED; urgency=high
 
   * Team upload
   * New upstream release
+    (Closes: #1056101, #1056102, #1053259, #1053260, #1053261)
+    - CVE-2023-40474: integer overflow in MXF file handling
+    - CVE-2023-40475: integer overflow in MXF file handling
+    - CVE-2023-40476: integer overflow in H.265 video parser
+    - CVE-2023-44429: AV1 codec parser buffer overflow
+    - CVE-2023-44446: MXF demuxer use-after-free
 
  -- Jeremy Bícha <jbicha@ubuntu.com>  Sun, 24 Sep 2023 07:59:41 -0400
 
