@@ -1,4 +1,4 @@
-gst-plugins-bad1.0 (1.22.7-1) UNRELEASED; urgency=high
+gst-plugins-bad1.0 (1.22.7-1) unstable; urgency=high
 
   * Team upload
   * New upstream release
@@ -8,8 +8,9 @@ gst-plugins-bad1.0 (1.22.7-1) UNRELEASED; urgency=high
     - CVE-2023-40476: integer overflow in H.265 video parser
     - CVE-2023-44429: AV1 codec parser buffer overflow
     - CVE-2023-44446: MXF demuxer use-after-free
+  * Update libzxing-dev Build-Depends (Closes: #1054382)
 
- -- Jeremy Bícha <jbicha@ubuntu.com>  Sun, 24 Sep 2023 07:59:41 -0400
+ -- Jeremy Bícha <jbicha@ubuntu.com>  Tue, 28 Nov 2023 19:29:13 -0500
 
 gst-plugins-bad1.0 (1.22.4-1) unstable; urgency=medium
 
