@@ -50,6 +50,7 @@
  *  + APP3 -- meta (same as exif)
  *  + APP12 -- Photoshop Save for Web: Ducky / Picture info
  *  + APP13 -- Adobe IRB
+ *  + check for interlaced mjpeg
  */
 
 #ifdef HAVE_CONFIG_H
@@ -367,7 +368,7 @@ gst_jpeg_parse_app0 (GstJpegParse * parse, GstJpegSegment * seg)
   guint16 xd, yd;
   guint8 unit, xt, yt;
 
-  if (seg->size < 14)           /* length of interesting data in APP0 */
+  if (seg->size < 6)            /* less than 6 means no id string */
     return FALSE;
 
   gst_byte_reader_init (&reader, seg->data + seg->offset, seg->size);
@@ -436,7 +437,21 @@ gst_jpeg_parse_app0 (GstJpegParse * parse, GstJpegSegment * seg)
     return TRUE;
   }
 
-  return FALSE;
+  /* https://exiftool.org/TagNames/JPEG.html#AVI1 */
+  if (g_strcmp0 (id_str, "AVI1") == 0) {
+    /* polarity */
+    if (!gst_byte_reader_get_uint8 (&reader, &unit))
+      return FALSE;
+
+    /* TODO: update caps for interlaced MJPEG */
+    GST_DEBUG_OBJECT (parse, "MJPEG interleaved field: %d", unit);
+
+    return TRUE;
+  }
+
+  GST_DEBUG_OBJECT (parse, "Unhandled app0: %s", id_str);
+
+  return TRUE;
 }
 
 /* *INDENT-OFF* */
@@ -459,6 +474,9 @@ gst_jpeg_parse_app1 (GstJpegParse * parse, GstJpegSegment * seg)
   const gchar *id_str;
   const guint8 *data;
   gint i;
+
+  if (seg->size < 6)            /* less than 6 means no id string */
+    return FALSE;
 
   gst_byte_reader_init (&reader, seg->data + seg->offset, seg->size);
   gst_byte_reader_skip_unchecked (&reader, 2);
@@ -497,11 +515,14 @@ gst_jpeg_parse_app1 (GstJpegParse * parse, GstJpegSegment * seg)
         gst_tag_list_unref (tags);
       } else {
         GST_INFO_OBJECT (parse, "failed to parse %s: %s", id_str, data);
+        return FALSE;
       }
     }
 
     return TRUE;
   }
+
+  GST_DEBUG_OBJECT (parse, "Unhandled app1: %s", id_str);
 
   return TRUE;
 }
@@ -513,7 +534,7 @@ gst_jpeg_parse_app14 (GstJpegParse * parse, GstJpegSegment * seg)
   const gchar *id_str;
   guint8 transform;
 
-  if (seg->size < 12)           /* length of interesting data in APP14 */
+  if (seg->size < 6)            /* less than 6 means no id string */
     return FALSE;
 
   gst_byte_reader_init (&reader, seg->data + seg->offset, seg->size);
@@ -522,8 +543,10 @@ gst_jpeg_parse_app14 (GstJpegParse * parse, GstJpegSegment * seg)
   if (!gst_byte_reader_get_string_utf8 (&reader, &id_str))
     return FALSE;
 
-  if (!g_str_has_prefix (id_str, "Adobe"))
-    return FALSE;
+  if (!g_str_has_prefix (id_str, "Adobe")) {
+    GST_DEBUG_OBJECT (parse, "Unhandled app14: %s", id_str);
+    return TRUE;
+  }
 
   /* skip version and flags */
   if (!gst_byte_reader_skip (&reader, 6))
@@ -568,13 +591,13 @@ gst_jpeg_parse_com (GstJpegParse * parse, GstJpegSegment * seg)
     return FALSE;
 
   comment = get_utf8_from_data (data, size);
+  if (!comment)
+    return FALSE;
 
-  if (comment) {
-    GST_INFO_OBJECT (parse, "comment found: %s", comment);
-    gst_tag_list_add (get_tag_list (parse), GST_TAG_MERGE_REPLACE,
-        GST_TAG_COMMENT, comment, NULL);
-    g_free (comment);
-  }
+  GST_INFO_OBJECT (parse, "comment found: %s", comment);
+  gst_tag_list_add (get_tag_list (parse), GST_TAG_MERGE_REPLACE,
+      GST_TAG_COMMENT, comment, NULL);
+  g_free (comment);
 
   return TRUE;
 }
@@ -773,25 +796,25 @@ gst_jpeg_parse_handle_frame (GstBaseParse * bparse, GstBaseParseFrame * frame,
       case GST_JPEG_MARKER_COM:
         if (!gst_jpeg_parse_com (parse, &seg)) {
           GST_ELEMENT_WARNING (parse, STREAM, FORMAT,
-              ("Failed to parse com segment"), (NULL));
+              ("Failed to parse com segment"), ("Invalid data"));
         }
         break;
       case GST_JPEG_MARKER_APP0:
         if (!gst_jpeg_parse_app0 (parse, &seg)) {
           GST_ELEMENT_WARNING (parse, STREAM, FORMAT,
-              ("Failed to parse app0 segment"), (NULL));
+              ("Failed to parse app0 segment"), ("Invalid data"));
         }
         break;
       case GST_JPEG_MARKER_APP1:
         if (!gst_jpeg_parse_app1 (parse, &seg)) {
           GST_ELEMENT_WARNING (parse, STREAM, FORMAT,
-              ("Failed to parse app1 segment"), (NULL));
+              ("Failed to parse app1 segment"), ("Invalid data"));
         }
         break;
       case GST_JPEG_MARKER_APP14:
         if (!gst_jpeg_parse_app14 (parse, &seg)) {
           GST_ELEMENT_WARNING (parse, STREAM, FORMAT,
-              ("Failed to parse app14 segment"), (NULL));
+              ("Failed to parse app14 segment"), ("Invalid data"));
         }
         break;
       case GST_JPEG_MARKER_DHT:
