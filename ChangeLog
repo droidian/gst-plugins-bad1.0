@@ -1,3 +1,221 @@
+=== release 1.22.8 ===
+
+2023-12-18 12:09:37 +0000  Tim-Philipp Müller <tim@centricular.com>
+
+	* NEWS:
+	* RELEASE:
+	* gst-plugins-bad.doap:
+	* meson.build:
+	  Release 1.22.8
+
+2023-11-23 20:24:42 +0900  Seungha Yang <seungha@centricular.com>
+
+	* gst-libs/gst/codecparsers/gstav1parser.h:
+	* gst/videoparsers/gstav1parse.c:
+	  av1parser: Fix array sizes in scalability structure
+	  Since the AV1 specification is not explicitly mentioning about
+	  the array size bounds, array sizes in scalability structure
+	  should be defined as possible maximum sizes that can have.
+	  Also, this commit removes GST_AV1_MAX_SPATIAL_LAYERS define from
+	  public header which is API break but the define is misleading
+	  and this patch is introducing ABI break already
+	  ZDI-CAN-22300
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/5824>
+
+2023-12-05 19:52:22 +0900  Seungha Yang <seungha@centricular.com>
+
+	* sys/nvcodec/gstnvdec.c:
+	  nvdec: Fix division by zero when calculating buffer duration
+	  Don't try to calculate buffer duration from variable framerate
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/5774>
+
+2023-11-08 09:53:17 +0000  HuQian <qian.hu@mediatek.com>
+
+	* gst-libs/gst/wayland/gstwlvideoformat.c:
+	  waylandsink: fix incorrect RGB and BGR mapping about GST DRM and WL_SHM
+	  This commit corrects the mapping relationship between RGB and BGR in GST and DRM.
+	  The previous mapping was incorrect, causing potential color mismatches in the output.
+	  The changes are as follows:
+	  {WL_SHM_FORMAT_RGB888, DRM_FORMAT_RGB888, GST_VIDEO_FORMAT_BGR},
+	  {WL_SHM_FORMAT_BGR888, DRM_FORMAT_BGR888, GST_VIDEO_FORMAT_RGB},
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/5792>
+
+2023-12-10 04:26:59 +0100  Stefan Brüns <stefan.bruens@rwth-aachen.de>
+
+	* ext/ladspa/meson.build:
+	* meson_options.txt:
+	  ladspa: Make RDF parsing truely optional
+	  If the ladspa plugin is enabled explicitly or via auto-features, the
+	  liblrdf dependency can not be disabled.
+	  As the RDF parsing currently provides hardly any features, the possibility
+	  to disable it fairly useful.
+	  Fixes: #3168
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/5802>
+
+2023-07-28 00:39:46 +0900  Seungha Yang <seungha@centricular.com>
+
+	* gst/onvif/gstrtponviftimestamp.c:
+	  rtponviftimestamp: Fix drop-out-of-segment=false mode
+	  Fixing unexpected buffer dropping and flow error in case that:
+	  * use-reference-timestamps=false
+	  * drop-out-of-segment=false
+	  * Calculated utc offset is not valid because buffer is out-of-segment
+	  The above case should be considered as a valid data flow without returning
+	  errors.
+	  Fixing regression introduced by
+	  https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/1683
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/5788>
+
+2023-12-05 09:28:25 +0100  Guillaume Desmottes <guillaume.desmottes@onestream.live>
+
+	* meson.build:
+	  meson: update PACKAGE_BUGREPORT
+	  Some were still using pre-monorepo links.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/5786>
+
+2023-07-17 16:21:47 +0000  Rabindra Harlalka <13387-rabindra-harlalka@users.noreply.gitlab.freedesktop.org>
+
+	* ext/aes/gstaesenc.c:
+	  aesenc: Fix IV length addition to output buffer length
+	  Add length of IV to output buffer length only for the first buffer.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/5785>
+
+2023-12-06 12:01:36 +0100  Alessandro Bono <alessandro.bono369@gmail.com>
+
+	* ext/dtls/gstdtlscertificate.c:
+	  gstdtlscertificate: Define _WINSOCKAPI_ before including windows.h
+	  This avoid a build failure when compiling against OpenSSL 3.2.0. The
+	  problem is when windows.h is included before WinSock2.h. Because
+	  windows.h includes winsock.h[1]. Defining _WINSOCKAPI_ stops windows.h
+	  including winsock.h.
+	  Error:
+	  ```
+	  [748/1041] Compiling C object ext/dtls/gstdtls.dll.p/gstdtlscertificate.c.obj
+	  FAILED: ext/dtls/gstdtls.dll.p/gstdtlscertificate.c.obj
+	  [...]
+	  Windows Kits\10\include\10.0.17763.0\shared\ws2def.h(235): error C2011: 'sockaddr': 'struct' type redefinition
+	  Windows Kits\10\include\10.0.17763.0\um\winsock.h(482): note: see declaration of 'sockaddr'
+	  ```
+	  [1] https://stackoverflow.com/a/1372836
+	  Closes: https://gitlab.freedesktop.org/gstreamer/gstreamer/-/issues/3167
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/5783>
+
+2023-12-07 15:36:26 +0100  Alexander Slobodeniuk <aslobodeniuk@fluendo.com>
+
+	* sys/d3d11/meson.build:
+	  d3d11: fix building with address sanitizer
+	  When building with address sanitizer it gives next error:
+	  "gstd3d11window_corewindow.cpp : fatal error C1128: number of sections
+	  exceeded object file format limit: compile with /bigobj"
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/5782>
+
+2023-11-21 14:26:54 +0100  Benjamin Gaignard <benjamin.gaignard@collabora.com>
+
+	* gst-libs/gst/codecparsers/gstav1parser.c:
+	  codecparsers: av1: Clip max tile rows and cols values
+	  Clip tile rows and cols to 64 as describe in AV1 specification
+	  to avoid writing outside array range but preserve sb_cols
+	  and sb_rows value which are used to futher computation.
+	  Fixes ZDI-CAN-22226 / CVE-2023-44429
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/5734>
+
+2023-11-21 14:04:49 +0100  Benjamin Gaignard <benjamin.gaignard@collabora.com>
+
+	* gst-libs/gst/codecparsers/gstav1parser.c:
+	  Revert "codecparsers: av1: Clip max tile rows and cols values"
+	  This reverts commit b76a801f57353b893c344025cac56413140fca6d.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/5734>
+
+2023-11-21 01:41:16 +0900  Seungha Yang <seungha@centricular.com>
+
+	* gst-libs/gst/codecs/gsth264decoder.c:
+	  h264decoder: Fix GstVideoCodecFrame leak
+	  If current buffer has no slice data, frame should be released.
+	  Otherwise frames will stay in decoder baseclass forever.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/5733>
+
+2023-11-21 21:14:12 +0900  Seungha Yang <seungha@centricular.com>
+
+	* sys/qsv/gstqsvh264dec.cpp:
+	* sys/qsv/gstqsvh265dec.cpp:
+	  qsvdecoder: Fix stream format detection
+	  Fixing typo
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/5711>
+
+2023-10-22 11:06:27 +0200  Robert Mader <robert.mader@collabora.com>
+
+	* gst/camerabin2/gstcamerabin2.c:
+	  camerabin: Fix source updates with user filters
+	  Take the case into account when user filters have been set before the
+	  source gets updated.
+	  Note that the further linking of the filters, if present, happens below
+	  in the `gst_camera_bin_check_and_replace_filter()` calls.
+	  The audio filter is still affected by the same issue but left out for
+	  now.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/5682>
+
+2023-11-15 22:41:47 +0900  Seungha Yang <seungha@centricular.com>
+
+	* sys/d3d11/gstd3d11dxgicapture.cpp:
+	* sys/d3d11/gstd3d11screencapture.cpp:
+	* sys/d3d11/gstd3d11screencapture.h:
+	* sys/d3d11/gstd3d11screencapturedevice.cpp:
+	* sys/d3d11/gstd3d11screencapturesrc.cpp:
+	* sys/d3d11/gstd3d11winrtcapture.cpp:
+	  d3d11screencapturesrc: Fix wrong color with HDR enabled
+	  Even if IDXGIOutput6 says current display colorspace is HDR,
+	  captured texture via IDXGIOutputDuplication::AcquireNextFrame()
+	  is converted frame by OS unless we use IDXGIOutput5::DuplicateOutput1()
+	  with DXGI_FORMAT_R16G16B16A16_FLOAT format, in order for captured
+	  frame to be scRGB color space. Then application should perform
+	  tonemap operation based on reported display white level, color primaries, etc.
+	  Since we don't have any tonemapping implementation, ignores colorimetry
+	  reported by IDXGIOutput6.
+	  Fixes: https://gitlab.freedesktop.org/gstreamer/gstreamer/-/issues/3128
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/5679>
+
+2023-11-15 19:13:08 +0200  Sebastian Dröge <sebastian@centricular.com>
+
+	* gst-libs/gst/player/gstplayer.c:
+	  player: Without dispatcher emit signals directly instead of via the default main context
+	  This is how it was documented and how it worked before the port to GstPlay.
+	  Without this, applications expecting signals to be emitted directly
+	  without anything running the main context will simply not receive any
+	  signals.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/5673>
+
+2022-08-08 14:46:16 -0400  Olivier Crête <olivier.crete@collabora.com>
+
+	* ext/webrtc/webrtcsdp.c:
+	  webrtcsdp: Don't require fingerprint in inactive media
+	  Inactive m-lines don't need a fingerprint as they may not
+	  have a connection.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/5663>
+
+2021-10-12 11:29:21 -0400  Olivier Crête <olivier.crete@collabora.com>
+
+	* ext/webrtc/webrtcsdp.c:
+	  webrtcsdp: Remove comparison between media and session fingerprint
+	  The code seems to validate that the media-level fingerprint matches
+	  the fingerprint of the previous media or of the whole session. There
+	  is no such requirement in any RFC I found. The session-session one
+	  is just meant to act as a fallback when there is no media-level
+	  fingerprint.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/5663>
+
+2023-11-11 14:10:37 +0200  Sebastian Dröge <sebastian@centricular.com>
+
+	* gst-libs/gst/play/gstplay-signal-adapter.c:
+	  play: Automatically flush the bus when disposing the signal adapter
+	  See https://gitlab.freedesktop.org/gstreamer/gstreamer/-/issues/3107
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/5653>
+
+2023-11-13 14:57:09 +0000  Tim-Philipp Müller <tim@centricular.com>
+
+	* meson.build:
+	  Back to development
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/5650>
+
 === release 1.22.7 ===
 
 2023-11-13 11:04:22 +0000  Tim-Philipp Müller <tim@centricular.com>
