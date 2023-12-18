@@ -1,5 +1,5 @@
 project('gst-plugins-bad', 'c', 'cpp',
-  version : '1.22.7',
+  version : '1.22.8',
   meson_version : '>= 0.62',
   default_options : [ 'warning_level=1',
                       'buildtype=debugoptimized' ])
@@ -213,7 +213,7 @@ cdata.set('SIZEOF_VOIDP', cc.sizeof('void*'))
 cdata.set_quoted('VERSION', gst_version)
 cdata.set_quoted('PACKAGE', 'gst-plugins-bad')
 cdata.set_quoted('PACKAGE_VERSION', gst_version)
-cdata.set_quoted('PACKAGE_BUGREPORT', 'https://gitlab.freedesktop.org/gstreamer/gst-plugins-bad/issues/new')
+cdata.set_quoted('PACKAGE_BUGREPORT', 'https://gitlab.freedesktop.org/gstreamer/gstreamer/issues/new')
 cdata.set_quoted('PACKAGE_NAME', 'GStreamer Bad Plug-ins')
 cdata.set_quoted('GETTEXT_PACKAGE', 'gst-plugins-bad-1.0')
 cdata.set_quoted('GST_API_VERSION', api_version)
