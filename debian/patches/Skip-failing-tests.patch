@@ -1,14 +1,19 @@
-From: Jeremy Bicha <jeremy.bicha@canonical.com>
-Date: Thu, 26 May 2022 13:27:33 -0400
-Subject: Skip failing tests
+From 389720d3c547a02323508bcdc2eae2b24518e6c5 Mon Sep 17 00:00:00 2001
+From: Marc Leeman <m.leeman@televic.com>
+Date: Tue, 19 Dec 2023 11:59:24 +0100
+Subject: [PATCH] Skip failing tests
 
+camerabin:
 https://gitlab.freedesktop.org/gstreamer/gstreamer/-/issues/1244
+
+netsim:
+https://gitlab.freedesktop.org/gstreamer/gstreamer/-/issues/3000
 ---
- tests/check/meson.build | 2 +-
- 1 file changed, 1 insertion(+), 1 deletion(-)
+ tests/check/meson.build | 4 ++--
+ 1 file changed, 2 insertions(+), 2 deletions(-)
 
 diff --git a/tests/check/meson.build b/tests/check/meson.build
-index cc0d7ab..7464caa 100644
+index 590135899..35f198787 100644
 --- a/tests/check/meson.build
 +++ b/tests/check/meson.build
 @@ -28,7 +28,7 @@ base_tests = [
@@ -20,3 +25,15 @@ index cc0d7ab..7464caa 100644
    [['elements/ccconverter.c'], not closedcaption_dep.found(), [gstvideo_dep]],
    [['elements/cccombiner.c'], not closedcaption_dep.found(), ],
    [['elements/ccextractor.c'], not closedcaption_dep.found(), ],
+@@ -138,7 +138,7 @@ if host_machine.system() != 'windows'
+     [['elements/jpegparse.c'], not cdata.has('HAVE_UNISTD_H')],
+     [['elements/kate.c'],
+         not kate_dep.found() or not cdata.has('HAVE_UNISTD_H'), [kate_dep]],
+-    [['elements/netsim.c']],
++    [['elements/netsim.c'], true],
+     [['elements/shm.c'], not shm_enabled, shm_deps],
+     [['elements/voaacenc.c'],
+         not voaac_dep.found() or not cdata.has('HAVE_UNISTD_H'), [voaac_dep]],
+-- 
+2.40.1
+
