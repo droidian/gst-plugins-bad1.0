@@ -1,9 +1,10 @@
-gst-plugins-bad1.0 (1.22.9-1) UNRELEASED; urgency=high
+gst-plugins-bad1.0 (1.22.9-1) unstable; urgency=high
 
   * Team upload
   * New upstream version 1.22.9
     - CVE-2024-0444 (ZDI-CAN-22873, GStreamer-SA-2024-001):
       AV1 codec parser potential buffer overflow during list tile parsing
+  * Run wrap-and-sort
 
  -- Jeremy Bícha <jbicha@ubuntu.com>  Fri, 26 Jan 2024 20:04:39 -0500
 
