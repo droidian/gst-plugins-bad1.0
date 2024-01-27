@@ -1,3 +1,203 @@
+=== release 1.22.9 ===
+
+2024-01-24 18:21:13 +0000  Tim-Philipp Müller <tim@centricular.com>
+
+	* NEWS:
+	* RELEASE:
+	* gst-plugins-bad.doap:
+	* meson.build:
+	  Release 1.22.9
+
+2024-01-24 12:36:48 +0000  Philippe Normand <philn@igalia.com>
+
+	* gst/videoparsers/gstvp9parse.c:
+	  vp9parse: Fix critical warning during caps negotiation
+	  `gst_pad_get_allowed_caps()` returns a non-writable caps, so we need to make it
+	  writable, otherwise the `gst_caps_remove_structure()` call below might trigger a
+	  critical warning.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/5976>
+
+2024-01-10 03:33:59 +0900  Seungha Yang <seungha@centricular.com>
+
+	* gst-libs/gst/codecparsers/gstav1parser.c:
+	  av1parser: Fix potential stack overflow during tile list parsing
+	  The tile_count_minus_1 must be less than or equal to 511 as specified
+	  in spec "6.11.1 General tile list OBU semantics"
+	  Fixes #3214 / CVE-2024-0444 / ZDI-CAN-22873
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/5971>
+
+2023-12-06 21:25:44 +0900  Seungha Yang <seungha@centricular.com>
+
+	* gst-libs/gst/codecs/gsth264decoder.c:
+	  h264decoder: Handle malformed avc/avc3 packets
+	  Packetized stream format should not contain start-code prefix
+	  in bitstream and each [nal-length-byte, nal-byte] unit should consist of
+	  single nal unit. But there are malformed streams in the world.
+	  Use newly added gst_h264_parser_identify_and_split_nalu_avc()
+	  method to identify each nal unit.
+	  Fixes: https://gitlab.freedesktop.org/gstreamer/gstreamer/-/issues/3219
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/5934>
+
+2023-12-06 21:23:08 +0900  Seungha Yang <seungha@centricular.com>
+
+	* gst-libs/gst/codecparsers/gsth264parser.c:
+	* gst-libs/gst/codecparsers/gsth264parser.h:
+	* tests/check/libs/h264parser.c:
+	  h264parser: Add gst_h264_parser_identify_and_split_nalu_avc() method
+	  Equivalent to _split_nalu_hevc() method in h265parser. This method
+	  will scan start-code prefix and split into individual NAL units
+	  if start-code prefix is detected
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/5934>
+
+2023-12-09 16:26:22 +0100  Marek Vasut <marex@denx.de>
+
+	* sys/v4l2codecs/gstv4l2codecmpeg2dec.c:
+	  mpeg2decoder: Fix multiplication wraparound
+	  The GstMpeg2Picture system_frame_number is guint32, constant 1000 is guint32,
+	  GstV4l2CodecMpeg2Dec *_ref_ts multiplication result is u64 .
+	  ```
+	  u64 result = (u32)((u32)system_frame_number * (u32)1000);
+	  ```
+	  behaves the same as
+	  ```
+	  u64 result = (u32)(((u32)system_frame_number * (u32)1000) & 0xffffffff);
+	  ```
+	  so in case `system_frame_number > 4294967295 / 1000`, the `result` will
+	  wrap around. Since the `result` is really used as a cookie used to look
+	  up V4L2 buffers related to the currently decoded frame, this wraparound
+	  leads to visible corruption during MPEG2 decoding. At 30 FPS this occurs
+	  after cca. 40 hours of playback .
+	  Fix this by changing the 1000 from u32 to u64, i.e.:
+	  ```
+	  u64 result = (u64)((u32)system_frame_number * (u64)1000ULL);
+	  ```
+	  this way, the wraparound is prevented and the correct cookie is used.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/5850>
+
+2023-12-09 16:08:31 +0100  Marek Vasut <marex@denx.de>
+
+	* sys/v4l2codecs/gstv4l2codecvp9dec.c:
+	  vp9decoder: Fix multiplication wraparound
+	  The GstVp9Picture system_frame_number is guint32, constant 1000 is guint32,
+	  GstV4l2CodecVp9Dec v4l2_vp9_frame.*_frame_ts multiplication result is u64 .
+	  ```
+	  u64 result = (u32)((u32)system_frame_number * (u32)1000);
+	  ```
+	  behaves the same as
+	  ```
+	  u64 result = (u32)(((u32)system_frame_number * (u32)1000) & 0xffffffff);
+	  ```
+	  so in case `system_frame_number > 4294967295 / 1000`, the `result` will
+	  wrap around. Since the `result` is really used as a cookie used to look
+	  up V4L2 buffers related to the currently decoded frame, this wraparound
+	  leads to visible corruption during VP9 decoding. At 30 FPS this occurs
+	  after cca. 40 hours of playback .
+	  Fix this by changing the 1000 from u32 to u64, i.e.:
+	  ```
+	  u64 result = (u64)((u32)system_frame_number * (u64)1000ULL);
+	  ```
+	  this way, the wraparound is prevented and the correct cookie is used.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/5850>
+
+2023-12-09 16:08:31 +0100  Marek Vasut <marex@denx.de>
+
+	* sys/v4l2codecs/gstv4l2codecvp8dec.c:
+	  vp8decoder: Fix multiplication wraparound
+	  The GstVp8Picture system_frame_number is guint32, constant 1000 is guint32,
+	  GstV4l2CodecVp8Dec v4l2_vp8_frame.*_frame_ts multiplication result is u64 .
+	  ```
+	  u64 result = (u32)((u32)system_frame_number * (u32)1000);
+	  ```
+	  behaves the same as
+	  ```
+	  u64 result = (u32)(((u32)system_frame_number * (u32)1000) & 0xffffffff);
+	  ```
+	  so in case `system_frame_number > 4294967295 / 1000`, the `result` will
+	  wrap around. Since the `result` is really used as a cookie used to look
+	  up V4L2 buffers related to the currently decoded frame, this wraparound
+	  leads to visible corruption during VP8 decoding. At 30 FPS this occurs
+	  after cca. 40 hours of playback .
+	  Fix this by changing the 1000 from u32 to u64, i.e.:
+	  ```
+	  u64 result = (u64)((u32)system_frame_number * (u64)1000ULL);
+	  ```
+	  this way, the wraparound is prevented and the correct cookie is used.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/5850>
+
+2023-12-11 15:26:11 +0100  Víctor Manuel Jáquez Leal <vjaquez@igalia.com>
+
+	* gst-libs/gst/va/gstvaallocator.c:
+	  vaallocator: only i965 can switch derived/non-derived at mapping
+	  Since newer drivers change the strides and offset, and they have to be defined
+	  at allocation time because those parameters are stored in the GstVideoMeta in
+	  the buffer pool.
+	  Thinks patch is based on commit 6b1fba14 and commit 809a984b
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/5778>
+
+2023-07-13 16:56:56 +0800  Mengkejiergeli Ba <mengkejiergeli.ba@intel.com>
+
+	* gst-libs/gst/va/gstvaallocator.c:
+	  vaallocator: let pool alloc_info be consitent with the test order in gst_va_allocator_try
+	  In gst_va_allocator_try, the first try is to use derive_image, if it
+	  succeeds, we should use info from derived image to create bufferpool.
+	  If derive fails, then try create_image and give created image info
+	  to the pool.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/5778>
+
+2023-12-04 20:05:48 +0100  Víctor Manuel Jáquez Leal <vjaquez@igalia.com>
+
+	* gst-libs/gst/va/gstvaallocator.c:
+	  vaallocator: force non-derived for old mesa drivers
+	  Mesa <23.3 can't map derived images for P010 format. This patch forces
+	  non-derived if this is the case.
+	  See: https://gitlab.freedesktop.org/mesa/mesa/-/merge_requests/24381
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/5778>
+
+2023-11-30 16:52:02 +0100  Víctor Manuel Jáquez Leal <vjaquez@igalia.com>
+
+	* gst-libs/gst/va/vasurfaceimage.c:
+	  va: check surface status before get derive image
+	  According with documentation the surface has to be in ready state before getting
+	  it derived image. This patch adds that check.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/5778>
+
+2023-11-30 12:00:27 +0100  Víctor Manuel Jáquez Leal <vjaquez@igalia.com>
+
+	* gst-libs/gst/va/gstvaallocator.c:
+	  vaallocator: don't fail if drm fourcc are different
+	  When exporting a DMABuf from a VASurface the user might tell that the surface
+	  was allocated with certain fourcc, but the returned VADRMPRIMESurfaceDescriptor
+	  migth tell a different fourcc, as in the case or radeonsi driver, for duplicated
+	  fourcc, such as YUY2 and YUYV.
+	  Originally it was supposed to be a failed exportation. This patch relax this
+	  validation by allowing different fourcc.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/5778>
+
+2023-11-18 18:51:04 +0100  Robert Mader <robert.mader@collabora.com>
+
+	* gst/camerabin2/gstcamerabin2.c:
+	  camerabin: Correctly relink viewfinderbin_queue
+	  This reverts a part of de92a6c7f2. Unlike `image_filter` and
+	  `video_filter`, `viewfinder_filter` does not get linked to `src` but
+	  `viewfinderbin_queue`. Thus the fix in the mentioned commit does not
+	  apply for it and should be reverted.
+	  This was not spotted earlier as only the other filters are used in
+	  the project that uncovered the issue.
+	  Fixes: de92a6c7f2 ("camerabin: Fix source updates with user filters")
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/5842>
+
+2023-12-18 17:01:36 +0000  Philippe Normand <philn@igalia.com>
+
+	* gst-libs/gst/play/gstplay.c:
+	  play: Fix error details parsing
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/5831>
+
+2023-12-18 13:52:12 +0000  Tim-Philipp Müller <tim@centricular.com>
+
+	* meson.build:
+	  Back to development
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/5826>
+
 === release 1.22.8 ===
 
 2023-12-18 12:09:37 +0000  Tim-Philipp Müller <tim@centricular.com>
