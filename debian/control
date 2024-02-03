@@ -3,7 +3,8 @@ Section: libs
 Priority: optional
 Maintainer: Maintainers of GStreamer packages <gst-plugins-bad1.0@packages.debian.org>
 Uploaders: Sebastian Dröge <slomo@debian.org>,
-           Sjoerd Simons <sjoerd@debian.org>
+           Sjoerd Simons <sjoerd@debian.org>,
+           Marc Leeman <marc.leeman@gmail.com>,
 Build-Depends: debhelper-compat (= 13),
                dh-sequence-gir,
                flite-dev,
