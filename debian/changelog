@@ -1,3 +1,13 @@
+gst-plugins-bad1.0 (1.22.8-1) unstable; urgency=high
+
+  * Team upload.
+  * New upstream version 1.22.8
+    - ZDI-CAN-22300: Heap-based buffer overflow in the AV1 codec parser
+      when handling certain malformed streams before GStreamer 1.22.8
+  * d/patches: skip netsim test. Mitigates: #1052660
+
+ -- Marc Leeman <marc.leeman@gmail.com>  Mon, 18 Dec 2023 17:23:36 +0100
+
 gst-plugins-bad1.0 (1.22.7-1) unstable; urgency=high
 
   * Team upload
