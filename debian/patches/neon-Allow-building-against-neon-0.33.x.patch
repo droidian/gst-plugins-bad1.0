@@ -1,0 +1,25 @@
+From: Heiko Becker <mail@heiko-becker.de>
+Date: Fri, 2 Feb 2024 00:18:56 +0100
+Subject: neon: Allow building against neon 0.33.x
+
+From its NEWS file:
+
+"API and ABI backwards-compatible with 0.27.x and later"
+
+Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/6036>
+
+Origin: upstream, will probably be in 1.22.10
+---
+ ext/neon/meson.build | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/ext/neon/meson.build b/ext/neon/meson.build
+index 42cd2f1..7aa5ed7 100644
+--- a/ext/neon/meson.build
++++ b/ext/neon/meson.build
+@@ -1,4 +1,4 @@
+-neon_dep = dependency('neon', version: ['>= 0.27', '<= 0.32.99'],
++neon_dep = dependency('neon', version: ['>= 0.27', '<= 0.33.99'],
+                       required : get_option('neon'))
+ 
+ if neon_dep.found()

@@ -1,2 +1,3 @@
 02_opencv-data-path.patch
 Skip-failing-tests.patch
+neon-Allow-building-against-neon-0.33.x.patch

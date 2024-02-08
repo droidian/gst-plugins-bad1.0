@@ -1,4 +1,3 @@
-From 389720d3c547a02323508bcdc2eae2b24518e6c5 Mon Sep 17 00:00:00 2001
 From: Marc Leeman <m.leeman@televic.com>
 Date: Tue, 19 Dec 2023 11:59:24 +0100
 Subject: [PATCH] Skip failing tests
@@ -13,7 +12,7 @@ https://gitlab.freedesktop.org/gstreamer/gstreamer/-/issues/3000
  1 file changed, 2 insertions(+), 2 deletions(-)
 
 diff --git a/tests/check/meson.build b/tests/check/meson.build
-index 590135899..35f198787 100644
+index 5901358..35f1987 100644
 --- a/tests/check/meson.build
 +++ b/tests/check/meson.build
 @@ -28,7 +28,7 @@ base_tests = [
@@ -34,6 +33,3 @@ index 590135899..35f198787 100644
      [['elements/shm.c'], not shm_enabled, shm_deps],
      [['elements/voaacenc.c'],
          not voaac_dep.found() or not cdata.has('HAVE_UNISTD_H'), [voaac_dep]],
--- 
-2.40.1
-
