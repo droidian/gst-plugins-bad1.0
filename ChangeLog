@@ -1,3 +1,94 @@
+=== release 1.22.10 ===
+
+2024-02-13 14:39:08 +0000  Tim-Philipp Müller <tim@centricular.com>
+
+	* NEWS:
+	* RELEASE:
+	* gst-plugins-bad.doap:
+	* meson.build:
+	  Release 1.22.10
+
+2024-01-19 14:35:05 +0100  Marvin Schmidt <marv@exherbo.org>
+
+	* ext/wpe/gstwpesrcbin.cpp:
+	* ext/wpe/gstwpethreadedview.cpp:
+	* ext/wpe/gstwpethreadedview.h:
+	* ext/wpe/gstwpevideosrc.cpp:
+	* ext/wpe/meson.build:
+	  wpe: Rename WPEView to GstWPEThreadedView
+	  WebKit commit b12e7ed2ad3a ("[WPE] Upstream the new WPE platform API
+	  https://bugs.webkit.org/show_bug.cgi?id=265286")[1] added a `WPEView` typedef
+	  which clashes with our `WPEView` class.
+	  Rename the `WPEView` class to `GstWPEThreadedView` to avoid the collision.
+	  Also prefix the `WPEContextThread` class with `Gst` and rename the
+	  source files to reflect the new class name and use lowercase while at it
+	  for consistency
+	  [1] https://github.com/WebKit/WebKit/commit/b12e7ed2ad3a47ab322507ebac214225f2298acc
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/6096>
+
+2024-02-09 10:50:39 +0200  Sebastian Dröge <sebastian@centricular.com>
+
+	* gst/sdp/gstsdpdemux.c:
+	  sdpdemux: Add SDP message (aka session) attributes to the caps too
+	  They apply to all medias, and if overridden by the specific media then
+	  they would also be overridden just below in the created caps.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/6086>
+
+2024-02-08 15:50:43 +0100  Edward Hervey <edward@centricular.com>
+
+	* ext/musepack/gstmusepackdec.c:
+	  musepack: Prefer using FFmpeg musepack decoder/demuxer
+	  * Bump the rank of the musepack v7/v8 FFmpeg demuxers to SECONDARY
+	  * Bump the rank of the musepack v7/v8 FFmpeg audio decoders to SECONDARY
+	  * Demote the rank of the musepackdec element to MARGINAL
+	  This is for two reasons:
+	  * The musepack library is no longer maintained, whereas the FFmpeg
+	  implementation can/will receive fixes
+	  * The `musepackdec` implementation was a all-in-one "parsing and decoding" blob
+	  which doesn't play nicely with decodebin3 and others
+	  Fixes https://gitlab.freedesktop.org/gstreamer/gstreamer/-/issues/3033
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/6085>
+
+2024-02-02 00:18:56 +0100  Heiko Becker <mail@heiko-becker.de>
+
+	* ext/neon/meson.build:
+	  neon: Allow building against neon 0.33.x
+	  From its NEWS file:
+	  "API and ABI backwards-compatible with 0.27.x and later"
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/6049>
+
+2024-01-31 15:22:37 +0000  Philippe Normand <philn@igalia.com>
+
+	* ext/srtp/gstsrtpenc.c:
+	  srtpenc: Fix potential leak
+	  When attempting to process a buffer after the rtcp session was closed the output
+	  buffer memory would remain referenced.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/6048>
+
+2024-01-25 22:25:19 +1100  Jan Schmidt <jan@centricular.com>
+
+	* ext/webrtc/gstwebrtcbin.c:
+	* ext/webrtc/utils.c:
+	* ext/webrtc/utils.h:
+	  webrtcbin: Improve SDP intersection for Opus
+	  Remove optional sprop-stereo and sprop-maxcapture fields from Opus
+	  remote offer caps before intersecting with local codec preferences.
+	  According to https://datatracker.ietf.org/doc/html/rfc7587#section-7.1
+	  those fields are sender-only informative, and don't affect
+	  interoperability.
+	  Fixes cases where the webrtc media will end up receive-only if the
+	  local side wants to send stereo but the remote is sending mono, or
+	  vice versa.
+	  There may be other fields in other codecs, so the implementation
+	  anticipates needing to add further fields and codecs in the future.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/5999>
+
+2024-01-25 00:18:12 +0000  Tim-Philipp Müller <tim@centricular.com>
+
+	* meson.build:
+	  Back to development
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/5990>
+
 === release 1.22.9 ===
 
 2024-01-24 18:21:13 +0000  Tim-Philipp Müller <tim@centricular.com>
