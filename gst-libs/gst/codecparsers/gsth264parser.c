@@ -986,7 +986,7 @@ gst_h264_parser_parse_pic_timing (GstH264NalParser * nalparser,
       hrd = &vui->vcl_hrd_parameters;
     }
 
-    tim->CpbDpbDelaysPresentFlag = ! !hrd;
+    tim->CpbDpbDelaysPresentFlag = !!hrd;
     tim->pic_struct_present_flag = vui->pic_struct_present_flag;
 
     if (tim->CpbDpbDelaysPresentFlag) {
@@ -1102,8 +1102,8 @@ gst_h264_parser_parse_user_data_unregistered (GstH264NalParser * nalparser,
 
   for (int i = 0; i < 16; i++) {
     READ_UINT8 (nr, urud->uuid[i], 8);
-    --payload_size;
   }
+  payload_size -= 16;
 
   urud->size = payload_size;
 
@@ -1432,7 +1432,7 @@ gst_h264_nal_parser_new (void)
 {
   GstH264NalParser *nalparser;
 
-  nalparser = g_slice_new0 (GstH264NalParser);
+  nalparser = g_new0 (GstH264NalParser, 1);
 
   return nalparser;
 }
@@ -1452,7 +1452,7 @@ gst_h264_nal_parser_free (GstH264NalParser * nalparser)
     gst_h264_sps_clear (&nalparser->sps[i]);
   for (i = 0; i < GST_H264_MAX_PPS_COUNT; i++)
     gst_h264_pps_clear (&nalparser->pps[i]);
-  g_slice_free (GstH264NalParser, nalparser);
+  g_free (nalparser);
 
   nalparser = NULL;
 }
@@ -1507,9 +1507,9 @@ gst_h264_parser_identify_nalu_unchecked (GstH264NalParser * nalparser,
   nalu->size = size - nalu->offset;
 
   if (!gst_h264_parse_nalu_header (nalu)) {
-    GST_WARNING ("error parsing \"NAL unit header\"");
+    GST_DEBUG ("not enough data to parse \"NAL unit header\"");
     nalu->size = 0;
-    return GST_H264_PARSER_BROKEN_DATA;
+    return GST_H264_PARSER_NO_NAL;
   }
 
   nalu->valid = TRUE;
@@ -2605,7 +2605,8 @@ gst_h264_parser_parse_slice_hdr (GstH264NalParser * nalparser,
     guint32 PicHeightInMapUnits = sps->pic_height_in_map_units_minus1 + 1;
     guint32 PicSizeInMapUnits = PicWidthInMbs * PicHeightInMapUnits;
     guint32 SliceGroupChangeRate = pps->slice_group_change_rate_minus1 + 1;
-    const guint n = ceil_log2 (PicSizeInMapUnits / SliceGroupChangeRate + 1);
+    const guint n =
+        gst_util_ceil_log2 (PicSizeInMapUnits / SliceGroupChangeRate + 1);
     READ_UINT16 (&nr, slice->slice_group_change_cycle, n);
   }
 
@@ -3019,6 +3020,19 @@ error:
 }
 
 static gboolean
+gst_h264_write_sei_user_data_unregistered (NalWriter * nw,
+    GstH264UserDataUnregistered * udu)
+{
+  WRITE_BYTES (nw, udu->uuid, 16);
+  WRITE_BYTES (nw, udu->data, udu->size);
+
+  return TRUE;
+
+error:
+  return FALSE;
+}
+
+static gboolean
 gst_h264_write_sei_frame_packing (NalWriter * nw,
     GstH264FramePacking * frame_packing)
 {
@@ -3200,6 +3214,12 @@ gst_h264_create_sei_memory_internal (guint8 nal_prefix_size,
         }
 
         payload_size_data += rud->size;
+        break;
+      }
+      case GST_H264_SEI_USER_DATA_UNREGISTERED:{
+        GstH264UserDataUnregistered *udu = &msg->payload.user_data_unregistered;
+
+        payload_size_data = 16 + udu->size;
         break;
       }
       case GST_H264_SEI_FRAME_PACKING:{
@@ -3385,6 +3405,15 @@ gst_h264_create_sei_memory_internal (guint8 nal_prefix_size,
         if (!gst_h264_write_sei_registered_user_data (&nw,
                 &msg->payload.registered_user_data)) {
           GST_WARNING ("Failed to write \"Registered user data\"");
+          goto error;
+        }
+        have_written_data = TRUE;
+        break;
+      case GST_H264_SEI_USER_DATA_UNREGISTERED:
+        GST_DEBUG ("Writing \"Unregistered user data\"");
+        if (!gst_h264_write_sei_user_data_unregistered (&nw,
+                &msg->payload.user_data_unregistered)) {
+          GST_WARNING ("Failed to write \"Unregistered user data\"");
           goto error;
         }
         have_written_data = TRUE;
@@ -3587,7 +3616,7 @@ out:
  * The validation for completeness of @au and @sei is caller's responsibility.
  * Both @au and @sei must be byte-stream formatted
  *
- * Returns: (nullable): a SEI inserted #GstBuffer or %NULL
+ * Returns: (transfer full) (nullable): a SEI inserted #GstBuffer or %NULL
  *   if cannot figure out proper position to insert a @sei
  *
  * Since: 1.18
@@ -3617,7 +3646,7 @@ gst_h264_parser_insert_sei (GstH264NalParser * nalparser, GstBuffer * au,
  * Nal prefix type of both @au and @sei must be packetized, and
  * also the size of nal length field must be identical to @nal_length_size
  *
- * Returns: (nullable): a SEI inserted #GstBuffer or %NULL
+ * Returns: (transfer full) (nullable): a SEI inserted #GstBuffer or %NULL
  *   if cannot figure out proper position to insert a @sei
  *
  * Since: 1.18
@@ -3861,4 +3890,82 @@ error:
 
 #undef READ_CONFIG_UINT8
 #undef SKIP_CONFIG_BITS
+}
+
+typedef struct
+{
+  const gchar *name;
+  GstH264Profile profile;
+} H264ProfileMapping;
+
+
+static const H264ProfileMapping h264_profiles[] = {
+  {"baseline", GST_H264_PROFILE_BASELINE},
+  {"main", GST_H264_PROFILE_MAIN},
+  {"high", GST_H264_PROFILE_HIGH},
+  {"high-10", GST_H264_PROFILE_HIGH10},
+  {"high-4:2:2", GST_H264_PROFILE_HIGH_422},
+  {"high-4:4:4", GST_H264_PROFILE_HIGH_444},
+  {"multiview-high", GST_H264_PROFILE_MULTIVIEW_HIGH},
+  {"stereo-high", GST_H264_PROFILE_STEREO_HIGH},
+  {"scalable-baseline", GST_H264_PROFILE_SCALABLE_BASELINE},
+  {"scalable-high", GST_H264_PROFILE_SCALABLE_HIGH},
+};
+
+/**
+ * gst_h264_profile_from_string:
+ * @string: the descriptive name for #GstH264Profile
+ *
+ * Returns a #GstH264Profile for the @string.
+ *
+ * Returns: the #GstH264Profile of @string or %GST_H265_PROFILE_INVALID on error
+ *
+ * Since: 1.24
+ */
+GstH264Profile
+gst_h264_profile_from_string (const gchar * string)
+{
+  guint i;
+
+  if (string == NULL)
+    return GST_H264_PROFILE_INVALID;
+
+  for (i = 0; i < G_N_ELEMENTS (h264_profiles); i++) {
+    if (g_strcmp0 (string, h264_profiles[i].name) == 0) {
+      return h264_profiles[i].profile;
+    }
+  }
+
+  return GST_H264_PROFILE_INVALID;
+}
+
+/**
+ * gst_h264_slice_type_to_string:
+ * @slice_type: a #GstH264SliceType
+ *
+ * Returns the descriptive name for the #GstH264SliceType.
+ *
+ * Returns: (nullable): the name for @slice_type or %NULL on error
+ *
+ * Since: 1.24
+ */
+const gchar *
+gst_h264_slice_type_to_string (GstH264SliceType slice_type)
+{
+  switch (slice_type) {
+    case GST_H264_P_SLICE:
+      return "P";
+    case GST_H264_B_SLICE:
+      return "B";
+    case GST_H264_I_SLICE:
+      return "I";
+    case GST_H264_SP_SLICE:
+      return "SP";
+    case GST_H264_SI_SLICE:
+      return "SI";
+    default:
+      GST_ERROR ("unknown %d slice type", slice_type);
+  }
+
+  return NULL;
 }

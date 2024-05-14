@@ -56,7 +56,6 @@ usr/lib/*/gstreamer-1.0/libgstivfparse.so
 usr/lib/*/gstreamer-1.0/libgstivtc.so
 usr/lib/*/gstreamer-1.0/libgstjp2kdecimator.so
 usr/lib/*/gstreamer-1.0/libgstjpegformat.so
-usr/lib/*/gstreamer-1.0/libgstkate.so
 usr/lib/*/gstreamer-1.0/libgstladspa.so
 usr/lib/*/gstreamer-1.0/libgstlegacyrawparse.so
 usr/lib/*/gstreamer-1.0/libgstlv2.so
@@ -118,10 +117,17 @@ usr/lib/*/gstreamer-1.0/libgstvoaacenc.so
 usr/lib/*/gstreamer-1.0/libgstvoamrwbenc.so
 usr/lib/*/gstreamer-1.0/libgstwebp.so
 usr/lib/*/gstreamer-1.0/libgstwebrtc.so
-usr/lib/*/gstreamer-1.0/libgstwebrtcdsp.so
 usr/lib/*/gstreamer-1.0/libgstwildmidi.so
 usr/lib/*/gstreamer-1.0/libgstx265.so
 usr/lib/*/gstreamer-1.0/libgsty4mdec.so
 usr/lib/*/gstreamer-1.0/libgstzbar.so
+usr/lib/*/gstreamer-1.0/libgstanalyticsoverlay.so
+usr/lib/*/gstreamer-1.0/libgstcodec2json.so
+usr/lib/*/gstreamer-1.0/libgstinsertbin.so
+usr/lib/*/gstreamer-1.0/libgstlc3.so
+usr/lib/*/gstreamer-1.0/libgstmse.so
+usr/lib/*/gstreamer-1.0/libgstsvtav1.so
+usr/lib/*/gstreamer-1.0/libgstunixfd.so
+usr/lib/*/gstreamer-1.0/libgstuvcgadget.so
 usr/share/gstreamer-1.0/presets/
 usr/share/locale

@@ -175,6 +175,21 @@ get_format_map_from_va_fourcc (guint va_fourcc)
   return NULL;
 }
 
+static const struct FormatMap *
+get_format_map_from_drm_fourcc (guint drm_fourcc)
+{
+  int i;
+  GstVideoFormat format;
+
+  format = gst_video_dma_drm_fourcc_to_format (drm_fourcc);
+  for (i = 0; i < G_N_ELEMENTS (format_map); i++) {
+    if (format_map[i].format == format)
+      return &format_map[i];
+  }
+
+  return NULL;
+}
+
 static struct FormatMap *
 get_format_map_from_video_format (GstVideoFormat format)
 {
@@ -228,6 +243,20 @@ get_format_map_from_va_image_format (const VAImageFormat * va_format)
   return NULL;
 }
 
+/**
+ * XXX: there are two potentially different fourcc: the VA and the DRM.
+ *
+ * Normally they should be the same, but there are a couple formats where VA's
+ * fourcc is different from the DRM's fourcc. One example is
+ * GST_VIDEO_FORMAT_I420, where VA's fourcc is ('I', '4', '2', '0') while DRM's
+ * is ('Y', 'U', '1', '2').
+ *
+ * That's the reason there are two functions:
+ * gst_va_video_format_from_va_fourcc() and
+ * gst_va_video_format_from_drm_fourcc() They should be used depending where the
+ * value is going to be used: for VA concerns the first should be used, for
+ * DMABuf exportation, the last.
+ */
 GstVideoFormat
 gst_va_video_format_from_va_fourcc (guint fourcc)
 {
@@ -242,6 +271,22 @@ gst_va_fourcc_from_video_format (GstVideoFormat format)
   const struct FormatMap *map = get_format_map_from_video_format (format);
 
   return map ? map->va_format.fourcc : 0;
+}
+
+GstVideoFormat
+gst_va_video_format_from_drm_fourcc (guint fourcc)
+{
+  const struct FormatMap *map = get_format_map_from_drm_fourcc (fourcc);
+
+  return map ? map->format : GST_VIDEO_FORMAT_UNKNOWN;
+}
+
+guint
+gst_va_drm_fourcc_from_video_format (GstVideoFormat format)
+{
+  const struct FormatMap *map = get_format_map_from_video_format (format);
+
+  return map ? gst_video_dma_drm_fourcc_from_format (format) : 0;
 }
 
 guint
@@ -311,6 +356,49 @@ gst_va_video_surface_format_from_image_format (GstVideoFormat image_format,
   return GST_VIDEO_FORMAT_UNKNOWN;
 }
 
+/* Convert the GstVideoInfoDmaDrm into a traditional GstVideoInfo
+   with recognized format. */
+gboolean
+gst_va_dma_drm_info_to_video_info (const GstVideoInfoDmaDrm * drm_info,
+    GstVideoInfo * info)
+{
+  GstVideoFormat video_format;
+  GstVideoInfo tmp_info;
+  guint i;
+
+  g_return_val_if_fail (drm_info, FALSE);
+  g_return_val_if_fail (info, FALSE);
+
+  if (GST_VIDEO_INFO_FORMAT (&drm_info->vinfo) != GST_VIDEO_FORMAT_DMA_DRM) {
+    *info = drm_info->vinfo;
+    return TRUE;
+  }
+
+  /* The non linear DMA format will be recognized as FORMAT_ENCODED,
+     but we still need to know its real format to set the info such
+     as pitch and stride. Because va plugins have its internal mapping
+     between drm fourcc and video format, we do not use the standard
+     conversion API here. */
+  video_format = gst_va_video_format_from_drm_fourcc (drm_info->drm_fourcc);
+  if (video_format == GST_VIDEO_FORMAT_UNKNOWN)
+    return FALSE;
+
+  if (!gst_video_info_set_format (&tmp_info, video_format,
+          GST_VIDEO_INFO_WIDTH (&drm_info->vinfo),
+          GST_VIDEO_INFO_HEIGHT (&drm_info->vinfo)))
+    return FALSE;
+
+  *info = drm_info->vinfo;
+  info->finfo = tmp_info.finfo;
+  for (i = 0; i < GST_VIDEO_MAX_PLANES; i++)
+    info->stride[i] = tmp_info.stride[i];
+  for (i = 0; i < GST_VIDEO_MAX_PLANES; i++)
+    info->offset[i] = tmp_info.offset[i];
+  info->size = tmp_info.size;
+
+  return TRUE;
+}
+
 static GstVideoFormat
 find_gst_video_format_in_rgb32_map (VAImageFormat * image_format)
 {
@@ -318,8 +406,9 @@ find_gst_video_format_in_rgb32_map (VAImageFormat * image_format)
 
   for (i = 0; i < G_N_ELEMENTS (rgb32_format_map); i++) {
     for (j = 0; j < G_N_ELEMENTS (rgb32_format_map[i].va_format); j++) {
-      if (va_format_is_same (&rgb32_format_map[i].va_format[j], image_format))
+      if (va_format_is_same (&rgb32_format_map[i].va_format[j], image_format)) {
         return rgb32_format_map[i].format;
+      }
     }
   }
 
