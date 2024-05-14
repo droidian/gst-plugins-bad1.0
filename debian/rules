@@ -75,6 +75,7 @@ conf_flags += -Duvch264=disabled -Dzxing=disabled
 # bookworm backport flags
 conf_flags += -Daja=disabled -Dqt6d3d11=disabled -Dwebrtcdsp=disabled
 
+conf_flags += -Dwpe=disabled
 %:
 	dh $@
 

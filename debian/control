@@ -90,7 +90,7 @@ Build-Depends: debhelper-compat (= 13),
                libwebp-dev (>= 0.2.1),
                libwildmidi-dev (>= 0.4.2),
                libwpebackend-fdo-1.0-dev (>= 1.8.0) [linux-any],
-               libwpewebkit-2.0-dev [amd64 arm64 armel armhf i386 mips64el ppc64el riscv64 s390x ia64 loong64 powerpc sparc64 x32],
+#               libwpewebkit-2.0-dev [amd64 arm64 armel armhf i386 mips64el ppc64el riscv64 s390x ia64 loong64 powerpc sparc64 x32],
                libx11-dev,
                libx11-xcb-dev,
                libx265-dev,
@@ -207,7 +207,8 @@ Description: GStreamer OpenCV plugins
  This package contains the OpenCV plugins.
 
 Package: gstreamer1.0-wpe
-Architecture: amd64 arm64 armel armhf i386 mips64el ppc64el riscv64 s390x ia64 loong64 powerpc sparc64 x32
+#Architecture: amd64 arm64 armel armhf i386 mips64el ppc64el riscv64 s390x ia64 loong64 powerpc sparc64 x32
+Architecture: s390x
 Multi-Arch: same
 Depends: gstreamer1.0-plugins-base,
          libgstreamer-plugins-bad1.0-0 (= ${binary:Version}),
