@@ -11,10 +11,10 @@ https://gitlab.freedesktop.org/gstreamer/gstreamer/-/issues/3000
  tests/check/meson.build | 4 ++--
  1 file changed, 2 insertions(+), 2 deletions(-)
 
-diff --git a/tests/check/meson.build b/tests/check/meson.build
-index 5901358..35f1987 100644
---- a/tests/check/meson.build
-+++ b/tests/check/meson.build
+Index: gst-plugins-bad1.0/tests/check/meson.build
+===================================================================
+--- gst-plugins-bad1.0.orig/tests/check/meson.build
++++ gst-plugins-bad1.0/tests/check/meson.build
 @@ -28,7 +28,7 @@ base_tests = [
    [['elements/autoconvert.c'], get_option('autoconvert').disabled()],
    [['elements/autovideoconvert.c'], get_option('autoconvert').disabled()],
@@ -24,12 +24,39 @@ index 5901358..35f1987 100644
    [['elements/ccconverter.c'], not closedcaption_dep.found(), [gstvideo_dep]],
    [['elements/cccombiner.c'], not closedcaption_dep.found(), ],
    [['elements/ccextractor.c'], not closedcaption_dep.found(), ],
-@@ -138,7 +138,7 @@ if host_machine.system() != 'windows'
+@@ -99,7 +99,7 @@ base_tests = [
+   [['libs/av1bitwriter.c'], false, [gstcodecparsers_dep]],
+   [['libs/vkmemory.c'], not gstvulkan_dep.found(), [gstvulkan_dep]],
+   [['libs/analyticsmeta.c'], false, [gstanalytics_dep]],
+-  [['elements/vkcolorconvert.c'], not gstvulkan_dep.found(), [gstvulkan_dep]],
++  [['elements/vkcolorconvert.c'], true , [gstvulkan_dep]],
+   [['libs/vkwindow.c'], not gstvulkan_dep.found(), [gstvulkan_dep]],
+   [['libs/vkdevice.c'], not gstvulkan_dep.found(), [gstvulkan_dep]],
+   [['elements/vkdeviceprovider.c'], not gstvulkan_dep.found(), [gstvulkan_dep]],
+@@ -121,7 +121,7 @@ if host_machine.system() != 'windows'
+     [['elements/avtpaafdepay.c'], not avtp_dep.found(), [avtp_dep]],
+     [['elements/avtpcrfbase.c'], not avtp_dep.found(), [avtp_dep]],
+     [['elements/avtpcrfcheck.c'], not avtp_dep.found(), [avtp_dep], ['../../ext/avtp/gstavtpcrfutil.c']],
+-    [['elements/avtpcrfsync.c'], not avtp_dep.found(), [avtp_dep], ['../../ext/avtp/gstavtpcrfutil.c', '../../ext/avtp/gstavtpcrfbase.c']],
++    [['elements/avtpcrfsync.c'], true, [avtp_dep], ['../../ext/avtp/gstavtpcrfutil.c', '../../ext/avtp/gstavtpcrfbase.c']],
+     [['elements/avtpcrfutil.c'], not avtp_dep.found(), [avtp_dep], ['../../ext/avtp/gstavtpcrfutil.c', '../../ext/avtp/gstavtpcrfbase.c']],
+     [['elements/avtpcvfpay.c'], not avtp_dep.found(), [avtp_dep]],
+     [['elements/avtpcvfdepay.c'], not avtp_dep.found(), [avtp_dep]],
+@@ -145,7 +145,7 @@ if host_machine.system() != 'windows'
+     [['elements/jifmux.c'],
+         not exif_dep.found() or not cdata.has('HAVE_UNISTD_H'), [exif_dep]],
      [['elements/jpegparse.c'], not cdata.has('HAVE_UNISTD_H')],
-     [['elements/kate.c'],
-         not kate_dep.found() or not cdata.has('HAVE_UNISTD_H'), [kate_dep]],
 -    [['elements/netsim.c']],
-+    [['elements/netsim.c'], true],
++    [['elements/netsim.c'], true ],
      [['elements/shm.c'], not shm_enabled, shm_deps],
+     [['elements/unixfd.c'], not gio_unix_dep.found()],
      [['elements/voaacenc.c'],
-         not voaac_dep.found() or not cdata.has('HAVE_UNISTD_H'), [voaac_dep]],
+@@ -161,7 +161,7 @@ endif
+ # linux only tests
+ if host_machine.system() == 'linux'
+   base_tests += [
+-    [['elements/vapostproc.c'], not gstva_dep.found(), [gstva_dep]],
++    [['elements/vapostproc.c'], true, [gstva_dep]],
+     [['elements/vacompositor.c'], not gstva_dep.found(), [gstva_dep]],
+   ]
+ endif

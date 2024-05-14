@@ -35,101 +35,71 @@ real live maintainer, or some actual wide use.
 
  <release>
   <Version>
-   <revision>1.22.10</revision>
-   <branch>1.22</branch>
+   <revision>1.24.3</revision>
+   <branch>1.24</branch>
    <name></name>
-   <created>2024-02-13</created>
-   <file-release rdf:resource="https://gstreamer.freedesktop.org/src/gst-plugins-bad/gst-plugins-bad-1.22.10.tar.xz" />
+   <created>2024-04-30</created>
+   <file-release rdf:resource="https://gstreamer.freedesktop.org/src/gst-plugins-bad/gst-plugins-bad-1.24.3.tar.xz" />
   </Version>
  </release>
 
  <release>
   <Version>
-   <revision>1.22.9</revision>
-   <branch>1.22</branch>
+   <revision>1.24.2</revision>
+   <branch>1.24</branch>
    <name></name>
-   <created>2024-01-24</created>
-   <file-release rdf:resource="https://gstreamer.freedesktop.org/src/gst-plugins-bad/gst-plugins-bad-1.22.9.tar.xz" />
+   <created>2024-04-09</created>
+   <file-release rdf:resource="https://gstreamer.freedesktop.org/src/gst-plugins-bad/gst-plugins-bad-1.24.2.tar.xz" />
   </Version>
  </release>
 
  <release>
   <Version>
-   <revision>1.22.8</revision>
-   <branch>1.22</branch>
+   <revision>1.24.1</revision>
+   <branch>1.24</branch>
    <name></name>
-   <created>2023-12-18</created>
-   <file-release rdf:resource="https://gstreamer.freedesktop.org/src/gst-plugins-bad/gst-plugins-bad-1.22.8.tar.xz" />
+   <created>2024-03-21</created>
+   <file-release rdf:resource="https://gstreamer.freedesktop.org/src/gst-plugins-bad/gst-plugins-bad-1.24.1.tar.xz" />
   </Version>
  </release>
 
  <release>
   <Version>
-   <revision>1.22.7</revision>
-   <branch>1.22</branch>
+   <revision>1.24.0</revision>
+   <branch>main</branch>
    <name></name>
-   <created>2023-11-13</created>
-   <file-release rdf:resource="https://gstreamer.freedesktop.org/src/gst-plugins-bad/gst-plugins-bad-1.22.7.tar.xz" />
+   <created>2024-03-04</created>
+   <file-release rdf:resource="https://gstreamer.freedesktop.org/src/gst-plugins-bad/gst-plugins-bad-1.24.0.tar.xz" />
   </Version>
  </release>
 
  <release>
   <Version>
-   <revision>1.22.6</revision>
-   <branch>1.22</branch>
+   <revision>1.23.90</revision>
+   <branch>main</branch>
    <name></name>
-   <created>2023-09-20</created>
-   <file-release rdf:resource="https://gstreamer.freedesktop.org/src/gst-plugins-bad/gst-plugins-bad-1.22.6.tar.xz" />
+   <created>2024-02-23</created>
+   <file-release rdf:resource="https://gstreamer.freedesktop.org/src/gst-plugins-bad/gst-plugins-bad-1.23.90.tar.xz" />
   </Version>
  </release>
 
  <release>
   <Version>
-   <revision>1.22.5</revision>
-   <branch>1.22</branch>
+   <revision>1.23.2</revision>
+   <branch>main</branch>
    <name></name>
-   <created>2023-07-20</created>
-   <file-release rdf:resource="https://gstreamer.freedesktop.org/src/gst-plugins-bad/gst-plugins-bad-1.22.5.tar.xz" />
+   <created>2024-02-15</created>
+   <file-release rdf:resource="https://gstreamer.freedesktop.org/src/gst-plugins-bad/gst-plugins-bad-1.23.2.tar.xz" />
   </Version>
  </release>
 
  <release>
   <Version>
-   <revision>1.22.4</revision>
-   <branch>1.22</branch>
+   <revision>1.23.1</revision>
+   <branch>main</branch>
    <name></name>
-   <created>2023-06-20</created>
-   <file-release rdf:resource="https://gstreamer.freedesktop.org/src/gst-plugins-bad/gst-plugins-bad-1.22.4.tar.xz" />
-  </Version>
- </release>
-
- <release>
-  <Version>
-   <revision>1.22.3</revision>
-   <branch>1.22</branch>
-   <name></name>
-   <created>2023-05-19</created>
-   <file-release rdf:resource="https://gstreamer.freedesktop.org/src/gst-plugins-bad/gst-plugins-bad-1.22.3.tar.xz" />
-  </Version>
- </release>
-
- <release>
-  <Version>
-   <revision>1.22.2</revision>
-   <branch>1.22</branch>
-   <name></name>
-   <created>2023-04-11</created>
-   <file-release rdf:resource="https://gstreamer.freedesktop.org/src/gst-plugins-bad/gst-plugins-bad-1.22.2.tar.xz" />
-  </Version>
- </release>
-
- <release>
-  <Version>
-   <revision>1.22.1</revision>
-   <branch>1.22</branch>
-   <name></name>
-   <created>2023-03-04</created>
-   <file-release rdf:resource="https://gstreamer.freedesktop.org/src/gst-plugins-bad/gst-plugins-bad-1.22.1.tar.xz" />
+   <created>2024-02-06</created>
+   <file-release rdf:resource="https://gstreamer.freedesktop.org/src/gst-plugins-bad/gst-plugins-bad-1.23.1.tar.xz" />
   </Version>
  </release>
 

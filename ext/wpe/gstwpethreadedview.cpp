@@ -186,7 +186,11 @@ initialize_web_extensions (WebKitWebContext *context)
     const gchar *local_path = gst_wpe_get_devenv_extension_path ();
     const gchar *path = g_file_test (local_path, G_FILE_TEST_IS_DIR) ? local_path : G_STRINGIFY (WPE_EXTENSION_INSTALL_DIR);
     GST_INFO ("Loading WebExtension from %s", path);
+#if USE_WPE2
+    webkit_web_context_set_web_process_extensions_directory (context, path);
+#else
     webkit_web_context_set_web_extensions_directory (context, path);
+#endif
 }
 
 static void
@@ -326,6 +330,14 @@ webkit_extension_msg_received (WebKitWebContext  *context,
         webkit_extension_gerror_msg_received (src, params);
     } else if (!g_strcmp0(name, "gstwpe.bus_message")) {
         webkit_extension_bus_message_received (src, params);
+    } else if (!g_strcmp0(name, "gstwpe.console_message")) {
+        const gchar *message = g_variant_get_string (g_variant_get_child_value (params, 0), NULL);
+        GstStructure *structure = gst_structure_new ("wpe-console-message",
+            "message", G_TYPE_STRING, message,
+            NULL);
+
+        gst_element_post_message(GST_ELEMENT(src), gst_message_new_custom(GST_MESSAGE_ELEMENT,
+            GST_OBJECT(src), structure));
     } else {
         res = FALSE;
         g_error("Unknown event: %s", name);
@@ -348,10 +360,14 @@ GstWPEThreadedView* GstWPEContextThread::createWPEView(GstWpeVideoSrc* src, GstG
     GstWPEThreadedView* view = nullptr;
     dispatch([&]() mutable {
         if (!glib.web_context) {
-            auto *manager = webkit_website_data_manager_new_ephemeral();
+#if USE_WPE2
+            glib.web_context = WEBKIT_WEB_CONTEXT(g_object_new(WEBKIT_TYPE_WEB_CONTEXT, nullptr));
+#else
+            auto *manager = webkit_website_data_manager_new(NULL);
             glib.web_context =
                 webkit_web_context_new_with_website_data_manager(manager);
             g_object_unref(manager);
+#endif
         }
         view = new GstWPEThreadedView(glib.web_context, src, context, display, width, height);
     });
@@ -385,7 +401,7 @@ static gboolean s_loadFailedWithTLSErrors(WebKitWebView*,  gchar* failing_uri, G
     return FALSE;
 }
 
-static void s_loadProgressChaned(GObject* object, GParamSpec*, gpointer data)
+static void s_loadProgressChanged(GObject* object, GParamSpec*, gpointer data)
 {
     GstElement* src = GST_ELEMENT_CAST (data);
     // The src element is locked already so we can't call
@@ -399,7 +415,26 @@ static void s_loadProgressChaned(GObject* object, GParamSpec*, gpointer data)
     gst_object_unref (bus);
 }
 
+static void s_webProcessCrashed(WebKitWebView*, WebKitWebProcessTerminationReason reason, gpointer data)
+{
+    auto &view = *static_cast<GstWPEThreadedView *>(data);
+    auto *src = view.src();
+    gchar *reason_str =
+        g_enum_to_string (WEBKIT_TYPE_WEB_PROCESS_TERMINATION_REASON, reason);
+
+    // In case the crash happened while doing the initial URL loading, unlock
+    // the load completion waiting.
+    view.notifyLoadFinished();
+
+    // TODO: Emit a signal here and fallback to error system if signal wasn't handled by application?
+
+    GST_ELEMENT_ERROR(GST_ELEMENT_CAST(src), RESOURCE, FAILED, (NULL), ("%s", reason_str));
+
+    g_free (reason_str);
+}
+
 GstWPEThreadedView::GstWPEThreadedView(WebKitWebContext* web_context, GstWpeVideoSrc* src, GstGLContext* context, GstGLDisplay* display, int width, int height)
+  : m_src(src)
 {
 #ifdef G_OS_UNIX
 {
@@ -407,7 +442,11 @@ GstWPEThreadedView::GstWPEThreadedView(WebKitWebContext* web_context, GstWpeVide
 
         if (parent && GST_IS_WPE_SRC (parent)) {
             audio.init_ext_sigid = g_signal_connect (web_context,
+#if USE_WPE2
+                              "initialize-web-process-extensions",
+#else
                               "initialize-web-extensions",
+#endif
                               G_CALLBACK (initialize_web_extensions),
                               NULL);
             audio.extension_msg_sigid = g_signal_connect (web_context,
@@ -473,7 +512,8 @@ GstWPEThreadedView::GstWPEThreadedView(WebKitWebContext* web_context, GstWpeVide
 
     g_signal_connect(webkit.view, "load-failed", G_CALLBACK(s_loadFailed), src);
     g_signal_connect(webkit.view, "load-failed-with-tls-errors", G_CALLBACK(s_loadFailedWithTLSErrors), src);
-    g_signal_connect(webkit.view, "notify::estimated-load-progress", G_CALLBACK(s_loadProgressChaned), src);
+    g_signal_connect(webkit.view, "notify::estimated-load-progress", G_CALLBACK(s_loadProgressChanged), src);
+    g_signal_connect(webkit.view, "web-process-terminated", G_CALLBACK(s_webProcessCrashed), this);
 
     auto* settings = webkit_web_view_get_settings(webkit.view);
     webkit_settings_set_enable_webaudio(settings, TRUE);
@@ -698,22 +738,32 @@ void GstWPEThreadedView::loadUri(const gchar* uri)
 
 static void s_runJavascriptFinished(GObject* object, GAsyncResult* result, gpointer user_data)
 {
-    WebKitJavascriptResult* js_result;
-    GError* error = NULL;
+    GError *error = NULL;
+#if USE_WPE2
+    g_autoptr(JSCValue) js_result = webkit_web_view_evaluate_javascript_finish(
+#else
+    g_autoptr(WebKitJavascriptResult) js_result = webkit_web_view_run_javascript_finish(
+#endif
+        WEBKIT_WEB_VIEW(object), result, &error);
 
-    js_result = webkit_web_view_run_javascript_finish(WEBKIT_WEB_VIEW(object), result, &error);
-    if (!js_result) {
+    // TODO: Pass result back to signal call site using a GstPromise?
+    (void) js_result;
+
+    if (error) {
         GST_WARNING("Error running javascript: %s", error->message);
         g_error_free(error);
-        return;
     }
-    webkit_javascript_result_unref(js_result);
 }
 
 void GstWPEThreadedView::runJavascript(const char* script)
 {
     s_view->dispatch([&]() {
+#if USE_WPE2
+        webkit_web_view_evaluate_javascript(webkit.view, script, -1, nullptr, nullptr, nullptr,
+                                            s_runJavascriptFinished, nullptr);
+#else
         webkit_web_view_run_javascript(webkit.view, script, nullptr, s_runJavascriptFinished, nullptr);
+#endif
     });
 }
 
@@ -749,7 +799,7 @@ struct ImageContext {
 
 void GstWPEThreadedView::handleExportedImage(gpointer image)
 {
-    ImageContext* imageContext = g_slice_new(ImageContext);
+    ImageContext* imageContext = g_new (ImageContext, 1);
     imageContext->view = this;
     imageContext->image = static_cast<gpointer>(image);
     EGLImageKHR eglImage = wpe_fdo_egl_exported_image_get_egl_image(static_cast<struct wpe_fdo_egl_exported_image*>(image));
@@ -785,7 +835,7 @@ void GstWPEThreadedView::s_releaseSHMBuffer(gpointer data)
 {
     SHMBufferContext* context = static_cast<SHMBufferContext*>(data);
     context->view->releaseSHMBuffer(data);
-    g_slice_free(SHMBufferContext, context);
+    g_free (context);
 }
 
 void GstWPEThreadedView::handleExportedBuffer(struct wpe_fdo_shm_exported_buffer* buffer)
@@ -803,7 +853,7 @@ void GstWPEThreadedView::handleExportedBuffer(struct wpe_fdo_shm_exported_buffer
     gsize size = width * height * 4;
     auto* data = static_cast<uint8_t*>(wl_shm_buffer_get_data(shmBuffer));
 
-    SHMBufferContext* bufferContext = g_slice_new(SHMBufferContext);
+    SHMBufferContext* bufferContext = g_new (SHMBufferContext, 1);
     bufferContext->view = this;
     bufferContext->buffer = buffer;
 
@@ -851,7 +901,7 @@ void GstWPEThreadedView::s_releaseImage(GstEGLImage* image, gpointer data)
 {
     ImageContext* context = static_cast<ImageContext*>(data);
     context->view->releaseImage(context->image);
-    g_slice_free(ImageContext, context);
+    g_free (context);
 }
 
 struct wpe_view_backend* GstWPEThreadedView::backend() const

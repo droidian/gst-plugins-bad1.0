@@ -1,6 +1,6 @@
 project('gst-plugins-bad', 'c', 'cpp',
-  version : '1.22.10',
-  meson_version : '>= 0.62',
+  version : '1.24.3',
+  meson_version : '>= 1.1',
   default_options : [ 'warning_level=1',
                       'buildtype=debugoptimized' ])
 
@@ -17,7 +17,7 @@ endif
 gst_version_is_stable = gst_version_minor.is_even()
 gst_version_is_dev = gst_version_minor.is_odd() and gst_version_micro < 90
 
-glib_req = '>= 2.62.0'
+glib_req = '>= 2.64.0'
 orc_req = '>= 0.4.17'
 
 if gst_version_is_stable
@@ -83,8 +83,6 @@ if cc.get_id() == 'msvc'
       '/we4053', # one void operand for '?:'
       '/we4062', # enumerator 'identifier' in switch of enum 'enumeration' is not handled
       '/we4098', # 'function' : void function returning a value
-      '/we4101', # 'identifier' : unreferenced local variable
-      '/we4189', # 'identifier' : local variable is initialized but not referenced
     ])
   endif
   add_project_arguments(msvc_args, language: ['c', 'cpp'])
@@ -478,11 +476,6 @@ else
 endif
 cdata.set('GST_ENABLE_EXTRA_CHECKS', not get_option('extra-checks').disabled())
 
-gnustl_dep = declare_dependency()
-if host_system == 'android'
-  gnustl_dep = dependency('gnustl', required : false)
-endif
-
 # Disable compiler warnings for unused variables and args if gst debug system is disabled
 if gst_dep.type_name() == 'internal'
   gst_debug_disabled = not subproject('gstreamer').get_variable('gst_debug')
@@ -494,13 +487,28 @@ endif
 
 if gst_debug_disabled
   message('GStreamer debug system is disabled')
-  if cc.has_argument('-Wno-unused')
-    add_project_arguments('-Wno-unused', language: 'c')
-  endif
-  if cxx.has_argument ('-Wno-unused')
-    add_project_arguments('-Wno-unused', language: 'cpp')
+  if cc.get_argument_syntax() == 'msvc'
+    msvc_args = cc.get_supported_arguments([
+      '/wd4101', # 'identifier' : unreferenced local variable
+      '/wd4189', # 'identifier' : local variable is initialized but not referenced
+    ])
+    add_project_arguments(msvc_args, language: ['c', 'cpp'])
+  else
+    if cc.has_argument('-Wno-unused')
+      add_project_arguments('-Wno-unused', language: 'c')
+    endif
+    if cxx.has_argument ('-Wno-unused')
+      add_project_arguments('-Wno-unused', language: 'cpp')
+    endif
   endif
 else
+  if cc.get_argument_syntax() == 'msvc' and gst_version_is_dev
+    msvc_args = cc.get_supported_arguments([
+      '/we4101', # 'identifier' : unreferenced local variable
+      '/we4189', # 'identifier' : local variable is initialized but not referenced
+    ])
+    add_project_arguments(msvc_args, language: ['c', 'cpp'])
+  endif
   message('GStreamer debug system is enabled')
 endif
 
@@ -600,7 +608,7 @@ endif
 
 configure_file(output : 'config.h', configuration : cdata)
 
-meson.add_dist_script('scripts/gen-changelog.py', meson.project_name(), '1.20.0', meson.project_version())
+meson.add_dist_script('scripts/gen-changelog.py', meson.project_name(), '1.22.0', meson.project_version())
 
 subdir('docs')
 

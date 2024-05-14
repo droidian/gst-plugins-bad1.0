@@ -538,11 +538,15 @@ get_utc_from_offset (GstRtpOnvifTimestamp * self, GstBuffer * buf)
   guint64 time = GST_CLOCK_TIME_NONE;
 
   if (GST_BUFFER_PTS_IS_VALID (buf)) {
-    time = gst_segment_to_stream_time (&self->segment, GST_FORMAT_TIME,
-        GST_BUFFER_PTS (buf));
+    if (gst_segment_to_stream_time_full (&self->segment, GST_FORMAT_TIME,
+            GST_BUFFER_PTS (buf), &time) < 0) {
+      time = GST_CLOCK_TIME_NONE;
+    }
   } else if (GST_BUFFER_DTS_IS_VALID (buf)) {
-    time = gst_segment_to_stream_time (&self->segment, GST_FORMAT_TIME,
-        GST_BUFFER_DTS (buf));
+    if (gst_segment_to_stream_time_full (&self->segment, GST_FORMAT_TIME,
+            GST_BUFFER_DTS (buf), &time) < 0) {
+      time = GST_CLOCK_TIME_NONE;
+    }
   } else {
     g_assert_not_reached ();
   }
@@ -556,7 +560,7 @@ get_utc_from_offset (GstRtpOnvifTimestamp * self, GstBuffer * buf)
 }
 
 static gboolean
-handle_buffer (GstRtpOnvifTimestamp * self, GstBuffer * buf)
+handle_buffer (GstRtpOnvifTimestamp * self, GstBuffer * buf, gboolean last)
 {
   GstRTPBuffer rtp = GST_RTP_BUFFER_INIT;
   guint8 *data;
@@ -665,7 +669,7 @@ handle_buffer (GstRtpOnvifTimestamp * self, GstBuffer * buf)
   }
 
   /* Set E if this the last buffer of a contiguous section of recording */
-  if (self->set_e_bit) {
+  if (last && self->set_e_bit) {
     GST_DEBUG_OBJECT (self, "set E flag");
     field |= (1 << 6);
     self->set_e_bit = FALSE;
@@ -679,7 +683,7 @@ handle_buffer (GstRtpOnvifTimestamp * self, GstBuffer * buf)
   }
 
   /* Set T if we have received EOS */
-  if (self->set_t_bit) {
+  if (last && self->set_t_bit) {
     GST_DEBUG_OBJECT (self, "set T flag");
     field |= (1 << 4);
     self->set_t_bit = FALSE;
@@ -701,7 +705,7 @@ done:
 static GstFlowReturn
 handle_and_push_buffer (GstRtpOnvifTimestamp * self, GstBuffer * buf)
 {
-  if (!handle_buffer (self, buf)) {
+  if (!handle_buffer (self, buf, TRUE)) {
     gst_buffer_unref (buf);
     return GST_FLOW_ERROR;
   }
@@ -732,13 +736,15 @@ gst_rtp_onvif_timestamp_chain (GstPad * pad, GstObject * parent,
 static gboolean
 do_handle_buffer (GstBuffer ** buffer, guint idx, GstRtpOnvifTimestamp * self)
 {
-  return handle_buffer (self, *buffer);
+  return handle_buffer (self, *buffer, idx + 1 == self->current_list_size);
 }
 
 /* @buf: (transfer full) */
 static GstFlowReturn
 handle_and_push_buffer_list (GstRtpOnvifTimestamp * self, GstBufferList * list)
 {
+  self->current_list_size = gst_buffer_list_length (list);
+
   if (!gst_buffer_list_foreach (list, (GstBufferListFunc) do_handle_buffer,
           self)) {
     gst_buffer_list_unref (list);

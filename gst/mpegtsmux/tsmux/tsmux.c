@@ -113,13 +113,14 @@ static void
 tsmux_section_free (TsMuxSection * section)
 {
   gst_mpegts_section_unref (section->section);
-  g_slice_free (TsMuxSection, section);
+  g_free (section);
 }
 
 static TsMuxStream *
-tsmux_new_stream_default (guint16 pid, guint stream_type, gpointer user_data)
+tsmux_new_stream_default (guint16 pid, guint stream_type, guint stream_number,
+    gpointer user_data)
 {
-  return tsmux_stream_new (pid, stream_type);
+  return tsmux_stream_new (pid, stream_type, stream_number);
 }
 
 /**
@@ -134,7 +135,7 @@ tsmux_new (void)
 {
   TsMux *mux;
 
-  mux = g_slice_new0 (TsMux);
+  mux = g_new0 (TsMux, 1);
 
   mux->transport_id = TSMUX_DEFAULT_TS_ID;
 
@@ -350,7 +351,7 @@ tsmux_add_mpegts_si_section (TsMux * mux, GstMpegtsSection * section)
   g_return_val_if_fail (section != NULL, FALSE);
   g_return_val_if_fail (mux->si_sections != NULL, FALSE);
 
-  tsmux_section = g_slice_new0 (TsMuxSection);
+  tsmux_section = g_new0 (TsMuxSection, 1);
 
   GST_DEBUG ("Adding mpegts section with type %d to mux",
       section->section_type);
@@ -404,7 +405,7 @@ tsmux_free (TsMux * mux)
   /* Free SI table sections */
   g_hash_table_unref (mux->si_sections);
 
-  g_slice_free (TsMux, mux);
+  g_free (mux);
 }
 
 static gint
@@ -433,12 +434,13 @@ tsmux_program_new (TsMux * mux, gint prog_id)
   if (mux->nb_programs == TSMUX_MAX_PROGRAMS)
     return NULL;
 
-  program = g_slice_new0 (TsMuxProgram);
+  program = g_new0 (TsMuxProgram, 1);
 
   program->pmt_changed = TRUE;
   program->pmt_interval = TSMUX_DEFAULT_PMT_INTERVAL;
 
   program->next_pmt_pcr = -1;
+  program->next_pcr = -1;
 
   if (prog_id == 0) {
     program->pgm_number = mux->next_pgm_no++;
@@ -456,6 +458,7 @@ tsmux_program_new (TsMux * mux, gint prog_id)
 
   program->pmt_pid = mux->next_pmt_pid++;
   program->pcr_stream = NULL;
+  program->pcr_pid = 0;
 
   /* SCTE35 is disabled by default */
   program->scte35_pid = 0;
@@ -582,7 +585,7 @@ tsmux_program_set_scte35_pid (TsMuxProgram * program, guint16 pid)
     program->scte35_null_section = NULL;
   }
   if (pid != 0) {
-    program->scte35_null_section = section = g_slice_new0 (TsMuxSection);
+    program->scte35_null_section = section = g_new0 (TsMuxSection, 1);
     section->pi.pid = pid;
     sit = gst_mpegts_scte_null_new ();
     section->section = gst_mpegts_section_from_scte_sit (sit, pid);
@@ -674,12 +677,30 @@ tsmux_program_set_pcr_stream (TsMuxProgram * program, TsMuxStream * stream)
   if (program->pcr_stream == stream)
     return;
 
+  program->pcr_pid = 0;
   if (program->pcr_stream != NULL)
     tsmux_stream_pcr_unref (program->pcr_stream);
   if (stream)
     tsmux_stream_pcr_ref (stream);
   program->pcr_stream = stream;
 
+  program->pmt_changed = TRUE;
+}
+
+/**
+ * tsmux_program_set_pcr_pid:
+ * @program: a #TsMuxProgram
+ * @pid: a PID
+ *
+ * Set @pid as the PCR PID for @program, overwriting the previously
+ * configured PCR PID. When pid == 0, program will have no PCR PID configured.
+ */
+void
+tsmux_program_set_pcr_pid (TsMuxProgram * program, guint16 pid)
+{
+  g_return_if_fail (program != NULL);
+
+  program->pcr_pid = pid;
   program->pmt_changed = TRUE;
 }
 
@@ -709,9 +730,10 @@ tsmux_get_new_pid (TsMux * mux)
  * tsmux_create_stream:
  * @mux: a #TsMux
  * @stream_type: the stream type
+ * @stream_number: stream number
  * @pid: the PID of the new stream.
  *
- * Create a new stream of @stream_type in the muxer session @mux.
+ * Create a new stream of @stream_type with @stream_number in the muxer session @mux.
  *
  * When @pid is set to #TSMUX_PID_AUTO, a new free PID will automatically
  * be allocated for the new stream.
@@ -719,8 +741,8 @@ tsmux_get_new_pid (TsMux * mux)
  * Returns: a new #TsMuxStream.
  */
 TsMuxStream *
-tsmux_create_stream (TsMux * mux, guint stream_type, guint16 pid,
-    gchar * language)
+tsmux_create_stream (TsMux * mux, guint stream_type, guint stream_number,
+    guint16 pid, gchar * language, guint bitrate, guint max_bitrate)
 {
   TsMuxStream *stream;
   guint16 new_pid;
@@ -738,7 +760,9 @@ tsmux_create_stream (TsMux * mux, guint stream_type, guint16 pid,
   if (tsmux_find_stream (mux, new_pid))
     return NULL;
 
-  stream = mux->new_stream_func (new_pid, stream_type, mux->new_stream_data);
+  stream =
+      mux->new_stream_func (new_pid, stream_type, stream_number,
+      mux->new_stream_data);
 
   mux->streams = g_list_prepend (mux->streams, stream);
   mux->nb_streams++;
@@ -749,6 +773,10 @@ tsmux_create_stream (TsMux * mux, guint stream_type, guint16 pid,
   } else {
     stream->language[0] = 0;
   }
+
+  stream->max_bitrate = max_bitrate;
+  /* ignored if it's not audio */
+  stream->audio_bitrate = bitrate;
 
   return stream;
 }
@@ -1544,6 +1572,25 @@ done:
   return ret;
 }
 
+static gint64
+write_new_prog_pcr (TsMux * mux, TsMuxProgram * prog, gint64 cur_pcr)
+{
+  if (prog->next_pcr == -1 || cur_pcr > prog->next_pcr) {
+    prog->pi.flags |=
+        TSMUX_PACKET_FLAG_ADAPTATION | TSMUX_PACKET_FLAG_WRITE_PCR;
+    prog->pi.pcr = cur_pcr;
+
+    if (prog->next_pcr == -1)
+      prog->next_pcr = cur_pcr + mux->pcr_interval * 300;
+    else
+      prog->next_pcr += mux->pcr_interval * 300;
+  } else {
+    cur_pcr = -1;
+  }
+
+  return cur_pcr;
+}
+
 /**
  * tsmux_write_stream_packet:
  * @mux: a #TsMux
@@ -1566,7 +1613,7 @@ tsmux_write_stream_packet (TsMux * mux, TsMuxStream * stream)
   g_return_val_if_fail (mux != NULL, FALSE);
   g_return_val_if_fail (stream != NULL, FALSE);
 
-  if (tsmux_stream_is_pcr (stream)) {
+  if (tsmux_stream_is_pcr (stream) || stream->program->pcr_pid) {
     gint64 cur_ts = CLOCK_BASE;
     if (tsmux_stream_get_dts (stream) != G_MININT64)
       cur_ts += tsmux_stream_get_dts (stream);
@@ -1582,6 +1629,29 @@ tsmux_write_stream_packet (TsMux * mux, TsMuxStream * stream)
     new_pcr =
         write_new_pcr (mux, stream, get_current_pcr (mux, cur_ts),
         get_next_pcr (mux, cur_ts));
+
+    if (stream->program->pcr_pid) {
+      /* this should only enter block when time to send a PCR packet */
+      new_pcr = write_new_prog_pcr (mux, stream->program, get_current_pcr (mux,
+              cur_ts));
+      if (new_pcr != -1) {
+        if (!tsmux_get_buffer (mux, &buf))
+          return FALSE;
+
+        if (!gst_buffer_map (buf, &map, GST_MAP_WRITE))
+          goto fail_unmapped;
+
+        if (!tsmux_write_ts_header (mux, map.data, &stream->program->pi, 0,
+                NULL, NULL))
+          goto fail;
+
+        gst_buffer_unmap (buf, &map);
+        stream->program->pi.pid = stream->program->pcr_pid;
+        stream->program->pi.flags &= TSMUX_PACKET_FLAG_PES_FULL_HEADER;
+        if (!tsmux_packet_out (mux, buf, new_pcr))
+          return FALSE;
+      }
+    }
   }
 
   pi->packet_start_unit_indicator = tsmux_stream_at_pes_start (stream);
@@ -1627,6 +1697,9 @@ fail:
     }
     return FALSE;
   }
+fail_unmapped:
+  gst_clear_buffer (&buf);
+  return FALSE;
 }
 
 /**
@@ -1648,7 +1721,7 @@ tsmux_program_free (TsMuxProgram * program)
     tsmux_section_free (program->scte35_null_section);
 
   g_ptr_array_free (program->streams, TRUE);
-  g_slice_free (TsMuxProgram, program);
+  g_free (program);
 }
 
 /**
@@ -1659,7 +1732,10 @@ tsmux_program_free (TsMuxProgram * program)
 void
 tsmux_program_set_pmt_pid (TsMuxProgram * program, guint16 pmt_pid)
 {
+  g_return_if_fail (program != NULL);
+
   program->pmt_pid = pmt_pid;
+  program->pmt_changed = TRUE;
 }
 
 static gint
@@ -1751,8 +1827,10 @@ tsmux_write_pmt (TsMux * mux, TsMuxProgram * program)
 
     pmt = gst_mpegts_pmt_new ();
 
-    if (program->pcr_stream == NULL)
+    if ((program->pcr_stream == NULL) && (program->pcr_pid == 0))
       pmt->pcr_pid = 0x1FFF;
+    else if (program->pcr_pid != 0)
+      pmt->pcr_pid = program->pcr_pid;
     else
       pmt->pcr_pid = tsmux_stream_get_pid (program->pcr_stream);
 

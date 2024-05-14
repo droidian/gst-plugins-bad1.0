@@ -66,6 +66,7 @@
 #include "gstvaencoder.h"
 #include "gstvaprofile.h"
 #include "vacompat.h"
+#include "gstvapluginutils.h"
 
 GST_DEBUG_CATEGORY_STATIC (gst_va_h264enc_debug);
 #define GST_CAT_DEFAULT gst_va_h264enc_debug
@@ -99,10 +100,10 @@ enum
   PROP_BITRATE,
   PROP_TARGET_PERCENTAGE,
   PROP_TARGET_USAGE,
-  PROP_RATE_CONTROL,
   PROP_CPB_SIZE,
   PROP_AUD,
   PROP_CC,
+  PROP_RATE_CONTROL,
   N_PROPERTIES
 };
 
@@ -254,6 +255,7 @@ struct _GstVaH264Enc
     guint cpb_length_bits;
   } rc;
 
+  GstClockTime last_dts;
   GstH264SPS sequence_hdr;
 };
 
@@ -274,10 +276,8 @@ struct _GstVaH264EncFrame
    * explicitly. */
   gint unused_for_reference_pic_num;
 
-  /* The total frame count we handled. */
-  guint total_frame_count;
-
   gboolean last_frame;
+  gboolean reorder;
 };
 
 /**
@@ -309,26 +309,26 @@ struct _GstVaH264LevelLimits
 /* *INDENT-OFF* */
 static const GstVaH264LevelLimits _va_h264_level_limits[] = {
   /* level   idc   MaxMBPS   MaxFS   MaxDpbMbs  MaxBR   MaxCPB  MinCr */
-  {  "1",    10,   1485,     99,     396,       64,     175,    2 },
-  {  "1b",   11,   1485,     99,     396,       128,    350,    2 },
-  {  "1.1",  11,   3000,     396,    900,       192,    500,    2 },
-  {  "1.2",  12,   6000,     396,    2376,      384,    1000,   2 },
-  {  "1.3",  13,   11880,    396,    2376,      768,    2000,   2 },
-  {  "2",    20,   11880,    396,    2376,      2000,   2000,   2 },
-  {  "2.1",  21,   19800,    792,    4752,      4000,   4000,   2 },
-  {  "2.2",  22,   20250,    1620,   8100,      4000,   4000,   2 },
-  {  "3",    30,   40500,    1620,   8100,      10000,  10000,  2 },
-  {  "3.1",  31,   108000,   3600,   18000,     14000,  14000,  4 },
-  {  "3.2",  32,   216000,   5120,   20480,     20000,  20000,  4 },
-  {  "4",    40,   245760,   8192,   32768,     20000,  25000,  4 },
-  {  "4.1",  41,   245760,   8192,   32768,     50000,  62500,  2 },
-  {  "4.2",  42,   522240,   8704,   34816,     50000,  62500,  2 },
-  {  "5",    50,   589824,   22080,  110400,    135000, 135000, 2 },
-  {  "5.1",  51,   983040,   36864,  184320,    240000, 240000, 2 },
-  {  "5.2",  52,   2073600,  36864,  184320,    240000, 240000, 2 },
-  {  "6",    60,   4177920,  139264, 696320,    240000, 240000, 2 },
-  {  "6.1",  61,   8355840,  139264, 696320,    480000, 480000, 2 },
-  {  "6.2",  62,  16711680,  139264, 696320,    800000, 800000, 2 },
+  {  "1",    GST_H264_LEVEL_L1,   1485,     99,     396,       64,     175,    2 },
+  {  "1b",   GST_H264_LEVEL_L1B,   1485,     99,     396,       128,    350,    2 },
+  {  "1.1",  GST_H264_LEVEL_L1_1,   3000,     396,    900,       192,    500,    2 },
+  {  "1.2",  GST_H264_LEVEL_L1_2,   6000,     396,    2376,      384,    1000,   2 },
+  {  "1.3",  GST_H264_LEVEL_L1_3,   11880,    396,    2376,      768,    2000,   2 },
+  {  "2",    GST_H264_LEVEL_L2,   11880,    396,    2376,      2000,   2000,   2 },
+  {  "2.1",  GST_H264_LEVEL_L2_1,   19800,    792,    4752,      4000,   4000,   2 },
+  {  "2.2",  GST_H264_LEVEL_L2_2,   20250,    1620,   8100,      4000,   4000,   2 },
+  {  "3",    GST_H264_LEVEL_L3,   40500,    1620,   8100,      10000,  10000,  2 },
+  {  "3.1",  GST_H264_LEVEL_L3_1,   108000,   3600,   18000,     14000,  14000,  4 },
+  {  "3.2",  GST_H264_LEVEL_L3_2,   216000,   5120,   20480,     20000,  20000,  4 },
+  {  "4",    GST_H264_LEVEL_L4,   245760,   8192,   32768,     20000,  25000,  4 },
+  {  "4.1",  GST_H264_LEVEL_L4_1,   245760,   8192,   32768,     50000,  62500,  2 },
+  {  "4.2",  GST_H264_LEVEL_L4_2,   522240,   8704,   34816,     50000,  62500,  2 },
+  {  "5",    GST_H264_LEVEL_L5,   589824,   22080,  110400,    135000, 135000, 2 },
+  {  "5.1",  GST_H264_LEVEL_L5_1,   983040,   36864,  184320,    240000, 240000, 2 },
+  {  "5.2",  GST_H264_LEVEL_L5_2,   2073600,  36864,  184320,    240000, 240000, 2 },
+  {  "6",    GST_H264_LEVEL_L6,   4177920,  139264, 696320,    240000, 240000, 2 },
+  {  "6.1",  GST_H264_LEVEL_L6_1,   8355840,  139264, 696320,    480000, 480000, 2 },
+  {  "6.2",  GST_H264_LEVEL_L6_2,  16711680,  139264, 696320,    800000, 800000, 2 },
 };
 /* *INDENT-ON* */
 
@@ -375,12 +375,12 @@ gst_va_enc_frame_new (void)
 {
   GstVaH264EncFrame *frame;
 
-  frame = g_slice_new (GstVaH264EncFrame);
+  frame = g_new (GstVaH264EncFrame, 1);
   frame->frame_num = 0;
   frame->unused_for_reference_pic_num = -1;
   frame->picture = NULL;
-  frame->total_frame_count = 0;
   frame->last_frame = FALSE;
+  frame->reorder = FALSE;
 
   return frame;
 }
@@ -390,7 +390,7 @@ gst_va_enc_frame_free (gpointer pframe)
 {
   GstVaH264EncFrame *frame = pframe;
   g_clear_pointer (&frame->picture, gst_va_encode_picture_free);
-  g_slice_free (GstVaH264EncFrame, frame);
+  g_free (frame);
 }
 
 static inline GstVaH264EncFrame *
@@ -600,8 +600,8 @@ _ensure_rate_control (GstVaH264Enc * self)
 
     factor = (guint64) self->mb_width * self->mb_height * bits_per_mb;
     bitrate = gst_util_uint64_scale (factor,
-        GST_VIDEO_INFO_FPS_N (&base->input_state->info),
-        GST_VIDEO_INFO_FPS_D (&base->input_state->info)) / 1000;
+        GST_VIDEO_INFO_FPS_N (&base->in_info),
+        GST_VIDEO_INFO_FPS_D (&base->in_info)) / 1000;
     GST_INFO_OBJECT (self, "target bitrate computed to %u kbps", bitrate);
   }
 
@@ -703,8 +703,8 @@ _calculate_level (GstVaH264Enc * self)
   PicSizeMbs = self->mb_width * self->mb_height;
   MaxDpbMbs = PicSizeMbs * (self->gop.num_ref_frames + 1);
   MaxMBPS = gst_util_uint64_scale_int_ceil (PicSizeMbs,
-      GST_VIDEO_INFO_FPS_N (&base->input_state->info),
-      GST_VIDEO_INFO_FPS_D (&base->input_state->info));
+      GST_VIDEO_INFO_FPS_N (&base->in_info),
+      GST_VIDEO_INFO_FPS_D (&base->in_info));
 
   for (i = 0; i < G_N_ELEMENTS (_va_h264_level_limits); i++) {
     const GstVaH264LevelLimits *const limits = &_va_h264_level_limits[i];
@@ -948,9 +948,9 @@ _generate_gop_structure (GstVaH264Enc * self)
 
   /* If not set, generate a idr every second */
   if (self->gop.idr_period == 0) {
-    self->gop.idr_period = (GST_VIDEO_INFO_FPS_N (&base->input_state->info)
-        + GST_VIDEO_INFO_FPS_D (&base->input_state->info) - 1) /
-        GST_VIDEO_INFO_FPS_D (&base->input_state->info);
+    self->gop.idr_period = (GST_VIDEO_INFO_FPS_N (&base->in_info)
+        + GST_VIDEO_INFO_FPS_D (&base->in_info) - 1) /
+        GST_VIDEO_INFO_FPS_D (&base->in_info);
   }
 
   /* Do not use a too huge GOP size. */
@@ -1345,7 +1345,7 @@ _decide_profile (GstVaH264Enc * self, VAProfile * _profile, guint * _rt_format)
     goto out;
   }
 
-  in_format = GST_VIDEO_INFO_FORMAT (&base->input_state->info);
+  in_format = GST_VIDEO_INFO_FORMAT (&base->in_info);
   rt_format = _get_rtformat (self, in_format);
   if (!rt_format) {
     GST_ERROR_OBJECT (self, "unsupported video format %s",
@@ -1521,12 +1521,14 @@ gst_va_h264_enc_reset_state (GstVaBaseEnc * base)
   self->rc.target_bitrate_bits = 0;
   self->rc.cpb_length_bits = 0;
 
+  self->last_dts = GST_CLOCK_TIME_NONE;
   memset (&self->sequence_hdr, 0, sizeof (GstH264SPS));
 }
 
 static gboolean
 gst_va_h264_enc_reconfig (GstVaBaseEnc * base)
 {
+  GstVaBaseEncClass *klass = GST_VA_BASE_ENC_GET_CLASS (base);
   GstVideoEncoder *venc = GST_VIDEO_ENCODER (base);
   GstVaH264Enc *self = GST_VA_H264_ENC (base);
   GstCaps *out_caps, *reconf_caps = NULL;
@@ -1537,9 +1539,9 @@ gst_va_h264_enc_reconfig (GstVaBaseEnc * base)
   guint max_ref_frames, max_surfaces = 0, rt_format = 0, codedbuf_size;
   gint width, height;
 
-  width = GST_VIDEO_INFO_WIDTH (&base->input_state->info);
-  height = GST_VIDEO_INFO_HEIGHT (&base->input_state->info);
-  format = GST_VIDEO_INFO_FORMAT (&base->input_state->info);
+  width = GST_VIDEO_INFO_WIDTH (&base->in_info);
+  height = GST_VIDEO_INFO_HEIGHT (&base->in_info);
+  format = GST_VIDEO_INFO_FORMAT (&base->in_info);
   codedbuf_size = base->codedbuf_size;
 
   need_negotiation =
@@ -1574,15 +1576,15 @@ gst_va_h264_enc_reconfig (GstVaBaseEnc * base)
   self->mb_height = GST_ROUND_UP_16 (base->height) / 16;
 
   /* Frame rate is needed for rate control and PTS setting. */
-  if (GST_VIDEO_INFO_FPS_N (&base->input_state->info) == 0
-      || GST_VIDEO_INFO_FPS_D (&base->input_state->info) == 0) {
+  if (GST_VIDEO_INFO_FPS_N (&base->in_info) == 0
+      || GST_VIDEO_INFO_FPS_D (&base->in_info) == 0) {
     GST_INFO_OBJECT (self, "Unknown framerate, just set to 30 fps");
-    GST_VIDEO_INFO_FPS_N (&base->input_state->info) = 30;
-    GST_VIDEO_INFO_FPS_D (&base->input_state->info) = 1;
+    GST_VIDEO_INFO_FPS_N (&base->in_info) = 30;
+    GST_VIDEO_INFO_FPS_D (&base->in_info) = 1;
   }
   base->frame_duration = gst_util_uint64_scale (GST_SECOND,
-      GST_VIDEO_INFO_FPS_D (&base->input_state->info),
-      GST_VIDEO_INFO_FPS_N (&base->input_state->info));
+      GST_VIDEO_INFO_FPS_D (&base->in_info),
+      GST_VIDEO_INFO_FPS_N (&base->in_info));
 
   GST_DEBUG_OBJECT (self, "resolution:%dx%d, MB size: %dx%d,"
       " frame duration is %" GST_TIME_FORMAT,
@@ -1637,7 +1639,7 @@ gst_va_h264_enc_reconfig (GstVaBaseEnc * base)
   /* Add some tags */
   gst_va_base_enc_add_codec_tag (base, "H264");
 
-  out_caps = gst_va_profile_caps (base->profile);
+  out_caps = gst_va_profile_caps (base->profile, klass->entrypoint);
   g_assert (out_caps);
   out_caps = gst_caps_fixate (out_caps);
 
@@ -1850,6 +1852,9 @@ again:
     /* it will unref at pop_frame */
     f = g_queue_pop_nth (&base->reorder_list, index);
     g_assert (f == b_frame);
+
+    if (index > 0)
+      _enc_frame (f)->reorder = TRUE;
   } else {
     b_frame = NULL;
   }
@@ -1878,6 +1883,9 @@ _pop_one_frame (GstVaBaseEnc * base, GstVideoCodecFrame ** out_frame)
   vaframe = _enc_frame (frame);
   if (vaframe->type != GST_H264_B_SLICE) {
     frame = g_queue_pop_tail (&base->reorder_list);
+    if (!g_queue_is_empty (&base->reorder_list))
+      vaframe->reorder = TRUE;
+
     goto get_one;
   }
 
@@ -2179,10 +2187,10 @@ _fill_sequence_param (GstVaH264Enc * self,
     },
     .aspect_ratio_idc = 0xff,
     /* FIXME: what if no framerate info is provided */
-    .sar_width = GST_VIDEO_INFO_PAR_N (&base->input_state->info),
-    .sar_height = GST_VIDEO_INFO_PAR_D (&base->input_state->info),
-    .num_units_in_tick = GST_VIDEO_INFO_FPS_D (&base->input_state->info),
-    .time_scale = GST_VIDEO_INFO_FPS_N (&base->input_state->info) * 2,
+    .sar_width = GST_VIDEO_INFO_PAR_N (&base->in_info),
+    .sar_height = GST_VIDEO_INFO_PAR_D (&base->in_info),
+    .num_units_in_tick = GST_VIDEO_INFO_FPS_D (&base->in_info),
+    .time_scale = GST_VIDEO_INFO_FPS_N (&base->in_info) * 2,
   };
   /* *INDENT-ON* */
 
@@ -3036,22 +3044,55 @@ gst_va_h264_enc_flush (GstVideoEncoder * venc)
   return GST_VIDEO_ENCODER_CLASS (parent_class)->flush (venc);
 }
 
-static void
-gst_va_h264_enc_prepare_output (GstVaBaseEnc * base, GstVideoCodecFrame * frame)
+static gboolean
+gst_va_h264_enc_prepare_output (GstVaBaseEnc * base,
+    GstVideoCodecFrame * frame, gboolean * complete)
 {
   GstVaH264Enc *self = GST_VA_H264_ENC (base);
   GstVaH264EncFrame *frame_enc;
+  GstBuffer *buf;
 
   frame_enc = _enc_frame (frame);
 
-  frame->pts =
-      base->start_pts + base->frame_duration * frame_enc->total_frame_count;
-  /* The PTS should always be later than the DTS. */
-  frame->dts = base->start_pts + base->frame_duration *
-      ((gint64) base->output_frame_count -
-      (gint64) self->gop.num_reorder_frames);
-  base->output_frame_count++;
-  frame->duration = base->frame_duration;
+  if (frame_enc->reorder) {
+    if (!GST_CLOCK_TIME_IS_VALID (self->last_dts)) {
+      GST_WARNING_OBJECT (base, "Reorder frame poc: %d, system frame "
+          "number: %d without previous valid DTS.", frame_enc->poc,
+          frame->system_frame_number);
+      frame->dts = frame->pts;
+    } else {
+      GST_LOG_OBJECT (base, "Set reorder frame poc: %d, system frame "
+          "number: %d with DTS: %" GST_TIME_FORMAT, frame_enc->poc,
+          frame->system_frame_number, GST_TIME_ARGS (self->last_dts));
+      frame->dts = self->last_dts;
+    }
+  } else {
+    frame->dts = frame->pts;
+    self->last_dts = frame->dts;
+  }
+
+  buf = gst_va_base_enc_create_output_buffer (base,
+      frame_enc->picture, NULL, 0);
+  if (!buf) {
+    GST_ERROR_OBJECT (base, "Failed to create output buffer");
+    return FALSE;
+  }
+
+  GST_BUFFER_FLAG_SET (buf, GST_BUFFER_FLAG_MARKER);
+  if (frame_enc->poc == 0) {
+    GST_VIDEO_CODEC_FRAME_SET_SYNC_POINT (frame);
+    GST_BUFFER_FLAG_UNSET (buf, GST_BUFFER_FLAG_DELTA_UNIT);
+    GST_BUFFER_FLAG_SET (buf, GST_BUFFER_FLAG_HEADER);
+  } else {
+    GST_VIDEO_CODEC_FRAME_UNSET_SYNC_POINT (frame);
+    GST_BUFFER_FLAG_SET (buf, GST_BUFFER_FLAG_DELTA_UNIT);
+  }
+
+  gst_buffer_replace (&frame->output_buffer, buf);
+  gst_clear_buffer (&buf);
+
+  *complete = TRUE;
+  return TRUE;
 }
 
 static gint
@@ -3181,7 +3222,6 @@ gst_va_h264_enc_new_frame (GstVaBaseEnc * base, GstVideoCodecFrame * frame)
   GstVaH264EncFrame *frame_in;
 
   frame_in = gst_va_enc_frame_new ();
-  frame_in->total_frame_count = base->input_frame_count++;
   gst_video_codec_frame_set_user_data (frame, frame_in, gst_va_enc_frame_free);
 
   return TRUE;
@@ -3531,8 +3571,7 @@ gst_va_h264_enc_class_init (gpointer g_klass, gpointer class_data)
       GST_DEBUG_FUNCPTR (gst_va_h264_enc_prepare_output);
 
   {
-    display =
-        gst_va_display_drm_new_from_path (va_enc_class->render_device_path);
+    display = gst_va_display_platform_new (va_enc_class->render_device_path);
     encoder = gst_va_encoder_new (display, va_enc_class->codec,
         va_enc_class->entrypoint);
     if (gst_va_encoder_get_rate_control_enum (encoder,
@@ -3840,30 +3879,14 @@ gst_va_h264_enc_register (GstPlugin * plugin, GstVaDevice * device,
 
   type_info.class_data = cdata;
 
-  /* The first encoder to be registered should use a constant name,
-   * like vah264enc, for any additional encoders, we create unique
-   * names, using inserting the render device name. */
-  if (device->index == 0) {
-    if (entrypoint == VAEntrypointEncSlice) {
-      type_name = g_strdup ("GstVaH264Enc");
-      feature_name = g_strdup ("vah264enc");
-    } else {
-      type_name = g_strdup ("GstVaH264LPEnc");
-      feature_name = g_strdup ("vah264lpenc");
-    }
+  if (entrypoint == VAEntrypointEncSlice) {
+    gst_va_create_feature_name (device, "GstVaH264Enc", "GstVa%sH264Enc",
+        &type_name, "vah264enc", "va%sh264enc", &feature_name,
+        &cdata->description, &rank);
   } else {
-    gchar *basename = g_path_get_basename (device->render_device_path);
-    if (entrypoint == VAEntrypointEncSlice) {
-      type_name = g_strdup_printf ("GstVa%sH264Enc", basename);
-      feature_name = g_strdup_printf ("va%sh264enc", basename);
-    } else {
-      type_name = g_strdup_printf ("GstVa%sH264LPEnc", basename);
-      feature_name = g_strdup_printf ("va%sh264lpenc", basename);
-    }
-    cdata->description = basename;
-    /* lower rank for non-first device */
-    if (rank > 0)
-      rank--;
+    gst_va_create_feature_name (device, "GstVaH264LPEnc", "GstVa%sH264LPEnc",
+        &type_name, "vah264lpenc", "va%sh264lpenc", &feature_name,
+        &cdata->description, &rank);
   }
 
   g_once (&debug_once, _register_debug_category, NULL);

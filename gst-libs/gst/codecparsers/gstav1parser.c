@@ -544,7 +544,7 @@ gst_av1_parse_reset_state (GstAV1Parser * parser, gboolean free_sps)
     parser->state.sequence_changed = FALSE;
 
     if (parser->seq_header) {
-      g_slice_free (GstAV1SequenceHeaderOBU, parser->seq_header);
+      g_free (parser->seq_header);
       parser->seq_header = NULL;
     }
   }
@@ -1440,10 +1440,10 @@ gst_av1_parser_parse_sequence_header_obu (GstAV1Parser * parser,
             sizeof (GstAV1SequenceHeaderOBU)))
       goto success;
 
-    g_slice_free (GstAV1SequenceHeaderOBU, parser->seq_header);
+    g_free (parser->seq_header);
   }
 
-  parser->seq_header = g_slice_dup (GstAV1SequenceHeaderOBU, seq_header);
+  parser->seq_header = g_memdup2 (seq_header, sizeof (GstAV1SequenceHeaderOBU));
   gst_av1_parse_reset_state (parser, FALSE);
 
   /* choose_operating_point() set the operating_point */
@@ -3416,6 +3416,7 @@ gst_av1_set_frame_refs (GstAV1Parser * parser,
         frame_header->order_hint);
 
   last_order_hint = shifted_order_hints[frame_header->last_frame_idx];
+  earliest_order_hint = shifted_order_hints[frame_header->gold_frame_idx];
 
   /* === Backward Reference Frames === */
   /* The ALTREF_FRAME reference is set to be a backward
@@ -3438,7 +3439,6 @@ gst_av1_set_frame_refs (GstAV1Parser * parser,
   /* The BWDREF_FRAME reference is set to be a backward reference
      to the closest frame. */
   ref = -1;
-  earliest_order_hint = last_order_hint;
   for (i = 0; i < GST_AV1_NUM_REF_FRAMES; i++) {
     hint = shifted_order_hints[i];
     if (!used_frame[i] && hint >= cur_frame_hint
@@ -3456,7 +3456,6 @@ gst_av1_set_frame_refs (GstAV1Parser * parser,
   /* The ALTREF2_FRAME reference is set to the next closest
      backward reference. */
   ref = -1;
-  earliest_order_hint = last_order_hint;
   for (i = 0; i < GST_AV1_NUM_REF_FRAMES; i++) {
     hint = shifted_order_hints[i];
     if (!used_frame[i] && hint >= cur_frame_hint
@@ -3475,7 +3474,6 @@ gst_av1_set_frame_refs (GstAV1Parser * parser,
 
   /* The remaining references are set to be forward references
      in anti-chronological order. */
-  last_order_hint = 0;
   for (i = 0; i < GST_AV1_REFS_PER_FRAME - 2; i++) {
     GstAV1ReferenceFrame ref_frame = ref_frame_list[i];
     if (frame_header->ref_frame_idx[ref_frame - GST_AV1_REF_LAST_FRAME] < 0) {
@@ -3499,7 +3497,6 @@ gst_av1_set_frame_refs (GstAV1Parser * parser,
   /* Finally, any remaining references are set to the reference frame
      with smallest output order. */
   ref = -1;
-  earliest_order_hint = cur_frame_hint * 2;
   for (i = 0; i < GST_AV1_NUM_REF_FRAMES; i++) {
     hint = shifted_order_hints[i];
     if (ref < 0 || hint < earliest_order_hint) {
@@ -4695,7 +4692,7 @@ gst_av1_parser_set_operating_point (GstAV1Parser * parser,
 GstAV1Parser *
 gst_av1_parser_new (void)
 {
-  return g_slice_new0 (GstAV1Parser);
+  return g_new0 (GstAV1Parser, 1);
 }
 
 /**
@@ -4714,6 +4711,6 @@ gst_av1_parser_free (GstAV1Parser * parser)
   g_return_if_fail (parser != NULL);
 
   if (parser->seq_header)
-    g_slice_free (GstAV1SequenceHeaderOBU, parser->seq_header);
-  g_slice_free (GstAV1Parser, parser);
+    g_free (parser->seq_header);
+  g_free (parser);
 }
