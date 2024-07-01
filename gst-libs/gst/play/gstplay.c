@@ -382,6 +382,9 @@ gst_play_class_init (GstPlayClass * klass)
 {
   GObjectClass *gobject_class = (GObjectClass *) klass;
 
+  GST_DEBUG_CATEGORY_INIT (gst_play_debug, "gst-play", 0, "GstPlay");
+  gst_play_error_quark ();
+
   gobject_class->set_property = gst_play_set_property;
   gobject_class->get_property = gst_play_get_property;
   gobject_class->dispose = gst_play_dispose;
@@ -2722,9 +2725,6 @@ gst_play_init_once (G_GNUC_UNUSED gpointer user_data)
 {
   gst_init (NULL, NULL);
 
-  GST_DEBUG_CATEGORY_INIT (gst_play_debug, "gst-play", 0, "GstPlay");
-  gst_play_error_quark ();
-
   return NULL;
 }
 
@@ -2737,6 +2737,9 @@ gst_play_init_once (G_GNUC_UNUSED gpointer user_data)
  * Video is going to be rendered by @video_renderer, or if %NULL is provided
  * no special video set up will be done and some default handling will be
  * performed.
+ *
+ * This also initializes GStreamer via `gst_init()` on the first call if this
+ * didn't happen before.
  *
  * Returns: (transfer full): a new #GstPlay instance
  * Since: 1.20

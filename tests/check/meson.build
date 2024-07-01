@@ -25,6 +25,7 @@ base_tests = [
   [['elements/aesdec.c'], not aes_dep.found(), [aes_dep]],
   [['elements/aiffparse.c'], get_option('aiff').disabled()],
   [['elements/asfmux.c'], get_option('asfmux').disabled()],
+  [['elements/audiovisualizer.c'], get_option('audiovisualizers').disabled()],
   [['elements/autoconvert.c'], get_option('autoconvert').disabled()],
   [['elements/autovideoconvert.c'], get_option('autoconvert').disabled()],
   [['elements/avwait.c'], get_option('timecode').disabled()],
@@ -108,7 +109,7 @@ base_tests = [
   [['libs/vkinstance.c'], not gstvulkan_dep.found(), [gstvulkan_dep]],
   [['libs/vkimagebufferpool.c'], not gstvulkan_dep.found(), [gstvulkan_dep]],
   [['libs/vkvideodecode.c'], not gstvulkan_dep.found() or vulkan_conf.get('GST_VULKAN_HAVE_VIDEO_EXTENSIONS') != 1, [gstvulkan_dep]],
-  [['libs/d3d11device.cpp'], not gstd3d11_dep.found(), [gstd3d11_dep, gstvideo_dep]],
+  [['libs/d3d11device.cpp'], not gstd3d11_dep.found(), [gstd3d11_dep]],
   [['libs/d3d11memory.c'], not gstd3d11_dep.found(), [gstd3d11_dep]],
   [['libs/cudamemory.c'], not gstcuda_dep.found(), [gstcuda_dep, gstcuda_stub_dep]],
 ]
