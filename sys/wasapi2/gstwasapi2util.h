@@ -25,6 +25,7 @@
 #include <windows.h>
 #include <initguid.h>
 #include <audioclient.h>
+#include <endpointvolume.h>
 
 G_BEGIN_DECLS
 
@@ -48,8 +49,13 @@ gboolean  _gst_wasapi2_result (HRESULT hr,
                                const gchar * function,
                                gint line);
 
+#ifndef GST_DISABLE_GST_DEBUG
 #define gst_wasapi2_result(result) \
     _gst_wasapi2_result (result, GST_CAT_DEFAULT, __FILE__, GST_FUNCTION, __LINE__)
+#else
+#define gst_wasapi2_result(result) \
+    _gst_wasapi2_result (result, NULL, __FILE__, GST_FUNCTION, __LINE__)
+#endif
 
 guint64       gst_wasapi2_util_waveformatex_to_channel_mask (WAVEFORMATEX * format,
                                                              GstAudioChannelPosition ** out_position);
@@ -64,6 +70,10 @@ gboolean      gst_wasapi2_util_parse_waveformatex (WAVEFORMATEX * format,
 gchar *       gst_wasapi2_util_get_error_message  (HRESULT hr);
 
 gboolean      gst_wasapi2_can_automatic_stream_routing (void);
+
+gboolean      gst_wasapi2_can_process_loopback (void);
+
+WAVEFORMATEX * gst_wasapi2_get_default_mix_format (void);
 
 G_END_DECLS
 

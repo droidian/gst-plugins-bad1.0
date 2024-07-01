@@ -37,7 +37,7 @@
 
 #include <glib.h>
 
-#include <gst/gst-i18n-plugin.h>
+#include <glib/gi18n-lib.h>
 #include "mpegtsbase.h"
 #include "gstmpegdesc.h"
 
@@ -502,13 +502,7 @@ mpegts_base_steal_program (MpegTSBase * base, gint program_number)
   for (i = 0; i < base->programs->len; i++) {
     MpegTSBaseProgram *program = g_ptr_array_index (base->programs, i);
     if (program->program_number == program_number) {
-#if GLIB_CHECK_VERSION(2, 58, 0)
       return g_ptr_array_steal_index (base->programs, i);
-#else
-      program->recycle = TRUE;
-      g_ptr_array_remove_index (base->programs, i);
-      return program;
-#endif
     }
   }
 
@@ -690,6 +684,7 @@ mpegts_base_program_remove_stream (MpegTSBase * base,
   program->streams[pid] = NULL;
 }
 
+#if 0                           /* Smart-update disabled */
 /* Check if pmtstream is already present in the program */
 static inline gboolean
 _stream_in_pmt (const GstMpegtsPMT * pmt, MpegTSBaseStream * stream)
@@ -771,9 +766,10 @@ mpegts_base_update_program (MpegTSBase * base, MpegTSBaseProgram * program,
     MpegTSBaseStream *stream = (MpegTSBaseStream *) tmp->data;
     mpegts_base_program_remove_stream (base, program, stream->pid);
   }
+  g_list_free (toremove);
   return TRUE;
 }
-
+#endif
 
 static gboolean
 _stream_is_private_section (const GstMpegtsPMT * pmt,
@@ -819,7 +815,6 @@ mpegts_base_is_same_program (MpegTSBase * base, MpegTSBaseProgram * oldprogram,
 {
   guint i, nbstreams;
   MpegTSBaseStream *oldstream;
-  gboolean sawpcrpid = FALSE;
 
   if (oldprogram->pmt_pid != new_pmt_pid) {
     GST_DEBUG ("Different pmt_pid (new:0x%04x, old:0x%04x)", new_pmt_pid,
@@ -833,7 +828,6 @@ mpegts_base_is_same_program (MpegTSBase * base, MpegTSBaseProgram * oldprogram,
     return FALSE;
   }
 
-  /* Check the streams */
   nbstreams = new_pmt->streams->len;
   for (i = 0; i < nbstreams; ++i) {
     GstMpegtsPMTStream *stream = g_ptr_array_index (new_pmt->streams, i);
@@ -849,17 +843,14 @@ mpegts_base_is_same_program (MpegTSBase * base, MpegTSBaseProgram * oldprogram,
           stream->pid, stream->stream_type, oldstream->stream_type);
       return FALSE;
     }
-    if (stream->pid == oldprogram->pcr_pid)
-      sawpcrpid = TRUE;
   }
 
-  /* If the pcr is not shared with an existing stream, we'll have one extra stream */
-  if (!sawpcrpid)
-    nbstreams += 1;
+  /* We can now just check the number of streams from each PMT. The check for
+   * PCR was already done previously */
 
-  if (nbstreams != g_list_length (oldprogram->stream_list)) {
-    GST_DEBUG ("Different number of streams (new:%d, old:%d)",
-        nbstreams, g_list_length (oldprogram->stream_list));
+  if (nbstreams != oldprogram->pmt->streams->len) {
+    GST_DEBUG ("Different number of streams (new:%d, old:%u)",
+        nbstreams, oldprogram->pmt->streams->len);
     return FALSE;
   }
 
@@ -867,6 +858,7 @@ mpegts_base_is_same_program (MpegTSBase * base, MpegTSBaseProgram * oldprogram,
   return TRUE;
 }
 
+#if 0                           /* Smart-update disabled */
 /* Return TRUE if program is an update
  *
  * A program is equal if:
@@ -928,6 +920,7 @@ mpegts_base_is_program_update (MpegTSBase * base,
   GST_DEBUG ("Program is not an update of the previous one");
   return FALSE;
 }
+#endif
 
 static void
 mpegts_base_deactivate_program (MpegTSBase * base, MpegTSBaseProgram * program)
@@ -1209,6 +1202,12 @@ mpegts_base_apply_pmt (MpegTSBase * base, GstMpegtsSection * section)
   if (G_UNLIKELY (old_program == NULL))
     goto no_program;
 
+  if (G_UNLIKELY (mpegts_base_is_same_program (base, old_program, section->pid,
+              pmt)))
+    goto same_program;
+
+#if 0
+  /* parsebin doesn't support program update properly. Disable this feature for now */
   if (base->streams_aware
       && mpegts_base_is_program_update (base, old_program, section->pid, pmt)) {
     GST_FIXME ("We are streams_aware and new program is an update");
@@ -1216,10 +1215,7 @@ mpegts_base_apply_pmt (MpegTSBase * base, GstMpegtsSection * section)
     mpegts_base_update_program (base, old_program, section, pmt);
     goto beach;
   }
-
-  if (G_UNLIKELY (mpegts_base_is_same_program (base, old_program, section->pid,
-              pmt)))
-    goto same_program;
+#endif
 
   /* If the current program is active, this means we have a new program */
   if (old_program->active) {
@@ -1252,7 +1248,9 @@ mpegts_base_apply_pmt (MpegTSBase * base, GstMpegtsSection * section)
   mpegts_base_activate_program (base, program, section->pid, section, pmt,
       initial_program);
 
+#if 0                           /* Smart-update disabled */
 beach:
+#endif
   GST_DEBUG ("Done activating program");
   return TRUE;
 
@@ -1523,15 +1521,19 @@ mpegts_base_chain (GstPad * pad, GstObject * parent, GstBuffer * buf)
       return res;
 
     mpegts_base_flush (base, FALSE);
-    /* In the case of discontinuities in push-mode with TIME segment
-     * we want to drop all previous observations (hard:TRUE) from
-     * the packetizer */
-    if (base->mode == BASE_MODE_PUSHING
-        && base->segment.format == GST_FORMAT_TIME) {
-      mpegts_packetizer_flush (base->packetizer, TRUE);
+    if (base->mode == BASE_MODE_PUSHING) {
+      if (base->segment.format == GST_FORMAT_TIME) {
+        /* In the case of discontinuities in push-mode with TIME segment
+         * we want to drop all previous observations (hard:TRUE) from
+         * the packetizer */
+        mpegts_packetizer_flush (base->packetizer, TRUE);
+      }
+      /* In all cases, we clear observations when we get a discontinuity in
+       * push-mode to re-check if the sections (PAT/PMT) changed or not */
       mpegts_packetizer_clear (base->packetizer);
-    } else
+    } else {
       mpegts_packetizer_flush (base->packetizer, FALSE);
+    }
   }
 
   mpegts_packetizer_push (base->packetizer, buf);
@@ -1751,11 +1753,30 @@ error:
   {
     GST_DEBUG_OBJECT (base, "Pausing task, reason %s", gst_flow_get_name (ret));
     if (ret == GST_FLOW_EOS) {
-      if (!GST_MPEGTS_BASE_GET_CLASS (base)->push_event (base,
-              gst_event_new_eos ()))
+      GstEvent *e;
+      if (base->out_segment.flags & GST_SEEK_FLAG_SEGMENT) {
+        gint64 stop;
+        if ((stop = base->out_segment.stop) == -1) {
+          stop = base->out_segment.position;
+        }
+        e = gst_event_new_segment_done (GST_FORMAT_TIME, stop);
+
+        GstMessage *msg = gst_message_new_segment_done (GST_OBJECT (base),
+            GST_FORMAT_TIME, stop);
+
+        if (base->last_seek_seqnum != GST_SEQNUM_INVALID) {
+          gst_message_set_seqnum (msg, base->last_seek_seqnum);
+        }
+        gst_element_post_message (GST_ELEMENT (base), msg);
+      } else {
+        e = gst_event_new_eos ();
+      }
+      GST_DEBUG_OBJECT (base, "Pushing event %" GST_PTR_FORMAT, e);
+      if (!GST_MPEGTS_BASE_GET_CLASS (base)->push_event (base, e)) {
         GST_ELEMENT_ERROR (base, STREAM, FAILED,
             (_("Internal data stream error.")),
             ("No program activated before EOS"));
+      }
     } else if (ret == GST_FLOW_NOT_LINKED || ret < GST_FLOW_EOS) {
       GST_ELEMENT_FLOW_ERROR (base, ret);
       GST_MPEGTS_BASE_GET_CLASS (base)->push_event (base, gst_event_new_eos ());
@@ -1838,8 +1859,8 @@ mpegts_base_handle_seek_event (MpegTSBase * base, GstPad * pad,
       " stop: %" GST_TIME_FORMAT, rate, GST_TIME_ARGS (start),
       GST_TIME_ARGS (stop));
 
-  flush = ! !(flags & GST_SEEK_FLAG_FLUSH);
-  instant_rate_change = ! !(flags & GST_SEEK_FLAG_INSTANT_RATE_CHANGE);
+  flush = !!(flags & GST_SEEK_FLAG_FLUSH);
+  instant_rate_change = !!(flags & GST_SEEK_FLAG_INSTANT_RATE_CHANGE);
 
   /* Directly send the instant-rate-change event here before taking the
    * stream-lock so that it can be applied as soon as possible */
@@ -1888,17 +1909,12 @@ mpegts_base_handle_seek_event (MpegTSBase * base, GstPad * pad,
 
     /* ref for it to be reused later */
     gst_pad_push_event (base->sinkpad, gst_event_ref (flush_event));
-    /* And actually flush our pending data but allow to preserve some info
-     * to perform the seek */
-    mpegts_base_flush (base, FALSE);
-    mpegts_packetizer_flush (base->packetizer, FALSE);
   }
 
-  if (flags & (GST_SEEK_FLAG_SEGMENT)) {
-    GST_WARNING ("seek flags 0x%x are not supported", (int) flags);
-    goto done;
-  }
-
+  /* And actually flush our pending data but allow to preserve some info
+   * to perform the seek */
+  mpegts_base_flush (base, FALSE);
+  mpegts_packetizer_flush (base->packetizer, FALSE);
 
   /* If the subclass can seek, do that */
   ret = klass->seek (base, event);
@@ -1913,7 +1929,7 @@ mpegts_base_handle_seek_event (MpegTSBase * base, GstPad * pad,
     GST_MPEGTS_BASE_GET_CLASS (base)->push_event (base, flush_event);
     flush_event = NULL;
   }
-done:
+
   if (flush_event)
     gst_event_unref (flush_event);
   gst_pad_start_task (base->sinkpad, (GstTaskFunction) mpegts_base_loop, base,

@@ -20,7 +20,7 @@
 
 #pragma once
 
-#include <gst/va/gstvadisplay.h>
+#include <gst/va/gstva.h>
 #include <gst/video/video.h>
 
 #include <va/va.h>
@@ -50,11 +50,13 @@ enum {
   GST_VA_FILTER_PROP_AUTO_SATURATION,
   GST_VA_FILTER_PROP_AUTO_BRIGHTNESS,
   GST_VA_FILTER_PROP_AUTO_CONTRAST,
-  GST_VA_FILTER_PROP_DISABLE_PASSTHROUGH,
   GST_VA_FILTER_PROP_DEINTERLACE_METHOD,
-  GST_VA_FILTER_PROP_ADD_BORDERS,
+  GST_VA_FILTER_PROP_HDR,
   GST_VA_FILTER_PROP_LAST
 };
+
+#define GST_TYPE_VA_SCALE_METHOD gst_va_scale_method_get_type()
+GType gst_va_scale_method_get_type (void) G_GNUC_CONST;
 
 typedef struct _GstVaSample GstVaSample;
 struct _GstVaSample
@@ -77,6 +79,31 @@ struct _GstVaSample
   VARectangle rect;
 };
 
+typedef struct _GstVaComposeSample GstVaComposeSample;
+struct _GstVaComposeSample
+{
+  /* input buffer (transfer full) */
+  GstBuffer *buffer;
+
+  VARectangle input_region;
+  VARectangle output_region;
+
+  gdouble alpha;
+};
+
+typedef struct _GstVaComposeTransaction GstVaComposeTransaction;
+struct _GstVaComposeTransaction
+{
+  /* input sample iterator function */
+  GstVaComposeSample* (*next) (gpointer user_data);
+
+  /* the output buffer to compose onto */
+  GstBuffer *output;
+
+  /* user data parameter for "next" function */
+  gpointer user_data;
+};
+
 GstVaFilter *         gst_va_filter_new                   (GstVaDisplay * display);
 gboolean              gst_va_filter_open                  (GstVaFilter * self);
 gboolean              gst_va_filter_close                 (GstVaFilter * self);
@@ -88,6 +115,8 @@ gboolean              gst_va_filter_install_properties    (GstVaFilter * self,
 gboolean              gst_va_filter_install_deinterlace_properties
                                                           (GstVaFilter * self,
                                                            GObjectClass * klass);
+gboolean              gst_va_filter_set_scale_method      (GstVaFilter * self,
+                                                           guint32 method);
 gboolean              gst_va_filter_set_orientation       (GstVaFilter * self,
                                                            GstVideoOrientationMethod orientation);
 GstVideoOrientationMethod gst_va_filter_get_orientation   (GstVaFilter * self);
@@ -121,5 +150,9 @@ guint32               gst_va_buffer_get_surface_flags     (GstBuffer * buffer,
 gboolean              gst_va_filter_has_video_format      (GstVaFilter * self,
                                                            GstVideoFormat format,
                                                            GstCapsFeatures * feature);
+
+gboolean              gst_va_filter_has_compose           (GstVaFilter * self);
+gboolean              gst_va_filter_compose               (GstVaFilter * self,
+                                                           GstVaComposeTransaction * tx);
 
 G_END_DECLS

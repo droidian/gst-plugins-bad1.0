@@ -22,7 +22,6 @@
 
 #include <gst/sdp/sdp.h>
 #include "fwd.h"
-#include "gstwebrtcice.h"
 #include "transportstream.h"
 #include "webrtcsctptransport.h"
 
@@ -39,6 +38,8 @@ GType gst_webrtc_bin_pad_get_type(void);
 typedef struct _GstWebRTCBinPad GstWebRTCBinPad;
 typedef struct _GstWebRTCBinPadClass GstWebRTCBinPadClass;
 
+G_DEFINE_AUTOPTR_CLEANUP_FUNC (GstWebRTCBinPad, gst_object_unref);
+
 struct _GstWebRTCBinPad
 {
   GstGhostPad           parent;
@@ -46,15 +47,22 @@ struct _GstWebRTCBinPad
   GstWebRTCRTPTransceiver *trans;
   gulong                block_id;
 
-  guint32               last_ssrc;
-
   GstCaps              *received_caps;
+  char                 *msid;
 };
 
 struct _GstWebRTCBinPadClass
 {
   GstGhostPadClass      parent_class;
 };
+
+G_DECLARE_FINAL_TYPE (GstWebRTCBinSinkPad, gst_webrtc_bin_sink_pad, GST,
+    WEBRTC_BIN_SINK_PAD, GstWebRTCBinPad);
+#define GST_TYPE_WEBRTC_BIN_SINK_PAD (gst_webrtc_bin_sink_pad_get_type())
+
+G_DECLARE_FINAL_TYPE (GstWebRTCBinSrcPad, gst_webrtc_bin_src_pad, GST,
+    WEBRTC_BIN_SRC_PAD, GstWebRTCBinPad);
+#define GST_TYPE_WEBRTC_BIN_SRC_PAD (gst_webrtc_bin_src_pad_get_type())
 
 GType gst_webrtc_bin_get_type(void);
 #define GST_TYPE_WEBRTC_BIN            (gst_webrtc_bin_get_type())
@@ -95,15 +103,20 @@ struct _GstWebRTCBinClass
 struct _GstWebRTCBinPrivate
 {
   guint max_sink_pad_serial;
+  guint src_pad_counter;
 
   gboolean bundle;
   GPtrArray *transceivers;
   GPtrArray *transports;
+  /* stats according to https://www.w3.org/TR/webrtc-stats/#dictionary-rtcpeerconnectionstats-members */
+  guint data_channels_opened;
+  guint data_channels_closed;
   GPtrArray *data_channels;
   /* list of data channels we've received a sctp stream for but no data
    * channel protocol for */
   GPtrArray *pending_data_channels;
-  /* dc_lock protects data_channels and pending_data_channels */
+  /* dc_lock protects data_channels and pending_data_channels
+   * and data_channels_opened and data_channels_closed */
   /* lock ordering is pc_lock first, then dc_lock */
   GMutex dc_lock;
 
@@ -162,6 +175,10 @@ gboolean        gst_webrtc_bin_enqueue_task             (GstWebRTCBin * pc,
                                                          gpointer data,
                                                          GDestroyNotify notify,
                                                          GstPromise *promise);
+
+void            gst_webrtc_bin_get_peer_connection_stats(GstWebRTCBin * pc,
+                                                         guint * data_channels_opened,
+                                                         guint * data_channels_closed);
 
 G_END_DECLS
 

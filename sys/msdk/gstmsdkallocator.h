@@ -39,22 +39,32 @@
 G_BEGIN_DECLS
 
 typedef struct _GstMsdkMemoryID GstMsdkMemoryID;
+typedef struct _GstMsdkSurface GstMsdkSurface;
 
 struct _GstMsdkMemoryID {
   mfxU32 fourcc;
 
 #ifndef _WIN32
-  VASurfaceID *surface;
+  VASurfaceID surface;
   VAImage image;
   VADRMPRIMESurfaceDescriptor desc;
 #else
-  /* TODO: This is just to avoid compile errors on Windows.
-   * Implement handling Windows-specific video-memory.
-   */
+  ID3D11Texture2D *texture;
+  guint subresource_index;
   gint pitch;
   guint offset;
 #endif
 };
+
+struct _GstMsdkSurface
+{
+  mfxFrameSurface1 *surface;
+  GstBuffer *buf;
+  gboolean from_qdata;
+};
+
+GstMsdkSurface *
+gst_msdk_import_sys_mem_to_msdk_surface (GstBuffer * buf, const GstVideoInfo * info);
 
 mfxStatus gst_msdk_frame_alloc(mfxHDL pthis, mfxFrameAllocRequest *req, mfxFrameAllocResponse *resp);
 mfxStatus gst_msdk_frame_free(mfxHDL pthis, mfxFrameAllocResponse *resp);
@@ -63,6 +73,13 @@ mfxStatus gst_msdk_frame_unlock(mfxHDL pthis, mfxMemId mid, mfxFrameData *ptr);
 mfxStatus gst_msdk_frame_get_hdl(mfxHDL pthis, mfxMemId mid, mfxHDL *hdl);
 
 void gst_msdk_set_frame_allocator (GstMsdkContext * context);
+
+GstMsdkSurface *
+gst_msdk_import_to_msdk_surface (GstBuffer * buf, GstMsdkContext * msdk_context,
+    GstVideoInfo * vinfo, guint map_flag);
+
+GQuark
+gst_msdk_frame_surface_quark_get (void);
 
 G_END_DECLS
 

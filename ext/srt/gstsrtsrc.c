@@ -65,6 +65,11 @@ enum
   LAST_SIGNAL
 };
 
+enum
+{
+  PROP_KEEP_LISTENING = 128
+};
+
 static guint signals[LAST_SIGNAL] = { 0 };
 
 static void gst_srt_src_uri_handler_init (gpointer g_iface,
@@ -110,12 +115,8 @@ gst_srt_src_start (GstBaseSrc * bsrc)
   GstSRTSrc *self = GST_SRT_SRC (bsrc);
   GError *error = NULL;
   gboolean ret = FALSE;
-  GstSRTConnectionMode connection_mode = GST_SRT_CONNECTION_MODE_NONE;
 
-  gst_structure_get_enum (self->srtobject->parameters, "mode",
-      GST_TYPE_SRT_CONNECTION_MODE, (gint *) & connection_mode);
-
-  ret = gst_srt_object_open (self->srtobject, self->cancellable, &error);
+  ret = gst_srt_object_open (self->srtobject, &error);
 
   if (!ret) {
     /* ensure error is posted since state change will fail */
@@ -155,7 +156,8 @@ gst_srt_src_fill (GstPushSrc * src, GstBuffer * outbuf)
   int64_t srt_time;
   SRT_MSGCTRL mctrl;
 
-  if (g_cancellable_is_cancelled (self->cancellable)) {
+retry:
+  if (g_cancellable_is_cancelled (self->srtobject->cancellable)) {
     ret = GST_FLOW_FLUSHING;
   }
 
@@ -176,7 +178,7 @@ gst_srt_src_fill (GstPushSrc * src, GstBuffer * outbuf)
   base_time = gst_element_get_base_time (GST_ELEMENT (src));
 
   recv_len = gst_srt_object_read (self->srtobject, info.data,
-      gst_buffer_get_size (outbuf), self->cancellable, &err, &mctrl);
+      gst_buffer_get_size (outbuf), &err, &mctrl);
 
   /* Capture clock values ASAP */
   capture_time = gst_clock_get_time (clock);
@@ -195,7 +197,7 @@ gst_srt_src_fill (GstPushSrc * src, GstBuffer * outbuf)
       "recv_len:%" G_GSIZE_FORMAT " pktseq:%d msgno:%d srctime:%"
       G_GINT64_FORMAT, recv_len, mctrl.pktseq, mctrl.msgno, mctrl.srctime);
 
-  if (g_cancellable_is_cancelled (self->cancellable)) {
+  if (g_cancellable_is_cancelled (self->srtobject->cancellable)) {
     ret = GST_FLOW_FLUSHING;
     goto out;
   }
@@ -206,8 +208,17 @@ gst_srt_src_fill (GstPushSrc * src, GstBuffer * outbuf)
     g_clear_error (&err);
     goto out;
   } else if (recv_len == 0) {
-    ret = GST_FLOW_EOS;
-    goto out;
+    gst_srt_src_stop (GST_BASE_SRC (self));
+    if (self->keep_listening && gst_srt_src_start (GST_BASE_SRC (self))) {
+      /* FIXME: Should send GAP event(s) downstream */
+      gst_element_post_message (GST_ELEMENT_CAST (self),
+          gst_message_new_element (GST_OBJECT_CAST (self),
+              gst_structure_new_empty ("connection-removed")));
+      goto retry;
+    } else {
+      ret = GST_FLOW_EOS;
+      goto out;
+    }
   }
 
   /* Detect discontinuities */
@@ -265,7 +276,6 @@ static void
 gst_srt_src_init (GstSRTSrc * self)
 {
   self->srtobject = gst_srt_object_new (GST_ELEMENT (self));
-  self->cancellable = g_cancellable_new ();
 
   gst_base_src_set_format (GST_BASE_SRC (self), GST_FORMAT_TIME);
   gst_base_src_set_live (GST_BASE_SRC (self), TRUE);
@@ -281,7 +291,6 @@ gst_srt_src_finalize (GObject * object)
 {
   GstSRTSrc *self = GST_SRT_SRC (object);
 
-  g_clear_object (&self->cancellable);
   gst_srt_object_destroy (self->srtobject);
 
   G_OBJECT_CLASS (parent_class)->finalize (object);
@@ -292,7 +301,7 @@ gst_srt_src_unlock (GstBaseSrc * bsrc)
 {
   GstSRTSrc *self = GST_SRT_SRC (bsrc);
 
-  gst_srt_object_wakeup (self->srtobject, self->cancellable);
+  gst_srt_object_unlock (self->srtobject);
 
   return TRUE;
 }
@@ -302,7 +311,7 @@ gst_srt_src_unlock_stop (GstBaseSrc * bsrc)
 {
   GstSRTSrc *self = GST_SRT_SRC (bsrc);
 
-  g_cancellable_reset (self->cancellable);
+  gst_srt_object_unlock_stop (self->srtobject);
 
   return TRUE;
 }
@@ -315,7 +324,13 @@ gst_srt_src_set_property (GObject * object,
 
   if (!gst_srt_object_set_property_helper (self->srtobject, prop_id, value,
           pspec)) {
-    G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
+    switch (prop_id) {
+      case PROP_KEEP_LISTENING:
+        self->keep_listening = g_value_get_boolean (value);
+        break;
+      default:
+        G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
+    }
   }
 }
 
@@ -327,7 +342,13 @@ gst_srt_src_get_property (GObject * object,
 
   if (!gst_srt_object_get_property_helper (self->srtobject, prop_id, value,
           pspec)) {
-    G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
+    switch (prop_id) {
+      case PROP_KEEP_LISTENING:
+        g_value_set_boolean (value, self->keep_listening);
+        break;
+      default:
+        G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
+    }
   }
 }
 
@@ -426,6 +447,22 @@ gst_srt_src_class_init (GstSRTSrcClass * klass)
 
   gst_srt_object_install_properties_helper (gobject_class);
 
+  /**
+   * GstSRTSrc:keep-listening:
+   *
+   * If FALSE, the element will return GST_FLOW_EOS when the remote client disconnects.
+   * If TRUE, the element will keep waiting for the client to reconnect. An element
+   * message named 'connection-removed' will be sent on disconnection.
+   *
+   * Since: 1.22
+   *
+   */
+  g_object_class_install_property (gobject_class, PROP_KEEP_LISTENING,
+      g_param_spec_boolean ("keep-listening",
+          "Keep listening",
+          "Toggle keep-listening for connection reuse",
+          FALSE, G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
+
   gst_element_class_add_static_pad_template (gstelement_class, &src_template);
   gst_element_class_set_metadata (gstelement_class,
       "SRT source", "Source/Network",
@@ -439,6 +476,8 @@ gst_srt_src_class_init (GstSRTSrcClass * klass)
   gstbasesrc_class->query = GST_DEBUG_FUNCPTR (gst_srt_src_query);
 
   gstpushsrc_class->fill = GST_DEBUG_FUNCPTR (gst_srt_src_fill);
+
+  gst_type_mark_as_plugin_api (GST_TYPE_SRT_SRC, 0);
 }
 
 static GstURIType

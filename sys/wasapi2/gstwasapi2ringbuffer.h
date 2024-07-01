@@ -34,7 +34,8 @@ GstAudioRingBuffer *   gst_wasapi2_ring_buffer_new (GstWasapi2ClientDeviceClass 
                                                     gboolean low_latency,
                                                     const gchar *device_id,
                                                     gpointer dispatcher,
-                                                    const gchar * name);
+                                                    const gchar * name,
+                                                    guint loopback_target_pid);
 
 GstCaps *              gst_wasapi2_ring_buffer_get_caps (GstWasapi2RingBuffer * buf);
 
@@ -49,6 +50,9 @@ HRESULT                gst_wasapi2_ring_buffer_set_volume (GstWasapi2RingBuffer 
 
 HRESULT                gst_wasapi2_ring_buffer_get_volume (GstWasapi2RingBuffer * buf,
                                                            gfloat * volume);
+
+void                   gst_wasapi2_ring_buffer_set_device_mute_monitoring (GstWasapi2RingBuffer * buf,
+                                                                           gboolean value);
 
 G_END_DECLS
 

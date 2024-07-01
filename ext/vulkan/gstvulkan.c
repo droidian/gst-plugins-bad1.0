@@ -33,11 +33,17 @@
 #include "vkupload.h"
 #include "vkimageidentity.h"
 #include "vkcolorconvert.h"
+#include "vkshaderspv.h"
 #include "vkdownload.h"
 #include "vkviewconvert.h"
 #include "vkdeviceprovider.h"
 #include "gstvulkanelements.h"
+#include "vkoverlaycompositor.h"
 
+#if GST_VULKAN_HAVE_VIDEO_EXTENSIONS
+#include "vkh264dec.h"
+#include "vkh265dec.h"
+#endif
 
 static gboolean
 plugin_init (GstPlugin * plugin)
@@ -56,7 +62,16 @@ plugin_init (GstPlugin * plugin)
 
   ret |= GST_ELEMENT_REGISTER (vulkanimageidentity, plugin);
 
+  ret |= GST_ELEMENT_REGISTER (vulkanshaderspv, plugin);
+
   ret |= GST_ELEMENT_REGISTER (vulkanviewconvert, plugin);
+
+  ret |= GST_ELEMENT_REGISTER (vulkanoverlaycompositor, plugin);
+
+#if GST_VULKAN_HAVE_VIDEO_EXTENSIONS
+  GST_ELEMENT_REGISTER (vulkanh264dec, plugin);
+  GST_ELEMENT_REGISTER (vulkanh265dec, plugin);
+#endif
 
   return ret;
 }

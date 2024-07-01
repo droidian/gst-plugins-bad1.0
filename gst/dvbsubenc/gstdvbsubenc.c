@@ -309,14 +309,14 @@ create_cropped_frame (GstDvbSubEnc * enc, GstVideoFrame * in,
     y++;
   }
 
-  /* By mapping the video frame no ref, it takes ownership of the buffer and it will be released
-   * on unmap (if the map call succeeds) */
+  /* Remap the video frame as read-only, and then drop our ref to the
+   * underlying buffer so the video frame holds the only remaining ref */
   gst_video_frame_unmap (out);
-  if (!gst_video_frame_map (out, &cropped_info, cropped_buffer,
-          GST_MAP_READ | GST_VIDEO_FRAME_MAP_FLAG_NO_REF)) {
+  if (!gst_video_frame_map (out, &cropped_info, cropped_buffer, GST_MAP_READ)) {
     gst_buffer_unref (cropped_buffer);
     return FALSE;
   }
+  gst_buffer_unref (cropped_buffer);
   return TRUE;
 }
 
@@ -338,6 +338,10 @@ process_largest_subregion (GstDvbSubEnc * enc, GstVideoFrame * vframe)
   find_largest_subregion (pixels, stride, pixel_stride, enc->in_info.width,
       enc->in_info.height, &left, &right, &top, &bottom);
 
+  /* Don't crash if subtitle is empty */
+  if (right < left || bottom < top)
+    goto skip;
+
   GST_LOG_OBJECT (enc, "Found subregion %u,%u -> %u,%u w %u, %u", left, top,
       right, bottom, right - left + 1, bottom - top + 1);
 
@@ -354,14 +358,15 @@ process_largest_subregion (GstDvbSubEnc * enc, GstVideoFrame * vframe)
   ayuv8p_buffer =
       gst_buffer_new_allocate (NULL, GST_VIDEO_INFO_SIZE (&ayuv8p_info), NULL);
 
-  /* Mapped without extra ref - the frame now owns the only ref */
+  /* Pass buffer ref to the frame, and remove the ref that we have - now frame owns the only ref */
   if (!gst_video_frame_map (&ayuv8p_frame, &ayuv8p_info, ayuv8p_buffer,
-          GST_MAP_WRITE | GST_VIDEO_FRAME_MAP_FLAG_NO_REF)) {
+          GST_MAP_WRITE)) {
     GST_WARNING_OBJECT (enc, "Failed to map frame conversion output buffer");
     gst_video_frame_unmap (&cropped_frame);
     gst_buffer_unref (ayuv8p_buffer);
     goto fail;
   }
+  gst_buffer_unref (ayuv8p_buffer);
 
   if (!gst_dvbsubenc_ayuv_to_ayuv8p (&cropped_frame, &ayuv8p_frame,
           enc->max_colours, &num_colours)) {
@@ -393,7 +398,9 @@ process_largest_subregion (GstDvbSubEnc * enc, GstVideoFrame * vframe)
     s.x = left;
     s.y = top;
 
-    packet = gst_dvbenc_encode (enc->object_version & 0xF, 1, &s, 1);
+    packet =
+        gst_dvbenc_encode (enc->object_version & 0xF, 1, enc->display_version,
+        enc->in_info.width, enc->in_info.height, &s, 1);
     if (packet == NULL) {
       gst_video_frame_unmap (&ayuv8p_frame);
       goto fail;
@@ -440,7 +447,9 @@ gst_dvb_sub_enc_generate_end_packet (GstDvbSubEnc * enc, GstClockTime pts)
   GST_DEBUG_OBJECT (enc, "Outputting end of page at TS %" GST_TIME_FORMAT,
       GST_TIME_ARGS (enc->current_end_time));
 
-  packet = gst_dvbenc_encode (enc->object_version & 0xF, 1, NULL, 0);
+  packet =
+      gst_dvbenc_encode (enc->object_version & 0xF, 1, enc->display_version,
+      enc->in_info.width, enc->in_info.height, NULL, 0);
   if (packet == NULL) {
     GST_ELEMENT_ERROR (enc, STREAM, FAILED,
         ("Internal data stream error."),
@@ -501,27 +510,34 @@ gst_dvb_sub_enc_sink_setcaps (GstPad * pad, GstCaps * caps)
 {
   GstDvbSubEnc *enc = GST_DVB_SUB_ENC (gst_pad_get_parent (pad));
   gboolean ret = FALSE;
+  GstVideoInfo in_info;
   GstCaps *out_caps = NULL;
 
   GST_DEBUG_OBJECT (enc, "setcaps called with %" GST_PTR_FORMAT, caps);
-  if (!gst_video_info_from_caps (&enc->in_info, caps)) {
+  if (!gst_video_info_from_caps (&in_info, caps)) {
     GST_ERROR_OBJECT (enc, "Failed to parse input caps");
     return FALSE;
   }
 
-  out_caps = gst_caps_new_simple ("subpicture/x-dvb",
-      "width", G_TYPE_INT, enc->in_info.width,
-      "height", G_TYPE_INT, enc->in_info.height,
-      "framerate", GST_TYPE_FRACTION, enc->in_info.fps_n, enc->in_info.fps_d,
-      NULL);
+  if (!enc->in_info.finfo || !gst_video_info_is_equal (&in_info, &enc->in_info)) {
+    enc->in_info = in_info;
+    enc->display_version++;
 
-  if (!gst_pad_set_caps (enc->srcpad, out_caps)) {
-    GST_WARNING_OBJECT (enc, "failed setting downstream caps");
+    out_caps = gst_caps_new_simple ("subpicture/x-dvb",
+        "width", G_TYPE_INT, enc->in_info.width,
+        "height", G_TYPE_INT, enc->in_info.height,
+        "framerate", GST_TYPE_FRACTION, enc->in_info.fps_n, enc->in_info.fps_d,
+        NULL);
+
+    if (!gst_pad_set_caps (enc->srcpad, out_caps)) {
+      GST_WARNING_OBJECT (enc, "failed setting downstream caps");
+      gst_caps_unref (out_caps);
+      goto beach;
+    }
+
     gst_caps_unref (out_caps);
-    goto beach;
   }
 
-  gst_caps_unref (out_caps);
   ret = TRUE;
 
 beach:
@@ -549,24 +565,29 @@ gst_dvb_sub_enc_sink_event (GstPad * pad, GstObject * parent, GstEvent * event)
     }
     case GST_EVENT_GAP:
     {
-      GstClockTime start, duration;
-
-      gst_event_parse_gap (event, &start, &duration);
-      if (GST_CLOCK_TIME_IS_VALID (start)) {
-        if (GST_CLOCK_TIME_IS_VALID (duration))
-          start += duration;
-        /* we do not expect another buffer until after gap,
-         * so that is our position now */
-        GST_DEBUG_OBJECT (enc,
-            "Got GAP event, advancing time to %" GST_TIME_FORMAT,
-            GST_TIME_ARGS (start));
-        gst_dvb_sub_enc_generate_end_packet (enc, start);
+      if (!GST_CLOCK_TIME_IS_VALID (enc->current_end_time)) {
+        ret = gst_pad_event_default (pad, parent, event);
       } else {
-        GST_WARNING_OBJECT (enc, "Got GAP event with invalid position");
-      }
+        GstClockTime start, duration;
 
-      gst_event_unref (event);
-      ret = TRUE;
+        gst_event_parse_gap (event, &start, &duration);
+
+        if (GST_CLOCK_TIME_IS_VALID (start)) {
+          if (GST_CLOCK_TIME_IS_VALID (duration))
+            start += duration;
+          /* we do not expect another buffer until after gap,
+           * so that is our position now */
+          GST_DEBUG_OBJECT (enc,
+              "Got GAP event, advancing time to %" GST_TIME_FORMAT,
+              GST_TIME_ARGS (start));
+          gst_dvb_sub_enc_generate_end_packet (enc, start);
+        } else {
+          GST_WARNING_OBJECT (enc, "Got GAP event with invalid position");
+        }
+
+        gst_event_unref (event);
+        ret = TRUE;
+      }
       break;
     }
     case GST_EVENT_SEGMENT:

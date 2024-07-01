@@ -20,9 +20,9 @@
 
 #pragma once
 
+#include <gst/gst.h>
 #include <gst/va/va_fwd.h>
 #include <gst/va/va-prelude.h>
-#include <gst/gst.h>
 
 G_BEGIN_DECLS
 
@@ -122,15 +122,15 @@ struct _GstVaDisplayClass
 GST_VA_API
 GType                 gst_va_display_get_type             (void);
 GST_VA_API
-void                  gst_va_display_lock                 (GstVaDisplay * self);
-GST_VA_API
-void                  gst_va_display_unlock               (GstVaDisplay * self);
-GST_VA_API
 gboolean              gst_va_display_initialize           (GstVaDisplay * self);
 GST_VA_API
 gpointer              gst_va_display_get_va_dpy           (GstVaDisplay * self);
 GST_VA_API
 GstVaImplementation   gst_va_display_get_implementation   (GstVaDisplay * self);
+GST_VA_API
+gboolean              gst_va_display_check_version        (GstVaDisplay * self,
+                                                           guint major,
+                                                           guint minor);
 
 /**
  * gst_va_display_is_implementation:

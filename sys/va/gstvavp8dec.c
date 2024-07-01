@@ -69,8 +69,6 @@ struct _GstVaVp8DecClass
 struct _GstVaVp8Dec
 {
   GstVaBaseDec parent;
-
-  GstFlowReturn last_ret;
 };
 
 static GstElementClass *parent_class = NULL;
@@ -83,51 +81,6 @@ static const gchar *src_caps_str =
 /* *INDENT-ON* */
 
 static const gchar *sink_caps_str = "video/x-vp8";
-
-static gboolean
-gst_va_vp8_dec_negotiate (GstVideoDecoder * decoder)
-{
-  GstCapsFeatures *capsfeatures = NULL;
-  GstVaBaseDec *base = GST_VA_BASE_DEC (decoder);
-  GstVaVp8Dec *self = GST_VA_VP8_DEC (decoder);
-  GstVideoFormat format = GST_VIDEO_FORMAT_UNKNOWN;
-  GstVp8Decoder *vp8dec = GST_VP8_DECODER (decoder);
-
-  /* Ignore downstream renegotiation request. */
-  if (!base->need_negotiation)
-    return TRUE;
-
-  base->need_negotiation = FALSE;
-
-  if (gst_va_decoder_is_open (base->decoder)
-      && !gst_va_decoder_close (base->decoder))
-    return FALSE;
-
-  if (!gst_va_decoder_open (base->decoder, base->profile, base->rt_format))
-    return FALSE;
-
-  if (!gst_va_decoder_set_frame_size (base->decoder, base->width, base->height))
-    return FALSE;
-
-  if (base->output_state)
-    gst_video_codec_state_unref (base->output_state);
-
-  gst_va_base_dec_get_preferred_format_and_caps_features (base, &format,
-      &capsfeatures);
-
-  base->output_state =
-      gst_video_decoder_set_output_state (decoder, format,
-      base->width, base->height, vp8dec->input_state);
-
-  base->output_state->caps = gst_video_info_to_caps (&base->output_state->info);
-  if (capsfeatures)
-    gst_caps_set_features_simple (base->output_state->caps, capsfeatures);
-
-  GST_INFO_OBJECT (self, "Negotiated caps %" GST_PTR_FORMAT,
-      base->output_state->caps);
-
-  return GST_VIDEO_DECODER_CLASS (parent_class)->negotiate (decoder);
-}
 
 static VAProfile
 _get_profile (GstVaVp8Dec * self, const GstVp8FrameHdr * frame_hdr)
@@ -143,10 +96,11 @@ _get_profile (GstVaVp8Dec * self, const GstVp8FrameHdr * frame_hdr)
 
 static GstFlowReturn
 gst_va_vp8_dec_new_sequence (GstVp8Decoder * decoder,
-    const GstVp8FrameHdr * frame_hdr)
+    const GstVp8FrameHdr * frame_hdr, gint max_dpb_size)
 {
   GstVaBaseDec *base = GST_VA_BASE_DEC (decoder);
   GstVaVp8Dec *self = GST_VA_VP8_DEC (decoder);
+  GstVideoInfo *info = &base->output_info;
   VAProfile profile;
   guint rt_format;
   gboolean negotiation_needed = FALSE;
@@ -169,15 +123,16 @@ gst_va_vp8_dec_new_sequence (GstVp8Decoder * decoder,
   if (!gst_va_decoder_config_is_equal (base->decoder, profile,
           rt_format, frame_hdr->width, frame_hdr->height)) {
     base->profile = profile;
-    base->width = frame_hdr->width;
-    base->height = frame_hdr->height;
+    GST_VIDEO_INFO_WIDTH (info) = base->width = frame_hdr->width;
+    GST_VIDEO_INFO_HEIGHT (info) = base->height = frame_hdr->height;
     base->rt_format = rt_format;
     negotiation_needed = TRUE;
   }
 
   base->min_buffers = 3 + 4;    /* max num pic references + scratch surfaces */
-
   base->need_negotiation = negotiation_needed;
+  g_clear_pointer (&base->input_state, gst_video_codec_state_unref);
+  base->input_state = gst_video_codec_state_ref (decoder->input_state);
 
   return GST_FLOW_OK;
 }
@@ -188,18 +143,11 @@ gst_va_vp8_dec_new_picture (GstVp8Decoder * decoder,
 {
   GstVaVp8Dec *self = GST_VA_VP8_DEC (decoder);
   GstVaDecodePicture *pic;
-  GstVideoDecoder *vdec = GST_VIDEO_DECODER (decoder);
   GstVaBaseDec *base = GST_VA_BASE_DEC (decoder);
+  GstFlowReturn ret;
 
-  if (base->need_negotiation) {
-    if (!gst_video_decoder_negotiate (vdec)) {
-      GST_ERROR_OBJECT (self, "Failed to negotiate with downstream");
-      return GST_FLOW_NOT_NEGOTIATED;
-    }
-  }
-
-  self->last_ret = gst_video_decoder_allocate_output_frame (vdec, frame);
-  if (self->last_ret != GST_FLOW_OK)
+  ret = gst_va_base_dec_prepare_output_frame (base, frame);
+  if (ret != GST_FLOW_OK)
     goto error;
 
   pic = gst_va_decode_picture_new (base->decoder, frame->output_buffer);
@@ -216,8 +164,8 @@ error:
   {
     GST_WARNING_OBJECT (self,
         "Failed to allocated output buffer, return %s",
-        gst_flow_get_name (self->last_ret));
-    return self->last_ret;
+        gst_flow_get_name (ret));
+    return ret;
   }
 }
 
@@ -228,7 +176,7 @@ _fill_quant_matrix (GstVp8Decoder * decoder, GstVp8Picture * picture,
   GstVaBaseDec *base = GST_VA_BASE_DEC (decoder);
   GstVp8FrameHdr const *frame_hdr = &picture->frame_hdr;
   GstVp8Segmentation *const seg = &parser->segmentation;
-  VAIQMatrixBufferVP8 iq_matrix = { };
+  VAIQMatrixBufferVP8 iq_matrix = { 0, };
   const gint8 QI_MAX = 127;
   gint16 qi, qi_base;
   gint i;
@@ -266,7 +214,7 @@ _fill_probability_table (GstVp8Decoder * decoder, GstVp8Picture * picture)
 {
   GstVaBaseDec *base = GST_VA_BASE_DEC (decoder);
   GstVp8FrameHdr const *frame_hdr = &picture->frame_hdr;
-  VAProbabilityDataBufferVP8 prob_table = { };
+  VAProbabilityDataBufferVP8 prob_table = { 0, };
 
   /* Fill in VAProbabilityDataBufferVP8 */
   memcpy (prob_table.dct_coeff_probs, frame_hdr->token_probs.prob,
@@ -409,7 +357,7 @@ _add_slice (GstVp8Decoder * decoder, GstVp8Picture * picture,
       sizeof (slice_param), (gpointer) picture->data, picture->size);
 }
 
-static gboolean
+static GstFlowReturn
 gst_va_vp8_dec_decode_picture (GstVp8Decoder * decoder, GstVp8Picture * picture,
     GstVp8Parser * parser)
 {
@@ -427,7 +375,7 @@ gst_va_vp8_dec_end_picture (GstVp8Decoder * decoder, GstVp8Picture * picture)
   GstVaDecodePicture *va_pic;
 
   GST_LOG_OBJECT (base, "end picture %p, (system_frame_number %d)",
-      picture, picture->system_frame_number);
+      picture, GST_CODEC_PICTURE (picture)->system_frame_number);
 
   va_pic = gst_vp8_picture_get_user_data (picture);
 
@@ -443,23 +391,21 @@ gst_va_vp8_dec_output_picture (GstVp8Decoder * decoder,
 {
   GstVaBaseDec *base = GST_VA_BASE_DEC (decoder);
   GstVaVp8Dec *self = GST_VA_VP8_DEC (decoder);
+  GstVideoDecoder *vdec = GST_VIDEO_DECODER (decoder);
+  GstCodecPicture *codec_picture = GST_CODEC_PICTURE (picture);
+  gboolean ret;
 
   GST_LOG_OBJECT (self,
       "Outputting picture %p (system_frame_number %d)",
-      picture, picture->system_frame_number);
+      picture, codec_picture->system_frame_number);
 
-  if (self->last_ret != GST_FLOW_OK) {
-    gst_vp8_picture_unref (picture);
-    gst_video_decoder_drop_frame (GST_VIDEO_DECODER (self), frame);
-    return self->last_ret;
-  }
-
-  if (base->copy_frames)
-    gst_va_base_dec_copy_output_buffer (base, frame);
-
+  ret = gst_va_base_dec_process_output (base, frame,
+      codec_picture->discont_state, 0);
   gst_vp8_picture_unref (picture);
 
-  return gst_video_decoder_finish_frame (GST_VIDEO_DECODER (self), frame);
+  if (ret)
+    return gst_video_decoder_finish_frame (vdec, frame);
+  return GST_FLOW_ERROR;
 }
 
 static void
@@ -482,7 +428,6 @@ gst_va_vp8_dec_class_init (gpointer g_class, gpointer class_data)
   GObjectClass *gobject_class = G_OBJECT_CLASS (g_class);
   GstElementClass *element_class = GST_ELEMENT_CLASS (g_class);
   GstVp8DecoderClass *vp8decoder_class = GST_VP8_DECODER_CLASS (g_class);
-  GstVideoDecoderClass *decoder_class = GST_VIDEO_DECODER_CLASS (g_class);
   struct CData *cdata = class_data;
   gchar *long_name;
 
@@ -502,13 +447,18 @@ gst_va_vp8_dec_class_init (gpointer g_class, gpointer class_data)
 
   parent_class = g_type_class_peek_parent (g_class);
 
+  /**
+   * GstVaVp8Dec:device-path:
+   *
+   * It shows the DRM device path used for the VA operation, if any.
+   *
+   * Since: 1.22
+   */
   gst_va_base_dec_class_init (GST_VA_BASE_DEC_CLASS (g_class), VP8,
       cdata->render_device_path, cdata->sink_caps, cdata->src_caps,
       src_doc_caps, sink_doc_caps);
 
   gobject_class->dispose = gst_va_vp8_dec_dispose;
-
-  decoder_class->negotiate = GST_DEBUG_FUNCPTR (gst_va_vp8_dec_negotiate);
 
   vp8decoder_class->new_sequence =
       GST_DEBUG_FUNCPTR (gst_va_vp8_dec_new_sequence);
@@ -572,24 +522,9 @@ gst_va_vp8_dec_register (GstPlugin * plugin, GstVaDevice * device,
 
   type_info.class_data = cdata;
 
-  type_name = g_strdup ("GstVaVp8dec");
-  feature_name = g_strdup ("vavp8dec");
-
-  /* The first decoder to be registered should use a constant name,
-   * like vavp8dec, for any additional decoders, we create unique
-   * names, using inserting the render device name. */
-  if (g_type_from_name (type_name)) {
-    gchar *basename = g_path_get_basename (device->render_device_path);
-    g_free (type_name);
-    g_free (feature_name);
-    type_name = g_strdup_printf ("GstVa%sVP8Dec", basename);
-    feature_name = g_strdup_printf ("va%svp8dec", basename);
-    cdata->description = basename;
-
-    /* lower rank for non-first device */
-    if (rank > 0)
-      rank--;
-  }
+  gst_va_create_feature_name (device, "GstVaVp8Dec", "GstVa%sVp8Dec",
+      &type_name, "vavp8dec", "va%svp8dec", &feature_name,
+      &cdata->description, &rank);
 
   g_once (&debug_once, _register_debug_category, NULL);
 

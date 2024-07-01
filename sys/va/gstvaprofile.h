@@ -40,7 +40,10 @@ typedef enum
 } GstVaCodecs;
 
 guint32               gst_va_profile_codec                (VAProfile profile);
-GstCaps *             gst_va_profile_caps                 (VAProfile profile);
+GstCaps *             gst_va_profile_caps                 (VAProfile profile,
+                                                           VAEntrypoint entrypoint);
 const gchar *         gst_va_profile_name                 (VAProfile profile);
+VAProfile             gst_va_profile_from_name            (GstVaCodecs codec,
+                                                           const gchar * name);
 
 G_END_DECLS

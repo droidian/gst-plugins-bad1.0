@@ -37,6 +37,9 @@
 #include <xf86drm.h>
 #include <va/va_drm.h>
 #include <gudev/gudev.h>
+#include <gst/va/gstvadisplay_drm.h>
+#else
+#include <gst/d3d11/gstd3d11.h>
 #endif
 
 GST_DEBUG_CATEGORY_STATIC (gst_debug_msdkcontext);
@@ -45,6 +48,7 @@ GST_DEBUG_CATEGORY_STATIC (gst_debug_msdkcontext);
 struct _GstMsdkContextPrivate
 {
   MsdkSession session;
+  GstBufferPool *alloc_pool;
   GList *cached_alloc_responses;
   gboolean hardware;
   gboolean has_frame_allocator;
@@ -54,8 +58,9 @@ struct _GstMsdkContextPrivate
   GList *child_session_list;
   GstMsdkContext *parent_context;
 #ifndef _WIN32
-  gint fd;
-  VADisplay dpy;
+  GstVaDisplay *display;
+#else
+  GstD3D11Device *device;
 #endif
 };
 
@@ -67,8 +72,8 @@ G_DEFINE_TYPE_WITH_CODE (GstMsdkContext, gst_msdk_context, GST_TYPE_OBJECT,
 
 #ifndef _WIN32
 
-static gint
-get_device_id (void)
+static char *
+get_device_path (void)
 {
   GUdevClient *client = NULL;
   GUdevEnumerator *e = NULL;
@@ -78,6 +83,7 @@ get_device_id (void)
   const gchar *devnode_files[2] = { "renderD[0-9]*", "card[0-9]*" };
   int fd = -1, i;
   const gchar *user_choice = g_getenv ("GST_MSDK_DRM_DEVICE");
+  gchar *ret_path = NULL;
 
   if (user_choice) {
     if (g_str_has_prefix (user_choice, "/dev/dri/"))
@@ -99,7 +105,12 @@ get_device_id (void)
       GST_ERROR ("The specified device isn't a valid drm device");
     }
 
-    return fd;
+    if (fd >= 0) {
+      ret_path = g_strdup (user_choice);
+      close (fd);
+    }
+
+    return ret_path;
   }
 
   client = g_udev_client_new (NULL);
@@ -131,6 +142,7 @@ get_device_id (void)
       if (fd < 0)
         continue;
       GST_DEBUG ("Opened the drm device node %s", devnode_path);
+      ret_path = g_strdup (devnode_path);
       break;
     }
 
@@ -141,89 +153,188 @@ get_device_id (void)
   }
 
 done:
+  if (fd >= 0)
+    close (fd);
+
   if (e)
     g_object_unref (e);
   if (client)
     g_object_unref (client);
 
-  return fd;
+  return ret_path;
 }
-
 
 static gboolean
 gst_msdk_context_use_vaapi (GstMsdkContext * context)
 {
-  gint fd;
-  gint maj_ver, min_ver;
-  VADisplay va_dpy = NULL;
-  VAStatus va_status;
-  mfxStatus status;
+  char *path;
+  GstVaDisplay *display_drm = NULL;
   GstMsdkContextPrivate *priv = context->priv;
 
-  fd = get_device_id ();
-  if (fd < 0) {
-    GST_WARNING ("Couldn't find a valid drm device node");
+  path = get_device_path ();
+  if (path == NULL) {
+    GST_WARNING ("Couldn't find a drm device node to open");
     return FALSE;
   }
 
-  va_dpy = vaGetDisplayDRM (fd);
-  if (!va_dpy) {
-    GST_ERROR ("Couldn't get a VA DRM display");
-    goto failed;
+  display_drm = gst_va_display_drm_new_from_path (path);
+  g_free (path);
+
+  if (!display_drm) {
+    GST_ERROR ("Couldn't create a VA DRM display");
+    return FALSE;
   }
 
-  va_status = vaInitialize (va_dpy, &maj_ver, &min_ver);
-  if (va_status != VA_STATUS_SUCCESS) {
-    GST_ERROR ("Couldn't initialize VA DRM display");
-    goto failed;
-  }
-
-  status = MFXVideoCORE_SetHandle (priv->session.session, MFX_HANDLE_VA_DISPLAY,
-      (mfxHDL) va_dpy);
-  if (status != MFX_ERR_NONE) {
-    GST_ERROR ("Setting VAAPI handle failed (%s)",
-        msdk_status_to_string (status));
-    goto failed;
-  }
-
-  priv->fd = fd;
-  priv->dpy = va_dpy;
+  priv->display = display_drm;
 
   return TRUE;
+}
+#else
+static GstD3D11Device *
+get_device_by_index (IDXGIFactory1 * factory, guint idx)
+{
+  HRESULT hr;
+  IDXGIAdapter1 *adapter;
+  ID3D11Device *device_handle;
+  ID3D10Multithread *multi_thread;
+  DXGI_ADAPTER_DESC desc;
+  GstD3D11Device *device = NULL;
+  gint64 luid;
 
-failed:
-  if (va_dpy)
-    vaTerminate (va_dpy);
-  close (fd);
-  return FALSE;
+  hr = IDXGIFactory1_EnumAdapters1 (factory, idx, &adapter);
+  if (FAILED (hr)) {
+    return NULL;
+  }
+
+  hr = IDXGIAdapter1_GetDesc (adapter, &desc);
+  if (FAILED (hr)) {
+    IDXGIAdapter1_Release (adapter);
+    return NULL;
+  }
+
+  if (desc.VendorId != 0x8086) {
+    IDXGIAdapter1_Release (adapter);
+    return NULL;
+  }
+
+  luid = gst_d3d11_luid_to_int64 (&desc.AdapterLuid);
+  device = gst_d3d11_device_new_for_adapter_luid (luid,
+      D3D11_CREATE_DEVICE_BGRA_SUPPORT);
+  IDXGIAdapter1_Release (adapter);
+
+  device_handle = gst_d3d11_device_get_device_handle (device);
+  hr = ID3D11Device_QueryInterface (device_handle,
+      &IID_ID3D10Multithread, (void **) &multi_thread);
+  if (FAILED (hr)) {
+    gst_object_unref (device);
+    return NULL;
+  }
+
+  hr = ID3D10Multithread_SetMultithreadProtected (multi_thread, TRUE);
+  ID3D10Multithread_Release (multi_thread);
+
+  return device;
+}
+
+static gboolean
+gst_msdk_context_use_d3d11 (GstMsdkContext * context)
+{
+  HRESULT hr;
+  IDXGIFactory1 *factory = NULL;
+  GstD3D11Device *device = NULL;
+  ID3D11Device *device_handle;
+  GstMsdkContextPrivate *priv = context->priv;
+  mfxStatus status;
+  guint idx = 0;
+  gint user_idx = -1;
+  const gchar *user_choice = g_getenv ("GST_MSDK_DEVICE");
+
+  hr = CreateDXGIFactory1 (&IID_IDXGIFactory1, (void **) &factory);
+  if (FAILED (hr)) {
+    GST_ERROR ("Couldn't create DXGI factory");
+    return FALSE;
+  }
+
+  if (user_choice) {
+    user_idx = atoi (user_choice);
+    if (!(device = get_device_by_index (factory, user_idx)))
+      GST_WARNING
+          ("Failed to get device by user index, try to pick the first available device");
+  }
+
+  /* Pick the first available device */
+  while (!device) {
+    device = get_device_by_index (factory, idx++);
+  }
+
+  IDXGIFactory1_Release (factory);
+  device_handle = gst_d3d11_device_get_device_handle (device);
+
+  status =
+      MFXVideoCORE_SetHandle (priv->session.session, MFX_HANDLE_D3D11_DEVICE,
+      gst_d3d11_device_get_device_handle (device));
+  if (status != MFX_ERR_NONE) {
+    GST_ERROR ("Setting D3D11VA handle failed (%s)",
+        msdk_status_to_string (status));
+    gst_object_unref (device);
+    return FALSE;
+  }
+
+  priv->device = device;
+
+  return TRUE;
 }
 #endif
 
 static gboolean
-gst_msdk_context_open (GstMsdkContext * context, gboolean hardware,
-    GstMsdkContextJobType job_type)
+gst_msdk_context_open (GstMsdkContext * context, gboolean hardware)
 {
   mfxU16 codename;
   GstMsdkContextPrivate *priv = context->priv;
   MsdkSession msdk_session;
+  mfxIMPL impl;
+  mfxHDL handle = NULL;
+#ifndef _WIN32
+  mfxStatus status;
+#endif
 
-  priv->job_type = job_type;
   priv->hardware = hardware;
 
-  msdk_session =
-      msdk_open_session (hardware ? MFX_IMPL_HARDWARE_ANY : MFX_IMPL_SOFTWARE);
-  priv->session = msdk_session;
-  if (!priv->session.session)
-    goto failed;
+  impl = hardware ? MFX_IMPL_HARDWARE_ANY : MFX_IMPL_SOFTWARE;
+
+#ifdef _WIN32
+  impl |= MFX_IMPL_VIA_D3D11;
+#endif
 
 #ifndef _WIN32
-  priv->fd = -1;
-
   if (hardware) {
     if (!gst_msdk_context_use_vaapi (context))
-      goto failed;
+      return FALSE;
+
+    handle = (mfxHDL) gst_va_display_get_va_dpy (priv->display);
   }
 #endif
+
+  msdk_session = msdk_open_session (handle, impl);
+  if (!msdk_session.session)
+    return FALSE;
+
+  priv->session = msdk_session;
+
+  if (hardware) {
+#ifndef _WIN32
+    status = MFXVideoCORE_SetHandle (priv->session.session,
+        MFX_HANDLE_VA_DISPLAY, handle);
+    if (status != MFX_ERR_NONE) {
+      GST_ERROR ("Setting VAAPI handle failed (%s)",
+          msdk_status_to_string (status));
+      return FALSE;
+    }
+#else
+    if (!gst_msdk_context_use_d3d11 (context))
+      return FALSE;
+#endif
+  }
 
   codename = msdk_get_platform_codename (priv->session.session);
 
@@ -233,9 +344,6 @@ gst_msdk_context_open (GstMsdkContext * context, gboolean hardware,
     GST_WARNING ("Unknown MFX platform");
 
   return TRUE;
-
-failed:
-  return FALSE;
 }
 
 static void
@@ -277,10 +385,11 @@ gst_msdk_context_finalize (GObject * obj)
   g_mutex_clear (&priv->mutex);
 
 #ifndef _WIN32
-  if (priv->dpy)
-    vaTerminate (priv->dpy);
-  if (priv->fd >= 0)
-    close (priv->fd);
+  if (priv->display)
+    gst_object_unref (priv->display);
+#else
+  if (priv->device)
+    gst_object_unref (priv->device);
 #endif
 
 done:
@@ -296,15 +405,27 @@ gst_msdk_context_class_init (GstMsdkContextClass * klass)
 }
 
 GstMsdkContext *
-gst_msdk_context_new (gboolean hardware, GstMsdkContextJobType job_type)
+gst_msdk_context_new (gboolean hardware)
 {
   GstMsdkContext *obj = g_object_new (GST_TYPE_MSDK_CONTEXT, NULL);
+  gst_object_ref_sink (obj);
 
-  if (obj && !gst_msdk_context_open (obj, hardware, job_type)) {
-    if (obj)
-      gst_object_unref (obj);
+  if (obj && !gst_msdk_context_open (obj, hardware)) {
+    gst_object_unref (obj);
     return NULL;
   }
+
+  return obj;
+}
+
+GstMsdkContext *
+gst_msdk_context_new_with_job_type (gboolean hardware,
+    GstMsdkContextJobType job_type)
+{
+  GstMsdkContext *obj = gst_msdk_context_new (hardware);
+
+  if (obj)
+    obj->priv->job_type = job_type;
 
   return obj;
 }
@@ -313,15 +434,18 @@ GstMsdkContext *
 gst_msdk_context_new_with_parent (GstMsdkContext * parent)
 {
   mfxStatus status;
-  GstMsdkContext *obj = g_object_new (GST_TYPE_MSDK_CONTEXT, NULL);
-  GstMsdkContextPrivate *priv = obj->priv;
-  GstMsdkContextPrivate *parent_priv = parent->priv;
+  GstMsdkContext *obj;
+  GstMsdkContextPrivate *priv;
+  GstMsdkContextPrivate *parent_priv;
   mfxVersion version;
   mfxIMPL impl;
   MsdkSession child_msdk_session;
   mfxHandleType handle_type = 0;
-  mfxHDL handle = NULL;
+  mfxHDL handle = NULL, hardware_handle = NULL;
 
+  g_return_val_if_fail (GST_IS_MSDK_CONTEXT (parent), NULL);
+
+  parent_priv = parent->priv;
   status = MFXQueryIMPL (parent_priv->session.session, &impl);
 
   if (status == MFX_ERR_NONE)
@@ -330,12 +454,13 @@ gst_msdk_context_new_with_parent (GstMsdkContext * parent)
   if (status != MFX_ERR_NONE) {
     GST_ERROR ("Failed to query the session attributes (%s)",
         msdk_status_to_string (status));
-    g_object_unref (obj);
     return NULL;
   }
 
   if (MFX_IMPL_VIA_VAAPI == (0x0f00 & (impl)))
     handle_type = MFX_HANDLE_VA_DISPLAY;
+  else if (MFX_IMPL_VIA_D3D11 == (0x0f00 & (impl)))
+    handle_type = MFX_HANDLE_D3D11_DEVICE;
 
   if (handle_type) {
     status =
@@ -345,19 +470,22 @@ gst_msdk_context_new_with_parent (GstMsdkContext * parent)
     if (status != MFX_ERR_NONE || !handle) {
       GST_ERROR ("Failed to get session handle (%s)",
           msdk_status_to_string (status));
-      g_object_unref (obj);
       return NULL;
     }
   }
 
   child_msdk_session.loader = parent_priv->session.loader;
   child_msdk_session.session = NULL;
-  status = msdk_init_msdk_session (impl, &version, &child_msdk_session);
+#ifndef _WIN32
+  hardware_handle = (mfxHDL) gst_va_display_get_va_dpy (parent_priv->display);
+#endif
+
+  status = msdk_init_msdk_session (hardware_handle, impl, &version,
+      &child_msdk_session);
 
   if (status != MFX_ERR_NONE) {
     GST_ERROR ("Failed to create a child mfx session (%s)",
         msdk_status_to_string (status));
-    g_object_unref (obj);
     return NULL;
   }
 
@@ -370,7 +498,6 @@ gst_msdk_context_new_with_parent (GstMsdkContext * parent)
       GST_ERROR ("Failed to set a HW handle (%s)",
           msdk_status_to_string (status));
       MFXClose (child_msdk_session.session);
-      g_object_unref (obj);
       return NULL;
     }
   }
@@ -382,10 +509,13 @@ gst_msdk_context_new_with_parent (GstMsdkContext * parent)
     GST_ERROR ("Failed to join two sessions (%s)",
         msdk_status_to_string (status));
     MFXClose (child_msdk_session.session);
-    g_object_unref (obj);
     return NULL;
   }
 #endif
+
+  obj = g_object_new (GST_TYPE_MSDK_CONTEXT, NULL);
+  gst_object_ref_sink (obj);
+  priv = obj->priv;
 
   /* Set loader to NULL for child session */
   priv->session.loader = NULL;
@@ -395,13 +525,134 @@ gst_msdk_context_new_with_parent (GstMsdkContext * parent)
   parent_priv->child_session_list =
       g_list_prepend (parent_priv->child_session_list, priv->session.session);
 #ifndef _WIN32
-  priv->dpy = parent_priv->dpy;
-  priv->fd = parent_priv->fd;
+  priv->display = parent_priv->display;
+#else
+  priv->device = parent_priv->device;
 #endif
   priv->parent_context = gst_object_ref (parent);
 
   return obj;
 }
+
+#ifndef _WIN32
+GstMsdkContext *
+gst_msdk_context_new_with_va_display (GstObject * display_obj,
+    gboolean hardware, GstMsdkContextJobType job_type)
+{
+  GstMsdkContext *obj = NULL;
+
+  GstMsdkContextPrivate *priv;
+  mfxU16 codename;
+  mfxStatus status;
+  GstVaDisplay *va_display;
+  mfxHDL handle;
+
+  va_display = GST_VA_DISPLAY (display_obj);
+  if (!va_display)
+    return NULL;
+
+  obj = g_object_new (GST_TYPE_MSDK_CONTEXT, NULL);
+  gst_object_ref_sink (obj);
+
+  priv = obj->priv;
+  priv->display = gst_object_ref (va_display);
+
+  priv->job_type = job_type;
+  priv->hardware = hardware;
+
+  handle = (mfxHDL) gst_va_display_get_va_dpy (priv->display);
+  priv->session = msdk_open_session (handle,
+      hardware ? MFX_IMPL_HARDWARE_ANY : MFX_IMPL_SOFTWARE);
+  if (!priv->session.session) {
+    gst_object_unref (obj);
+    return NULL;
+  }
+
+  if (hardware) {
+    status =
+        MFXVideoCORE_SetHandle (priv->session.session, MFX_HANDLE_VA_DISPLAY,
+        handle);
+    if (status != MFX_ERR_NONE) {
+      GST_ERROR ("Setting VAAPI handle failed (%s)",
+          msdk_status_to_string (status));
+      gst_object_unref (obj);
+      return NULL;
+    }
+  }
+
+  codename = msdk_get_platform_codename (priv->session.session);
+
+  if (codename != MFX_PLATFORM_UNKNOWN)
+    GST_INFO ("Detected MFX platform with device code %d", codename);
+  else
+    GST_WARNING ("Unknown MFX platform");
+
+  return obj;
+}
+#else
+GstMsdkContext *
+gst_msdk_context_new_with_d3d11_device (GstD3D11Device * device,
+    gboolean hardware, GstMsdkContextJobType job_type)
+{
+  GstMsdkContext *obj = NULL;
+  GstMsdkContextPrivate *priv;
+  mfxU16 codename;
+  mfxStatus status;
+  ID3D10Multithread *multi_thread;
+  ID3D11Device *device_handle;
+  HRESULT hr;
+
+  obj = g_object_new (GST_TYPE_MSDK_CONTEXT, NULL);
+  gst_object_ref_sink (obj);
+
+  priv = obj->priv;
+  priv->device = gst_object_ref (device);
+
+  priv->job_type = job_type;
+  priv->hardware = hardware;
+  priv->session = msdk_open_session (NULL,
+      hardware ? MFX_IMPL_HARDWARE_ANY : MFX_IMPL_SOFTWARE);
+  if (!priv->session.session) {
+    goto failed;
+  }
+
+  device_handle = gst_d3d11_device_get_device_handle (device);
+  hr = ID3D11Device_QueryInterface (device_handle,
+      &IID_ID3D10Multithread, (void **) &multi_thread);
+  if (FAILED (hr)) {
+    GST_ERROR ("ID3D10Multithread interface is unavailable");
+    goto failed;
+  }
+
+  hr = ID3D10Multithread_SetMultithreadProtected (multi_thread, TRUE);
+  ID3D10Multithread_Release (multi_thread);
+
+  if (hardware) {
+    status =
+        MFXVideoCORE_SetHandle (priv->session.session, MFX_HANDLE_D3D11_DEVICE,
+        device_handle);
+    if (status != MFX_ERR_NONE) {
+      GST_ERROR ("Setting D3D11VA handle failed (%s)",
+          msdk_status_to_string (status));
+      goto failed;
+    }
+  }
+
+  codename = msdk_get_platform_codename (priv->session.session);
+
+  if (codename != MFX_PLATFORM_UNKNOWN)
+    GST_INFO ("Detected MFX platform with device code %d", codename);
+  else
+    GST_WARNING ("Unknown MFX platform");
+
+  return obj;
+
+failed:
+  gst_object_unref (obj);
+  gst_object_unref (device);
+  return NULL;
+}
+#endif
 
 mfxSession
 gst_msdk_context_get_session (GstMsdkContext * context)
@@ -409,25 +660,45 @@ gst_msdk_context_get_session (GstMsdkContext * context)
   return context->priv->session.session;
 }
 
+const mfxLoader *
+gst_msdk_context_get_loader (GstMsdkContext * context)
+{
+  return &context->priv->session.loader;
+}
+
+mfxU32
+gst_msdk_context_get_impl_idx (GstMsdkContext * context)
+{
+  return context->priv->session.impl_idx;
+}
+
 gpointer
 gst_msdk_context_get_handle (GstMsdkContext * context)
 {
 #ifndef _WIN32
-  return context->priv->dpy;
+  return gst_va_display_get_va_dpy (context->priv->display);
 #else
   return NULL;
 #endif
 }
 
-gint
-gst_msdk_context_get_fd (GstMsdkContext * context)
-{
 #ifndef _WIN32
-  return context->priv->fd;
-#else
-  return -1;
-#endif
+GstObject *
+gst_msdk_context_get_va_display (GstMsdkContext * context)
+{
+  if (context->priv->display)
+    return gst_object_ref (GST_OBJECT_CAST (context->priv->display));
+  return NULL;
 }
+#else
+GstD3D11Device *
+gst_msdk_context_get_d3d11_device (GstMsdkContext * context)
+{
+  if (context->priv->device)
+    return gst_object_ref (context->priv->device);
+  return NULL;
+}
+#endif
 
 static gint
 _find_response (gconstpointer resp, gconstpointer comp_resp)
@@ -496,47 +767,12 @@ gst_msdk_context_get_cached_alloc_responses_by_request (GstMsdkContext *
     return NULL;
 }
 
-static void
-create_surfaces (GstMsdkContext * context, GstMsdkAllocResponse * resp)
-{
-  gint i;
-  mfxMemId *mem_id;
-  mfxFrameSurface1 *surface;
-
-  for (i = 0; i < resp->response.NumFrameActual; i++) {
-    mem_id = resp->response.mids[i];
-    surface = (mfxFrameSurface1 *) g_slice_new0 (mfxFrameSurface1);
-    if (!surface) {
-      GST_ERROR ("failed to allocate surface");
-      break;
-    }
-    surface->Data.MemId = mem_id;
-    resp->surfaces_avail = g_list_prepend (resp->surfaces_avail, surface);
-  }
-}
-
-static void
-free_surface (gpointer surface)
-{
-  g_slice_free1 (sizeof (mfxFrameSurface1), surface);
-}
-
-static void
-remove_surfaces (GstMsdkContext * context, GstMsdkAllocResponse * resp)
-{
-  g_list_free_full (resp->surfaces_used, free_surface);
-  g_list_free_full (resp->surfaces_avail, free_surface);
-  g_list_free_full (resp->surfaces_locked, free_surface);
-}
-
 void
 gst_msdk_context_add_alloc_response (GstMsdkContext * context,
     GstMsdkAllocResponse * resp)
 {
   context->priv->cached_alloc_responses =
       g_list_prepend (context->priv->cached_alloc_responses, resp);
-
-  create_surfaces (context, resp);
 }
 
 gboolean
@@ -553,8 +789,6 @@ gst_msdk_context_remove_alloc_response (GstMsdkContext * context,
 
   msdk_resp = l->data;
 
-  remove_surfaces (context, msdk_resp);
-
   g_slice_free1 (sizeof (GstMsdkAllocResponse), msdk_resp);
   priv->cached_alloc_responses =
       g_list_delete_link (priv->cached_alloc_responses, l);
@@ -562,126 +796,29 @@ gst_msdk_context_remove_alloc_response (GstMsdkContext * context,
   return TRUE;
 }
 
-static gboolean
-check_surfaces_available (GstMsdkContext * context, GstMsdkAllocResponse * resp)
-{
-  GList *l;
-  mfxFrameSurface1 *surface = NULL;
-  GstMsdkContextPrivate *priv = context->priv;
-  gboolean ret = FALSE;
-
-  g_mutex_lock (&priv->mutex);
-  for (l = resp->surfaces_locked; l;) {
-    surface = l->data;
-    l = l->next;
-    if (!surface->Data.Locked) {
-      resp->surfaces_locked = g_list_remove (resp->surfaces_locked, surface);
-      resp->surfaces_avail = g_list_prepend (resp->surfaces_avail, surface);
-      ret = TRUE;
-    }
-  }
-  g_mutex_unlock (&priv->mutex);
-
-  return ret;
-}
-
-/*
- * There are 3 lists here in GstMsdkContext as the following:
- * 1. surfaces_avail : surfaces which are free and unused anywhere
- * 2. surfaces_used : surfaces coupled with a gst buffer and being used now.
- * 3. surfaces_locked : surfaces still locked even after the gst buffer is released.
- *
- * Note that they need to be protected by mutex to be thread-safe.
- */
-
-mfxFrameSurface1 *
-gst_msdk_context_get_surface_available (GstMsdkContext * context,
-    mfxFrameAllocResponse * resp)
-{
-  GList *l;
-  mfxFrameSurface1 *surface = NULL;
-  GstMsdkAllocResponse *msdk_resp =
-      gst_msdk_context_get_cached_alloc_responses (context, resp);
-  gint retry = 0;
-  GstMsdkContextPrivate *priv = context->priv;
-
-retry:
-  g_mutex_lock (&priv->mutex);
-  for (l = msdk_resp->surfaces_avail; l;) {
-    surface = l->data;
-    l = l->next;
-    if (!surface->Data.Locked) {
-      msdk_resp->surfaces_avail =
-          g_list_remove (msdk_resp->surfaces_avail, surface);
-      msdk_resp->surfaces_used =
-          g_list_prepend (msdk_resp->surfaces_used, surface);
-      break;
-    }
-  }
-  g_mutex_unlock (&priv->mutex);
-
-  /*
-   * If a msdk context is shared by multiple msdk elements,
-   * upstream msdk element sometimes needs to wait for a gst buffer
-   * to be released in downstream.
-   *
-   * Poll the pool for a maximum of 20 millisecond.
-   *
-   * FIXME: Is there any better way to handle this case?
-   */
-  if (!surface && retry < 20) {
-    /* If there's no surface available, find unlocked surfaces in the locked list,
-     * take it back to the available list and then search again.
-     */
-    check_surfaces_available (context, msdk_resp);
-    retry++;
-    g_usleep (1000);
-    goto retry;
-  }
-
-  return surface;
-}
-
 void
-gst_msdk_context_put_surface_locked (GstMsdkContext * context,
-    mfxFrameAllocResponse * resp, mfxFrameSurface1 * surface)
+gst_msdk_context_set_alloc_pool (GstMsdkContext * context, GstBufferPool * pool)
 {
-  GstMsdkContextPrivate *priv = context->priv;
-  GstMsdkAllocResponse *msdk_resp =
-      gst_msdk_context_get_cached_alloc_responses (context, resp);
-
-  g_mutex_lock (&priv->mutex);
-  if (!g_list_find (msdk_resp->surfaces_locked, surface)) {
-    msdk_resp->surfaces_used =
-        g_list_remove (msdk_resp->surfaces_used, surface);
-    msdk_resp->surfaces_locked =
-        g_list_prepend (msdk_resp->surfaces_locked, surface);
-  }
-  g_mutex_unlock (&priv->mutex);
+  context->priv->alloc_pool = gst_object_ref (pool);
 }
 
-void
-gst_msdk_context_put_surface_available (GstMsdkContext * context,
-    mfxFrameAllocResponse * resp, mfxFrameSurface1 * surface)
+GstBufferPool *
+gst_msdk_context_get_alloc_pool (GstMsdkContext * context)
 {
-  GstMsdkContextPrivate *priv = context->priv;
-  GstMsdkAllocResponse *msdk_resp =
-      gst_msdk_context_get_cached_alloc_responses (context, resp);
-
-  g_mutex_lock (&priv->mutex);
-  if (!g_list_find (msdk_resp->surfaces_avail, surface)) {
-    msdk_resp->surfaces_used =
-        g_list_remove (msdk_resp->surfaces_used, surface);
-    msdk_resp->surfaces_avail =
-        g_list_prepend (msdk_resp->surfaces_avail, surface);
-  }
-  g_mutex_unlock (&priv->mutex);
+  return context->priv->alloc_pool;
 }
 
 GstMsdkContextJobType
 gst_msdk_context_get_job_type (GstMsdkContext * context)
 {
   return context->priv->job_type;
+}
+
+void
+gst_msdk_context_set_job_type (GstMsdkContext * context,
+    GstMsdkContextJobType job_type)
+{
+  context->priv->job_type = job_type;
 }
 
 void

@@ -41,10 +41,11 @@ if build_gir
   library_def += {'gir': [gir]}
   if not static_build
     audio_gir = gnome.generate_gir(gstbadaudio, kwargs: gir)
+    library_def += {'gir_targets':  library_def.get('gir_targets', []) + [audio_gir]}
     gen_sources += audio_gir
   endif
 endif
-libraries += [[pkg_name, library_def]]
+gst_libraries += [[pkg_name, library_def]]
 
 gstbadaudio_dep = declare_dependency(link_with : gstbadaudio,
   include_directories : [libsinc],

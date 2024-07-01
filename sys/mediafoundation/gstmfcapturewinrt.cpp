@@ -36,14 +36,11 @@ using namespace Microsoft::WRL::Wrappers;
 using namespace ABI::Windows::Media::MediaProperties;
 using namespace ABI::Windows::Graphics::Imaging;
 using namespace ABI::Windows::Foundation;
-
-G_BEGIN_DECLS
+/* *INDENT-ON* */
 
 GST_DEBUG_CATEGORY_EXTERN (gst_mf_source_object_debug);
 #define GST_CAT_DEFAULT gst_mf_source_object_debug
 
-G_END_DECLS
-/* *INDENT-ON* */
 
 enum
 {
@@ -250,7 +247,7 @@ gst_mf_capture_winrt_thread_func (GstMFCaptureWinRT * self)
 
   idle_source = g_idle_source_new ();
   g_source_set_callback (idle_source,
-      (GSourceFunc) gst_mf_capture_winrt_main_loop_running_cb, self, NULL);
+      (GSourceFunc) gst_mf_capture_winrt_main_loop_running_cb, self, nullptr);
   g_source_attach (idle_source, self->context);
   g_source_unref (idle_source);
 
@@ -298,6 +295,7 @@ gst_mf_capture_winrt_thread_func (GstMFCaptureWinRT * self)
 
   if (!target_group) {
     GST_WARNING_OBJECT (self, "No matching device");
+    source->source_state = GST_MF_DEVICE_NOT_FOUND;
     goto run_loop;
   }
 
@@ -321,7 +319,7 @@ gst_mf_capture_winrt_thread_func (GstMFCaptureWinRT * self)
   GST_DEBUG_OBJECT (self, "Available output caps %" GST_PTR_FORMAT,
       self->supported_caps);
 
-  source->opened = TRUE;
+  source->source_state = GST_MF_OK;
 
   g_free (source->device_path);
   source->device_path = g_strdup (target_group->id_.c_str ());
@@ -341,9 +339,9 @@ run_loop:
   gst_mf_capture_winrt_stop (source);
 
   delete self->capture;
-  self->capture = NULL;
+  self->capture = nullptr;
 
-  return NULL;
+  return nullptr;
 }
 
 static gboolean
@@ -668,7 +666,7 @@ gst_mf_capture_winrt_get_caps (GstMFSourceObject * object)
   if (self->supported_caps)
     return gst_caps_ref (self->supported_caps);
 
-  return NULL;
+  return nullptr;
 }
 
 /* *INDENT-OFF* */
@@ -678,7 +676,7 @@ gst_mf_capture_winrt_set_caps (GstMFSourceObject * object, GstCaps * caps)
   GstMFCaptureWinRT *self = GST_MF_CAPTURE_WINRT (object);
   std::vector<GstWinRTMediaDescription> desc_list;
   HRESULT hr;
-  GstCaps *target_caps = NULL;
+  GstCaps *target_caps = nullptr;
 
   hr = self->capture->GetAvailableDescriptions(desc_list);
   if (!gst_mf_result (hr) || desc_list.empty()) {
@@ -732,7 +730,7 @@ gst_mf_capture_winrt_new (GstMFSourceType type, gint device_index,
   RoInitializeWrapper init_wrapper (RO_INIT_MULTITHREADED);
 
   /* TODO: Add audio capture support */
-  g_return_val_if_fail (type == GST_MF_SOURCE_TYPE_VIDEO, NULL);
+  g_return_val_if_fail (type == GST_MF_SOURCE_TYPE_VIDEO, nullptr);
 
   /* If application didn't pass ICoreDispatcher object,
    * try to get dispatcher object for the current thread */
@@ -752,19 +750,42 @@ gst_mf_capture_winrt_new (GstMFSourceType type, gint device_index,
 
   self = (GstMFSourceObject *) g_object_new (GST_TYPE_MF_CAPTURE_WINRT,
       "source-type", type, "device-index", device_index, "device-name",
-      device_name, "device-path", device_path, "dispatcher", dispatcher, NULL);
+      device_name, "device-path", device_path, "dispatcher", dispatcher,
+      nullptr);
+  gst_object_ref_sink (self);
 
   /* Reset explicitly to ensure that it happens before
    * RoInitializeWrapper dtor is called */
   core_dispatcher.Reset ();
 
-  if (!self->opened) {
+  if (self->source_state != GST_MF_OK) {
     GST_WARNING_OBJECT (self, "Couldn't open device");
     gst_object_unref (self);
-    return NULL;
+    return nullptr;
   }
 
+  return self;
+}
+
+GstMFSourceResult
+gst_mf_capture_winrt_enumerate (gint device_index, GstMFSourceObject ** object)
+{
+  ComPtr < ICoreDispatcher > core_dispatcher;
+  /* Multiple COM init is allowed */
+  RoInitializeWrapper init_wrapper (RO_INIT_MULTITHREADED);
+  FindCoreDispatcherForCurrentThread (&core_dispatcher);
+
+  auto self = (GstMFSourceObject *) g_object_new (GST_TYPE_MF_CAPTURE_WINRT,
+      "source-type", GST_MF_SOURCE_TYPE_VIDEO, "device-index", device_index,
+      "dispatcher", core_dispatcher.Get (), nullptr);
   gst_object_ref_sink (self);
 
-  return self;
+  auto ret = self->source_state;
+  if (ret != GST_MF_OK) {
+    gst_object_unref (self);
+    return ret;
+  }
+
+  *object = self;
+  return GST_MF_OK;
 }

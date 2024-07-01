@@ -50,10 +50,20 @@ GST_STATIC_PAD_TEMPLATE (GST_VIDEO_DECODER_SINK_NAME,
         "alignment=(string) au")
     );
 
+#define SRC_CAPS \
+    GST_VIDEO_DMA_DRM_CAPS_MAKE " ; " \
+    GST_VIDEO_CAPS_MAKE (GST_V4L2_DEFAULT_VIDEO_FORMATS)
+
+#define SRC_CAPS_NO_DRM \
+    GST_VIDEO_CAPS_MAKE (GST_V4L2_DEFAULT_VIDEO_FORMATS)
+
+static GstStaticCaps static_src_caps = GST_STATIC_CAPS (SRC_CAPS);
+static GstStaticCaps static_src_caps_no_drm = GST_STATIC_CAPS (SRC_CAPS_NO_DRM);
+
 static GstStaticPadTemplate src_template =
 GST_STATIC_PAD_TEMPLATE (GST_VIDEO_DECODER_SRC_NAME,
     GST_PAD_SRC, GST_PAD_ALWAYS,
-    GST_STATIC_CAPS (GST_VIDEO_CAPS_MAKE (GST_V4L2_DEFAULT_VIDEO_FORMATS)));
+    GST_STATIC_CAPS (SRC_CAPS));
 
 struct _GstV4l2CodecH264Dec
 {
@@ -61,6 +71,7 @@ struct _GstV4l2CodecH264Dec
   GstV4l2Decoder *decoder;
   GstVideoCodecState *output_state;
   GstVideoInfo vinfo;
+  GstVideoInfoDmaDrm vinfo_drm;
   gint display_width;
   gint display_height;
   gint coded_width;
@@ -75,7 +86,7 @@ struct _GstV4l2CodecH264Dec
   GstV4l2CodecPool *src_pool;
   gint min_pool_size;
   gboolean has_videometa;
-  gboolean need_negotiation;
+  gboolean streaming;
   gboolean interlaced;
   gboolean need_sequence;
   gboolean copy_frames;
@@ -234,6 +245,16 @@ gst_v4l2_codec_h264_dec_close (GstVideoDecoder * decoder)
 }
 
 static void
+gst_v4l2_codec_h264_dec_streamoff (GstV4l2CodecH264Dec * self)
+{
+  if (self->streaming) {
+    gst_v4l2_decoder_streamoff (self->decoder, GST_PAD_SINK);
+    gst_v4l2_decoder_streamoff (self->decoder, GST_PAD_SRC);
+    self->streaming = FALSE;
+  }
+}
+
+static void
 gst_v4l2_codec_h264_dec_reset_allocation (GstV4l2CodecH264Dec * self)
 {
   if (self->sink_allocator) {
@@ -253,9 +274,7 @@ gst_v4l2_codec_h264_dec_stop (GstVideoDecoder * decoder)
 {
   GstV4l2CodecH264Dec *self = GST_V4L2_CODEC_H264_DEC (decoder);
 
-  gst_v4l2_decoder_streamoff (self->decoder, GST_PAD_SINK);
-  gst_v4l2_decoder_streamoff (self->decoder, GST_PAD_SRC);
-
+  gst_v4l2_codec_h264_dec_streamoff (self);
   gst_v4l2_codec_h264_dec_reset_allocation (self);
 
   if (self->output_state)
@@ -311,17 +330,14 @@ gst_v4l2_codec_h264_dec_negotiate (GstVideoDecoder * decoder)
     },
   };
   /* *INDENT-ON* */
-  GstCaps *filter, *caps;
+  GstCaps *peer_caps, *filter, *caps;
+  GstStaticCaps *static_filter;
 
   /* Ignore downstream renegotiation request. */
-  if (!self->need_negotiation)
-    return TRUE;
-  self->need_negotiation = FALSE;
+  if (self->streaming)
+    goto done;
 
   GST_DEBUG_OBJECT (self, "Negotiate");
-
-  gst_v4l2_decoder_streamoff (self->decoder, GST_PAD_SINK);
-  gst_v4l2_decoder_streamoff (self->decoder, GST_PAD_SRC);
 
   gst_v4l2_codec_h264_dec_reset_allocation (self);
 
@@ -341,7 +357,13 @@ gst_v4l2_codec_h264_dec_negotiate (GstVideoDecoder * decoder)
     return FALSE;
   }
 
-  filter = gst_v4l2_decoder_enum_src_formats (self->decoder);
+  /* If the peer has ANY caps only advertise system memory caps */
+  peer_caps = gst_pad_peer_query_caps (decoder->srcpad, NULL);
+  static_filter =
+      gst_caps_is_any (peer_caps) ? &static_src_caps_no_drm : &static_src_caps;
+  gst_caps_unref (peer_caps);
+
+  filter = gst_v4l2_decoder_enum_src_formats (self->decoder, static_filter);
   if (!filter) {
     GST_ELEMENT_ERROR (self, CORE, NEGOTIATION,
         ("No supported decoder output formats"), (NULL));
@@ -353,7 +375,8 @@ gst_v4l2_codec_h264_dec_negotiate (GstVideoDecoder * decoder)
   gst_caps_unref (filter);
   GST_DEBUG_OBJECT (self, "Peer supported formats: %" GST_PTR_FORMAT, caps);
 
-  if (!gst_v4l2_decoder_select_src_format (self->decoder, caps, &self->vinfo)) {
+  if (!gst_v4l2_decoder_select_src_format (self->decoder, caps, &self->vinfo,
+          &self->vinfo_drm)) {
     GST_ELEMENT_ERROR (self, CORE, NEGOTIATION,
         ("Unsupported bitdepth/chroma format"),
         ("No support for %ux%u %ubit chroma IDC %i", self->coded_width,
@@ -363,20 +386,22 @@ gst_v4l2_codec_h264_dec_negotiate (GstVideoDecoder * decoder)
   }
   gst_caps_unref (caps);
 
+done:
   if (self->output_state)
     gst_video_codec_state_unref (self->output_state);
 
   self->output_state =
-      gst_video_decoder_set_output_state (GST_VIDEO_DECODER (self),
-      self->vinfo.finfo->format, self->display_width,
-      self->display_height, h264dec->input_state);
+      gst_v4l2_decoder_set_output_state (GST_VIDEO_DECODER (self), &self->vinfo,
+      &self->vinfo_drm, self->display_width, self->display_height,
+      h264dec->input_state);
 
   if (self->interlaced)
     self->output_state->info.interlace_mode = GST_VIDEO_INTERLACE_MODE_MIXED;
 
-  self->output_state->caps = gst_video_info_to_caps (&self->output_state->info);
-
   if (GST_VIDEO_DECODER_CLASS (parent_class)->negotiate (decoder)) {
+    if (self->streaming)
+      return TRUE;
+
     if (!gst_v4l2_decoder_streamon (self->decoder, GST_PAD_SINK)) {
       GST_ELEMENT_ERROR (self, RESOURCE, FAILED,
           ("Could not enable the decoder driver."),
@@ -391,6 +416,8 @@ gst_v4l2_codec_h264_dec_negotiate (GstVideoDecoder * decoder)
       return FALSE;
     }
 
+    self->streaming = TRUE;
+
     return TRUE;
   }
 
@@ -402,13 +429,31 @@ gst_v4l2_codec_h264_dec_decide_allocation (GstVideoDecoder * decoder,
     GstQuery * query)
 {
   GstV4l2CodecH264Dec *self = GST_V4L2_CODEC_H264_DEC (decoder);
+  GstCaps *caps = NULL;
   guint min = 0, num_bitstream;
+
+  /* If we are streaming here, then it means there is nothing allocation
+   * related in the new state and allocation can be ignored */
+  if (self->streaming)
+    goto no_internal_changes;
+
+  g_clear_object (&self->src_pool);
+  g_clear_object (&self->src_allocator);
 
   self->has_videometa = gst_query_find_allocation_meta (query,
       GST_VIDEO_META_API_TYPE, NULL);
 
-  g_clear_object (&self->src_pool);
-  g_clear_object (&self->src_allocator);
+  gst_query_parse_allocation (query, &caps, NULL);
+  if (!caps) {
+    GST_ERROR_OBJECT (self, "No valid caps");
+    return FALSE;
+  }
+
+  if (gst_video_is_dma_drm_caps (caps) && !self->has_videometa) {
+    GST_ERROR_OBJECT (self,
+        "DMABuf caps negotiated without the mandatory support of VideoMeta");
+    return FALSE;
+  }
 
   if (gst_query_get_n_allocation_pools (query) > 0)
     gst_query_parse_nth_allocation_pool (query, 0, NULL, NULL, &min, NULL);
@@ -437,6 +482,7 @@ gst_v4l2_codec_h264_dec_decide_allocation (GstVideoDecoder * decoder,
 
   self->src_pool = gst_v4l2_codec_pool_new (self->src_allocator, &self->vinfo);
 
+no_internal_changes:
   /* Our buffer pool is internal, we will let the base class create a video
    * pool, and use it if we are running out of buffers or if downstream does
    * not support GstVideoMeta */
@@ -559,19 +605,26 @@ gst_v4l2_codec_h264_dec_fill_decoder_params (GstV4l2CodecH264Dec * self,
              (slice_hdr->field_pic_flag ? V4L2_H264_DECODE_PARAM_FLAG_FIELD_PIC : 0) |
              (slice_hdr->bottom_field_flag ? V4L2_H264_DECODE_PARAM_FLAG_BOTTOM_FIELD : 0),
   };
+  /* *INDENT-ON* */
 
   switch (picture->field) {
     case GST_H264_PICTURE_FIELD_FRAME:
       self->decode_params.top_field_order_cnt = picture->top_field_order_cnt;
       self->decode_params.bottom_field_order_cnt =
-        picture->bottom_field_order_cnt;
+          picture->bottom_field_order_cnt;
       break;
     case GST_H264_PICTURE_FIELD_TOP_FIELD:
       self->decode_params.top_field_order_cnt = picture->top_field_order_cnt;
       self->decode_params.bottom_field_order_cnt = 0;
+      if (picture->other_field)
+        self->decode_params.bottom_field_order_cnt =
+            picture->other_field->bottom_field_order_cnt;
       break;
     case GST_H264_PICTURE_FIELD_BOTTOM_FIELD:
       self->decode_params.top_field_order_cnt = 0;
+      if (picture->other_field)
+        self->decode_params.top_field_order_cnt =
+            picture->other_field->top_field_order_cnt;
       self->decode_params.bottom_field_order_cnt =
           picture->bottom_field_order_cnt;
       break;
@@ -599,18 +652,21 @@ gst_v4l2_codec_h264_dec_fill_decoder_params (GstV4l2CodecH264Dec * self,
     }
 
     entry = &self->decode_params.dpb[entry_id++];
+    /* *INDENT-OFF* */
     *entry = (struct v4l2_h264_dpb_entry) {
       /*
        * The reference is multiplied by 1000 because it's was set as micro
        * seconds and this TS is nanosecond.
        */
-      .reference_ts = (guint64) ref_pic->system_frame_number * 1000,
+      .reference_ts = GST_CODEC_PICTURE_TS_NS (ref_pic),
       .frame_num = frame_num,
       .pic_num = pic_num,
       .flags = V4L2_H264_DPB_ENTRY_FLAG_VALID
           | (GST_H264_PICTURE_IS_REF (ref_pic) ? V4L2_H264_DPB_ENTRY_FLAG_ACTIVE : 0)
-          | (GST_H264_PICTURE_IS_LONG_TERM_REF (ref_pic) ? V4L2_H264_DPB_ENTRY_FLAG_LONG_TERM : 0),
+          | (GST_H264_PICTURE_IS_LONG_TERM_REF (ref_pic) ? V4L2_H264_DPB_ENTRY_FLAG_LONG_TERM : 0)
+          | (ref_pic->field_pic_flag ? V4L2_H264_DPB_ENTRY_FLAG_FIELD : 0),
     };
+    /* *INDENT-ON* */
 
     switch (ref_pic->field) {
       case GST_H264_PICTURE_FIELD_FRAME:
@@ -626,8 +682,6 @@ gst_v4l2_codec_h264_dec_fill_decoder_params (GstV4l2CodecH264Dec * self,
           entry->bottom_field_order_cnt =
               ref_pic->other_field->bottom_field_order_cnt;
           entry->fields |= V4L2_H264_BOTTOM_FIELD_REF;
-        } else {
-          entry->flags |= V4L2_H264_DPB_ENTRY_FLAG_FIELD;
         }
         break;
       case GST_H264_PICTURE_FIELD_BOTTOM_FIELD:
@@ -636,15 +690,12 @@ gst_v4l2_codec_h264_dec_fill_decoder_params (GstV4l2CodecH264Dec * self,
 
         if (ref_pic->other_field) {
           entry->top_field_order_cnt =
-            ref_pic->other_field->top_field_order_cnt;
+              ref_pic->other_field->top_field_order_cnt;
           entry->fields |= V4L2_H264_TOP_FIELD_REF;
-        } else {
-          entry->flags |= V4L2_H264_DPB_ENTRY_FLAG_FIELD;
         }
         break;
     }
   }
-  /* *INDENT-ON* */
 
   g_array_unref (refs);
 }
@@ -715,15 +766,11 @@ gst_v4l2_codec_h264_dec_fill_slice_params (GstV4l2CodecH264Dec * self,
     GstH264Slice * slice)
 {
   gint n = self->num_slices++;
-  gsize slice_size = slice->nalu.size;
   struct v4l2_ctrl_h264_slice_params *params;
 
   /* Ensure array is large enough */
   if (self->slice_params->len < self->num_slices)
     g_array_set_size (self->slice_params, self->slice_params->len * 2);
-
-  if (needs_start_codes (self))
-    slice_size += 3;
 
   /* *INDENT-OFF* */
   params = &g_array_index (self->slice_params, struct v4l2_ctrl_h264_slice_params, n);
@@ -762,7 +809,7 @@ lookup_dpb_index (struct v4l2_h264_dpb_entry dpb[16], GstH264Picture * ref_pic)
   if (ref_pic->second_field && ref_pic->other_field)
     ref_pic = ref_pic->other_field;
 
-  ref_ts = (guint64) ref_pic->system_frame_number * 1000;
+  ref_ts = (guint64) GST_CODEC_PICTURE_FRAME_NUMBER (ref_pic) * 1000;
   for (i = 0; i < 16; i++) {
     if (dpb[i].flags & V4L2_H264_DPB_ENTRY_FLAG_ACTIVE
         && dpb[i].reference_ts == ref_ts)
@@ -889,7 +936,7 @@ gst_v4l2_codec_h264_dec_new_sequence (GstH264Decoder * decoder,
   self->need_sequence = TRUE;
 
   if (negotiation_needed) {
-    self->need_negotiation = TRUE;
+    gst_v4l2_codec_h264_dec_streamoff (self);
     if (!gst_video_decoder_negotiate (GST_VIDEO_DECODER (self))) {
       GST_ERROR_OBJECT (self, "Failed to negotiate with downstream");
       return GST_FLOW_NOT_NEGOTIATED;
@@ -979,6 +1026,7 @@ gst_v4l2_codec_h264_dec_start_picture (GstH264Decoder * decoder,
       dpb);
 
   self->first_slice = TRUE;
+  self->num_slices = 0;
 
   return GST_FLOW_OK;
 }
@@ -1038,14 +1086,23 @@ gst_v4l2_codec_h264_dec_output_picture (GstH264Decoder * decoder,
   GstV4l2CodecH264Dec *self = GST_V4L2_CODEC_H264_DEC (decoder);
   GstVideoDecoder *vdec = GST_VIDEO_DECODER (decoder);
   GstV4l2Request *request = gst_h264_picture_get_user_data (picture);
+  GstCodecPicture *codec_picture = GST_CODEC_PICTURE (picture);
   gint ret;
 
-  GST_DEBUG_OBJECT (self, "Output picture %u", picture->system_frame_number);
+  if (codec_picture->discont_state) {
+    if (!gst_video_decoder_negotiate (vdec)) {
+      GST_ERROR_OBJECT (vdec, "Could not re-negotiate with updated state");
+      return FALSE;
+    }
+  }
+
+  GST_DEBUG_OBJECT (self, "Output picture %u",
+      codec_picture->system_frame_number);
 
   ret = gst_v4l2_request_set_done (request);
   if (ret == 0) {
     GST_ELEMENT_ERROR (self, STREAM, DECODE,
-        ("Decoding frame %u took too long", picture->system_frame_number),
+        ("Decoding frame %u took too long", codec_picture->system_frame_number),
         (NULL));
     goto error;
   } else if (ret < 0) {
@@ -1057,7 +1114,8 @@ gst_v4l2_codec_h264_dec_output_picture (GstH264Decoder * decoder,
 
   if (gst_v4l2_request_failed (request)) {
     GST_ELEMENT_ERROR (self, STREAM, DECODE,
-        ("Failed to decode frame %u", picture->system_frame_number), (NULL));
+        ("Failed to decode frame %u", codec_picture->system_frame_number),
+        (NULL));
     goto error;
   }
 
@@ -1124,7 +1182,7 @@ gst_v4l2_codec_h264_dec_submit_bitstream (GstV4l2CodecH264Dec * self,
   GstV4l2Request *prev_request, *request = NULL;
   gsize bytesused;
   gboolean ret = FALSE;
-  guint count = 0;
+  guint num_controls = 0;
 
   /* *INDENT-OFF* */
   /* Reserve space for controls */
@@ -1150,16 +1208,17 @@ gst_v4l2_codec_h264_dec_submit_bitstream (GstV4l2CodecH264Dec * self,
         self->bitstream);
   } else {
     GstVideoCodecFrame *frame;
+    guint32 system_frame_number = GST_CODEC_PICTURE_FRAME_NUMBER (picture);
 
     frame = gst_video_decoder_get_frame (GST_VIDEO_DECODER (self),
-        picture->system_frame_number);
+        system_frame_number);
     g_return_val_if_fail (frame, FALSE);
 
     if (!gst_v4l2_codec_h264_dec_ensure_output_buffer (self, frame))
       goto done;
 
     request = gst_v4l2_decoder_alloc_request (self->decoder,
-        picture->system_frame_number, self->bitstream, frame->output_buffer);
+        system_frame_number, self->bitstream, frame->output_buffer);
 
     gst_video_codec_frame_unref (frame);
   }
@@ -1171,49 +1230,53 @@ gst_v4l2_codec_h264_dec_submit_bitstream (GstV4l2CodecH264Dec * self,
   }
 
   if (self->need_sequence) {
-    control[count].id = V4L2_CID_STATELESS_H264_SPS;
-    control[count].ptr = &self->sps;
-    control[count].size = sizeof (self->sps);
-    count++;
+    control[num_controls].id = V4L2_CID_STATELESS_H264_SPS;
+    control[num_controls].ptr = &self->sps;
+    control[num_controls].size = sizeof (self->sps);
+    num_controls++;
     self->need_sequence = FALSE;
   }
 
   if (self->first_slice) {
-    control[count].id = V4L2_CID_STATELESS_H264_PPS;
-    control[count].ptr = &self->pps;
-    control[count].size = sizeof (self->pps);
-    count++;
+    control[num_controls].id = V4L2_CID_STATELESS_H264_PPS;
+    control[num_controls].ptr = &self->pps;
+    control[num_controls].size = sizeof (self->pps);
+    num_controls++;
 
     if (self->scaling_matrix_present) {
-      control[count].id = V4L2_CID_STATELESS_H264_SCALING_MATRIX;
-      control[count].ptr = &self->scaling_matrix;
-      control[count].size = sizeof (self->scaling_matrix);
-      count++;
+      control[num_controls].id = V4L2_CID_STATELESS_H264_SCALING_MATRIX;
+      control[num_controls].ptr = &self->scaling_matrix;
+      control[num_controls].size = sizeof (self->scaling_matrix);
+      num_controls++;
     }
 
-    control[count].id = V4L2_CID_STATELESS_H264_DECODE_PARAMS;
-    control[count].ptr = &self->decode_params;
-    control[count].size = sizeof (self->decode_params);
-    count++;
+    control[num_controls].id = V4L2_CID_STATELESS_H264_DECODE_PARAMS;
+    control[num_controls].ptr = &self->decode_params;
+    control[num_controls].size = sizeof (self->decode_params);
+    num_controls++;
 
     self->first_slice = FALSE;
   }
 
   /* If it's not slice-based then it doesn't support per-slice controls. */
   if (is_slice_based (self)) {
-    control[count].id = V4L2_CID_STATELESS_H264_SLICE_PARAMS;
-    control[count].ptr = self->slice_params->data;
-    control[count].size = g_array_get_element_size (self->slice_params)
+    control[num_controls].id = V4L2_CID_STATELESS_H264_SLICE_PARAMS;
+    control[num_controls].ptr = self->slice_params->data;
+    control[num_controls].size = g_array_get_element_size (self->slice_params)
         * self->num_slices;
-    count++;
+    num_controls++;
 
-    control[count].id = V4L2_CID_STATELESS_H264_PRED_WEIGHTS;
-    control[count].ptr = &self->pred_weight;
-    control[count].size = sizeof (self->pred_weight);
-    count++;
+    control[num_controls].id = V4L2_CID_STATELESS_H264_PRED_WEIGHTS;
+    control[num_controls].ptr = &self->pred_weight;
+    control[num_controls].size = sizeof (self->pred_weight);
+    num_controls++;
   }
 
-  if (!gst_v4l2_decoder_set_controls (self->decoder, request, control, count)) {
+  if (num_controls > G_N_ELEMENTS (control))
+    g_error ("Set too many controls, increase control[] size");
+
+  if (!gst_v4l2_decoder_set_controls (self->decoder, request, control,
+          num_controls)) {
     GST_ELEMENT_ERROR (self, RESOURCE, WRITE,
         ("Driver did not accept the bitstream parameters."), (NULL));
     goto done;
@@ -1286,6 +1349,16 @@ gst_v4l2_codec_h264_dec_decode_slice (GstH264Decoder * decoder,
       slice->nalu.size);
   self->bitstream_map.size += nal_size;
 
+  switch (slice->header.type % 5) {
+    case GST_H264_P_SLICE:
+      self->decode_params.flags |= V4L2_H264_DECODE_PARAM_FLAG_PFRAME;
+      break;
+
+    case GST_H264_B_SLICE:
+      self->decode_params.flags |= V4L2_H264_DECODE_PARAM_FLAG_BFRAME;
+      break;
+  }
+
   return GST_FLOW_OK;
 }
 
@@ -1308,11 +1381,10 @@ gst_v4l2_codec_h264_dec_end_picture (GstH264Decoder * decoder,
 
 static GstFlowReturn
 gst_v4l2_codec_h264_dec_new_field_picture (GstH264Decoder * decoder,
-    const GstH264Picture * first_field, GstH264Picture * second_field)
+    GstH264Picture * first_field, GstH264Picture * second_field)
 {
   GstV4l2CodecH264Dec *self = GST_V4L2_CODEC_H264_DEC (decoder);
-  GstV4l2Request *request =
-      gst_h264_picture_get_user_data ((GstH264Picture *) first_field);
+  GstV4l2Request *request = gst_h264_picture_get_user_data (first_field);
 
   if (!request) {
     GST_WARNING_OBJECT (self,
@@ -1320,7 +1392,8 @@ gst_v4l2_codec_h264_dec_new_field_picture (GstH264Decoder * decoder,
     return GST_FLOW_OK;
   }
 
-  GST_DEBUG_OBJECT (self, "Assigned request %p to second field.", request);
+  GST_DEBUG_OBJECT (self, "Assigned request %i to second field.",
+      gst_v4l2_request_get_fd (request));
 
   /* Associate the previous request with the new picture so that
    * submit_bitstream can create sub-request */
@@ -1439,8 +1512,10 @@ gst_v4l2_codec_h264_dec_subinit (GstV4l2CodecH264Dec * self,
 {
   self->decoder = gst_v4l2_decoder_new (klass->device);
   gst_video_info_init (&self->vinfo);
+  gst_video_info_dma_drm_init (&self->vinfo_drm);
   self->slice_params = g_array_sized_new (FALSE, TRUE,
       sizeof (struct v4l2_ctrl_h264_slice_params), 4);
+  g_array_set_size (self->slice_params, 4);
 }
 
 static void
@@ -1526,7 +1601,7 @@ gst_v4l2_codec_h264_dec_register (GstPlugin * plugin, GstV4l2Decoder * decoder,
   if (!gst_v4l2_decoder_set_sink_fmt (decoder, V4L2_PIX_FMT_H264_SLICE,
           320, 240, 8))
     return;
-  src_caps = gst_v4l2_decoder_enum_src_formats (decoder);
+  src_caps = gst_v4l2_decoder_enum_src_formats (decoder, &static_src_caps);
 
   if (gst_caps_is_empty (src_caps)) {
     GST_WARNING ("Not registering H264 decoder since it produces no "

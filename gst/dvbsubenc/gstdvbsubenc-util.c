@@ -551,7 +551,7 @@ static gboolean
 dvbenc_write_object_data (GstByteWriter * b, int object_version, int page_id,
     int object_id, SubpictureRect * s)
 {
-  guint seg_size_pos, end_pos;
+  guint seg_size_pos, end_pos, bottom_end_pos;
   guint pixel_fields_size_pos, top_start_pos, bottom_start_pos;
   EncodeRLEFunc encode_rle_func;
   const gint stride = GST_VIDEO_INFO_PLANE_STRIDE (&s->frame->info, 0);
@@ -588,13 +588,15 @@ dvbenc_write_object_data (GstByteWriter * b, int object_version, int page_id,
   if (h > 1)
     encode_rle_func (b, pixels + stride, stride * 2, w, h >> 1);
 
-  end_pos = gst_byte_writer_get_pos (b);
+  bottom_end_pos = gst_byte_writer_get_pos (b);
 
   /* If the encoded size of the top+bottom field data blocks is even,
    * add a stuffing byte */
-  if (((end_pos - top_start_pos) & 1) == 0) {
+  if (((bottom_end_pos - top_start_pos) & 1) == 0) {
     gst_byte_writer_put_uint8 (b, 0);
     end_pos = gst_byte_writer_get_pos (b);
+  } else {
+    end_pos = bottom_end_pos;
   }
 
   /* Re-write the size fields */
@@ -605,12 +607,12 @@ dvbenc_write_object_data (GstByteWriter * b, int object_version, int page_id,
 
   if (bottom_start_pos - top_start_pos > G_MAXUINT16)
     return FALSE;               /* Data too big */
-  if (end_pos - bottom_start_pos > G_MAXUINT16)
+  if (bottom_end_pos - bottom_start_pos > G_MAXUINT16)
     return FALSE;               /* Data too big */
 
   gst_byte_writer_set_pos (b, pixel_fields_size_pos);
   gst_byte_writer_put_uint16_be (b, bottom_start_pos - top_start_pos);
-  gst_byte_writer_put_uint16_be (b, end_pos - bottom_start_pos);
+  gst_byte_writer_put_uint16_be (b, bottom_end_pos - bottom_start_pos);
   gst_byte_writer_set_pos (b, end_pos);
 
   GST_LOG ("Object seg size %u top_size %u bottom_size %u",
@@ -721,9 +723,35 @@ dvbenc_write_region_segment (GstByteWriter * b, int object_version, int page_id,
   gst_byte_writer_set_pos (b, pos);
 }
 
+static void
+dvbenc_write_display_definition_segment (GstByteWriter * b, int object_version,
+    int page_id, guint16 width, guint16 height)
+{
+  guint seg_size_pos, pos;
+
+  gst_byte_writer_put_uint8 (b, DVB_SEGMENT_SYNC_BYTE);
+  gst_byte_writer_put_uint8 (b, DVB_SEGMENT_TYPE_DISPLAY_DEFINITION);
+  gst_byte_writer_put_uint16_be (b, page_id);
+
+  /* Size placeholder */
+  seg_size_pos = gst_byte_writer_get_pos (b);
+  gst_byte_writer_put_uint16_be (b, 0);
+
+  /* version number, display window flag, reserved bits */
+  gst_byte_writer_put_uint8 (b, (object_version << 4) | (0 << 3) | 0x07);
+  gst_byte_writer_put_uint16_be (b, width);
+  gst_byte_writer_put_uint16_be (b, height);
+
+  /* Re-write the size field */
+  pos = gst_byte_writer_get_pos (b);
+  gst_byte_writer_set_pos (b, seg_size_pos);
+  gst_byte_writer_put_uint16_be (b, pos - (seg_size_pos + 2));
+  gst_byte_writer_set_pos (b, pos);
+}
+
 GstBuffer *
-gst_dvbenc_encode (int object_version, int page_id, SubpictureRect * s,
-    guint num_subpictures)
+gst_dvbenc_encode (int object_version, int page_id, int display_version,
+    guint16 width, guint16 height, SubpictureRect * s, guint num_subpictures)
 {
   GstByteWriter b;
   guint seg_size_pos, pos;
@@ -743,6 +771,11 @@ gst_dvbenc_encode (int object_version, int page_id, SubpictureRect * s,
   /* GStreamer passes DVB subpictures as private PES packets with
    * 0x20 0x00 prefixed */
   gst_byte_writer_put_uint16_be (&b, 0x2000);
+
+  /* If non-default width/height are used, write a display definiton segment */
+  if (width != 720 || height != 576)
+    dvbenc_write_display_definition_segment (&b, display_version, page_id,
+        width, height);
 
   /* Page Composition Segment */
   gst_byte_writer_put_uint8 (&b, DVB_SEGMENT_SYNC_BYTE);

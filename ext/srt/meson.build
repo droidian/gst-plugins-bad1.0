@@ -8,6 +8,7 @@ srt_sources = [
 ]
 srt_option = get_option('srt')
 if srt_option.disabled()
+  srt_dep = dependency('', required : false)
   subdir_done()
 endif
 
@@ -34,6 +35,5 @@ if srt_dep.found()
     install : true,
     install_dir : plugins_install_dir,
   )
-  pkgconfig.generate(gstsrt, install_dir : plugins_pkgconfig_install_dir)
   plugins += [gstsrt]
 endif

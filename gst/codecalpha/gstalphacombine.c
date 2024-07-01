@@ -47,9 +47,9 @@
 #include "gstalphacombine.h"
 
 
-#define SUPPORTED_SINK_FORMATS "{ I420, NV12 }"
-#define SUPPORTED_ALPHA_FORMATS "{ GRAY8, I420, NV12 }"
-#define SUPPORTED_SRC_FORMATS "{ A420, AV12 }"
+#define SUPPORTED_SINK_FORMATS "{ I420, I420_10LE, NV12 }"
+#define SUPPORTED_ALPHA_FORMATS "{ GRAY8, I420, I420_10LE, NV12 }"
+#define SUPPORTED_SRC_FORMATS "{ A420, A420_10LE, AV12 }"
 
 /* *INDENT-OFF* */
 struct {
@@ -81,6 +81,10 @@ struct {
     .sink = GST_VIDEO_FORMAT_NV12,
     .alpha = GST_VIDEO_FORMAT_I420,
     .src = GST_VIDEO_FORMAT_AV12
+ },{
+    .sink = GST_VIDEO_FORMAT_I420_10LE,
+    .alpha = GST_VIDEO_FORMAT_I420_10LE,
+    .src = GST_VIDEO_FORMAT_A420_10LE
   },
 };
 /* *INDENT-ON* */
@@ -215,7 +219,7 @@ gst_alpha_combine_negotiate (GstAlphaCombine * self)
 
   if (GST_VIDEO_INFO_COLORIMETRY (&self->sink_vinfo).range !=
       GST_VIDEO_INFO_COLORIMETRY (&self->alpha_vinfo).range) {
-    GST_ELEMENT_ERROR (self, STREAM, FORMAT, ("Color range miss-match"),
+    GST_ELEMENT_ERROR (self, STREAM, FORMAT, ("Color range mismatch"),
         ("We can only combine buffers if they have the same color range."));
     return FALSE;
   }
@@ -401,7 +405,7 @@ gst_alpha_combine_set_sink_format (GstAlphaCombine * self, GstCaps * caps)
 
   sink_format = GST_VIDEO_INFO_FORMAT (&self->sink_vinfo);
 
-  /* The sink format determin the src format, though we cannot fully validate
+  /* The sink format determines the src format, though we cannot fully validate
    * the negotiation here, since we don't have the alpha format yet. */
   for (i = 0; i < G_N_ELEMENTS (format_map); i++) {
     if (format_map[i].sink == sink_format) {
@@ -469,6 +473,14 @@ gst_alpha_combine_set_alpha_format (GstAlphaCombine * self, GstCaps * caps)
   return TRUE;
 }
 
+static void
+gst_alpha_combine_handle_gap (GstAlphaCombine * self)
+{
+  GstBuffer *gap_buffer = gst_buffer_new ();
+  GST_BUFFER_FLAG_SET (gap_buffer, GST_BUFFER_FLAG_GAP);
+  gst_alpha_combine_push_alpha_buffer (self, gap_buffer);
+}
+
 static gboolean
 gst_alpha_combine_sink_event (GstPad * pad, GstObject * object,
     GstEvent * event)
@@ -519,6 +531,12 @@ gst_alpha_combine_alpha_event (GstPad * pad, GstObject * object,
       GstCaps *caps;
       gst_event_parse_caps (event, &caps);
       gst_alpha_combine_set_alpha_format (self, caps);
+      break;
+    }
+    case GST_EVENT_GAP:
+    {
+      gst_alpha_combine_handle_gap (self);
+      break;
     }
     default:
       break;

@@ -36,7 +36,7 @@
 #endif
 
 #include <gst/gst.h>
-#include "gstmfvideoenc.h"
+#include "gstmfvideoencoder.h"
 #include "gstmfh265enc.h"
 #include <wrl.h>
 
@@ -53,6 +53,11 @@ enum
   GST_MF_H265_ENC_RC_MODE_QUALITY,
 };
 
+/**
+ * GstMFH265EncRCMode:
+ *
+ * Since: 1.18
+ */
 #define GST_TYPE_MF_H265_ENC_RC_MODE (gst_mf_h265_enc_rc_mode_get_type())
 static GType
 gst_mf_h265_enc_rc_mode_get_type (void)
@@ -62,7 +67,7 @@ gst_mf_h265_enc_rc_mode_get_type (void)
   static const GEnumValue rc_mode_types[] = {
     {GST_MF_H265_ENC_RC_MODE_CBR, "Constant bitrate", "cbr"},
     {GST_MF_H265_ENC_RC_MODE_QUALITY, "Quality-based variable bitrate", "qvbr"},
-    {0, NULL, NULL}
+    {0, nullptr, nullptr}
   };
 
   if (!rc_mode_type) {
@@ -77,6 +82,11 @@ enum
   GST_MF_H265_ENC_CONTENT_TYPE_FIXED_CAMERA_ANGLE,
 };
 
+/**
+ * GstMFH265EncContentType:
+ *
+ * Since: 1.18
+ */
 #define GST_TYPE_MF_H265_ENC_CONTENT_TYPE (gst_mf_h265_enc_content_type_get_type())
 static GType
 gst_mf_h265_enc_content_type_get_type (void)
@@ -87,7 +97,7 @@ gst_mf_h265_enc_content_type_get_type (void)
     {GST_MF_H265_ENC_CONTENT_TYPE_UNKNOWN, "Unknown", "unknown"},
     {GST_MF_H265_ENC_CONTENT_TYPE_FIXED_CAMERA_ANGLE,
         "Fixed Camera Angle, such as a webcam", "fixed"},
-    {0, NULL, NULL}
+    {0, nullptr, nullptr}
   };
 
   if (!content_type) {
@@ -140,9 +150,26 @@ enum
 #define DEFAULT_QP_B 26
 #define DEFAULT_REF 2
 
+#define DOC_SINK_CAPS_COMM \
+    "format = (string) { NV12, P010_10LE }, " \
+    "width = (int) [ 64, 8192 ], height = (int) [ 64, 8192 ]"
+
+#define DOC_SINK_CAPS \
+    "video/x-raw(memory:D3D11Memory), " DOC_SINK_CAPS_COMM "; " \
+    "video/x-raw, " DOC_SINK_CAPS_COMM
+
+#define DOC_SRC_CAPS \
+    "video/x-h265, width = (int) [ 64, 8192 ], height = (int) [ 64, 8192 ], " \
+    "stream-format = (string) byte-stream, alignment = (string) au, " \
+    "profile = (string) { main, main-10 }"
+
 typedef struct _GstMFH265Enc
 {
-  GstMFVideoEnc parent;
+  GstMFVideoEncoder parent;
+
+  GMutex prop_lock;
+
+  gboolean prop_updated;
 
   /* properties */
   guint bitrate;
@@ -153,7 +180,7 @@ typedef struct _GstMFH265Enc
   guint max_bitrate;
   guint quality_vs_speed;
   guint bframes;
-  guint gop_size;
+  gint gop_size;
   guint threads;
   guint content_type;
   guint qp;
@@ -168,33 +195,38 @@ typedef struct _GstMFH265Enc
 
 typedef struct _GstMFH265EncClass
 {
-  GstMFVideoEncClass parent_class;
+  GstMFVideoEncoderClass parent_class;
 } GstMFH265EncClass;
 
-static GstElementClass *parent_class = NULL;
+static GstElementClass *parent_class = nullptr;
 
+static void gst_mf_h265_enc_finalize (GObject * object);
 static void gst_mf_h265_enc_get_property (GObject * object, guint prop_id,
     GValue * value, GParamSpec * pspec);
 static void gst_mf_h265_enc_set_property (GObject * object, guint prop_id,
     const GValue * value, GParamSpec * pspec);
-static gboolean gst_mf_h265_enc_set_option (GstMFVideoEnc * mfenc,
+static gboolean gst_mf_h265_enc_set_option (GstMFVideoEncoder * encoder,
     GstVideoCodecState * state, IMFMediaType * output_type);
-static gboolean gst_mf_h265_enc_set_src_caps (GstMFVideoEnc * mfenc,
+static gboolean gst_mf_h265_enc_set_src_caps (GstMFVideoEncoder * encoder,
     GstVideoCodecState * state, IMFMediaType * output_type);
+static gboolean gst_mf_h265_enc_check_reconfigure (GstMFVideoEncoder * encoder);
 
 static void
 gst_mf_h265_enc_class_init (GstMFH265EncClass * klass, gpointer data)
 {
   GObjectClass *gobject_class = G_OBJECT_CLASS (klass);
   GstElementClass *element_class = GST_ELEMENT_CLASS (klass);
-  GstMFVideoEncClass *mfenc_class = GST_MF_VIDEO_ENC_CLASS (klass);
-  GstMFVideoEncClassData *cdata = (GstMFVideoEncClassData *) data;
-  GstMFVideoEncDeviceCaps *device_caps = &cdata->device_caps;
+  GstMFVideoEncoderClass *encoder_class = GST_MF_VIDEO_ENCODER_CLASS (klass);
+  GstMFVideoEncoderClassData *cdata = (GstMFVideoEncoderClassData *) data;
+  GstMFVideoEncoderDeviceCaps *device_caps = &cdata->device_caps;
   gchar *long_name;
   gchar *classification;
+  GstPadTemplate *pad_templ;
+  GstCaps *doc_caps;
 
   parent_class = (GstElementClass *) g_type_class_peek_parent (klass);
 
+  gobject_class->finalize = gst_mf_h265_enc_finalize;
   gobject_class->get_property = gst_mf_h265_enc_get_property;
   gobject_class->set_property = gst_mf_h265_enc_set_property;
 
@@ -204,6 +236,11 @@ gst_mf_h265_enc_class_init (GstMFH265EncClass * klass, gpointer data)
           (GParamFlags) (G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS)));
 
   if (device_caps->rc_mode) {
+    /**
+     * GstMFH264Enc:rc-mode:
+     *
+     * Since: 1.18
+     */
     g_object_class_install_property (gobject_class, PROP_RC_MODE,
         g_param_spec_enum ("rc-mode", "Rate Control Mode",
             "Rate Control Mode",
@@ -219,6 +256,11 @@ gst_mf_h265_enc_class_init (GstMFH265EncClass * klass, gpointer data)
   }
 
   if (device_caps->buffer_size) {
+    /**
+     * GstMFH264Enc:vbv-buffer-size:
+     *
+     * Since: 1.18
+     */
     g_object_class_install_property (gobject_class, PROP_BUFFER_SIZE,
         g_param_spec_uint ("vbv-buffer-size", "VBV Buffer Size",
             "VBV(HRD) Buffer Size in bytes (0 = MFT default)",
@@ -228,6 +270,11 @@ gst_mf_h265_enc_class_init (GstMFH265EncClass * klass, gpointer data)
   }
 
   if (device_caps->max_bitrate) {
+    /**
+     * GstMFH264Enc:max-bitrate:
+     *
+     * Since: 1.18
+     */
     g_object_class_install_property (gobject_class, PROP_MAX_BITRATE,
         g_param_spec_uint ("max-bitrate", "Max Bitrate",
             "The maximum bitrate applied when rc-mode is \"pcvbr\" in kbit/sec "
@@ -237,6 +284,11 @@ gst_mf_h265_enc_class_init (GstMFH265EncClass * klass, gpointer data)
   }
 
   if (device_caps->quality_vs_speed) {
+    /**
+     * GstMFH264Enc:quality-vs-speed:
+     *
+     * Since: 1.18
+     */
     g_object_class_install_property (gobject_class, PROP_QUALITY_VS_SPEED,
         g_param_spec_uint ("quality-vs-speed", "Quality Vs Speed",
             "Quality and speed tradeoff, [0, 33]: Low complexity, "
@@ -247,6 +299,11 @@ gst_mf_h265_enc_class_init (GstMFH265EncClass * klass, gpointer data)
   }
 
   if (device_caps->bframes) {
+    /**
+     * GstMFH264Enc:bframes:
+     *
+     * Since: 1.18
+     */
     g_object_class_install_property (gobject_class, PROP_BFRAMES,
         g_param_spec_uint ("bframes", "bframes",
             "The maximum number of consecutive B frames",
@@ -256,6 +313,11 @@ gst_mf_h265_enc_class_init (GstMFH265EncClass * klass, gpointer data)
   }
 
   if (device_caps->gop_size) {
+    /**
+     * GstMFH264Enc:gop-size:
+     *
+     * Since: 1.18
+     */
     g_object_class_install_property (gobject_class, PROP_GOP_SIZE,
         g_param_spec_int ("gop-size", "GOP size",
             "The number of pictures from one GOP header to the next. "
@@ -267,6 +329,11 @@ gst_mf_h265_enc_class_init (GstMFH265EncClass * klass, gpointer data)
   }
 
   if (device_caps->threads) {
+    /**
+     * GstMFH264Enc:threads:
+     *
+     * Since: 1.18
+     */
     g_object_class_install_property (gobject_class, PROP_THREADS,
         g_param_spec_uint ("threads", "Threads",
             "The number of worker threads used by a encoder, (0 = MFT default)",
@@ -276,6 +343,11 @@ gst_mf_h265_enc_class_init (GstMFH265EncClass * klass, gpointer data)
   }
 
   if (device_caps->content_type) {
+    /**
+     * GstMFH264Enc:content-type:
+     *
+     * Since: 1.18
+     */
     g_object_class_install_property (gobject_class, PROP_CONTENT_TYPE,
         g_param_spec_enum ("content-type", "Content Type",
             "Indicates the type of video content",
@@ -291,6 +363,11 @@ gst_mf_h265_enc_class_init (GstMFH265EncClass * klass, gpointer data)
   }
 
   if (device_caps->qp) {
+    /**
+     * GstMFH264Enc:qp:
+     *
+     * Since: 1.18
+     */
     g_object_class_install_property (gobject_class, PROP_QP,
         g_param_spec_uint ("qp", "qp",
             "QP applied when rc-mode is \"qvbr\"", 16, 51, DEFAULT_QP,
@@ -299,6 +376,11 @@ gst_mf_h265_enc_class_init (GstMFH265EncClass * klass, gpointer data)
   }
 
   if (device_caps->low_latency) {
+    /**
+     * GstMFH264Enc:low-latency:
+     *
+     * Since: 1.18
+     */
     g_object_class_install_property (gobject_class, PROP_LOW_LATENCY,
         g_param_spec_boolean ("low-latency", "Low Latency",
             "Enable low latency encoding", DEFAULT_LOW_LATENCY,
@@ -307,6 +389,11 @@ gst_mf_h265_enc_class_init (GstMFH265EncClass * klass, gpointer data)
   }
 
   if (device_caps->min_qp) {
+    /**
+     * GstMFH265Enc:min-qp:
+     *
+     * Since: 1.18
+     */
     g_object_class_install_property (gobject_class, PROP_MIN_QP,
         g_param_spec_uint ("min-qp", "Min QP",
             "The minimum allowed QP applied to all rc-mode",
@@ -316,6 +403,11 @@ gst_mf_h265_enc_class_init (GstMFH265EncClass * klass, gpointer data)
   }
 
   if (device_caps->max_qp) {
+    /**
+     * GstMFH265Enc:max-qp:
+     *
+     * Since: 1.18
+     */
     g_object_class_install_property (gobject_class, PROP_MAX_QP,
         g_param_spec_uint ("max-qp", "Max QP",
             "The maximum allowed QP applied to all rc-mode",
@@ -325,6 +417,11 @@ gst_mf_h265_enc_class_init (GstMFH265EncClass * klass, gpointer data)
   }
 
   if (device_caps->frame_type_qp) {
+    /**
+     * GstMFH265Enc:qp-i:
+     *
+     * Since: 1.18
+     */
     g_object_class_install_property (gobject_class, PROP_QP_I,
         g_param_spec_uint ("qp-i", "QP I",
             "QP applied to I frames", 0, 51,
@@ -332,6 +429,11 @@ gst_mf_h265_enc_class_init (GstMFH265EncClass * klass, gpointer data)
             (GParamFlags) (GST_PARAM_CONDITIONALLY_AVAILABLE |
                 G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS)));
 
+    /**
+     * GstMFH265Enc:qp-p:
+     *
+     * Since: 1.18
+     */
     g_object_class_install_property (gobject_class, PROP_QP_P,
         g_param_spec_uint ("qp-p", "QP P",
             "QP applied to P frames", 0, 51,
@@ -339,6 +441,11 @@ gst_mf_h265_enc_class_init (GstMFH265EncClass * klass, gpointer data)
             (GParamFlags) (GST_PARAM_CONDITIONALLY_AVAILABLE |
                 G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS)));
 
+    /**
+     * GstMFH265Enc:qp-b:
+     *
+     * Since: 1.18
+     */
     g_object_class_install_property (gobject_class, PROP_QP_B,
         g_param_spec_uint ("qp-b", "QP B",
             "QP applied to B frames", 0, 51,
@@ -348,6 +455,11 @@ gst_mf_h265_enc_class_init (GstMFH265EncClass * klass, gpointer data)
   }
 
   if (device_caps->max_num_ref) {
+    /**
+     * GstMFH265Enc:ref:
+     *
+     * Since: 1.18
+     */
     g_object_class_install_property (gobject_class, PROP_REF,
         g_param_spec_uint ("ref", "Reference Frames",
             "The number of reference frames",
@@ -381,8 +493,9 @@ gst_mf_h265_enc_class_init (GstMFH265EncClass * klass, gpointer data)
     g_object_class_install_property (gobject_class, PROP_ADAPTER_LUID,
         g_param_spec_int64 ("adapter-luid", "Adapter LUID",
             "DXGI Adapter LUID (Locally Unique Identifier) of created device",
-            G_MININT64, G_MAXINT64, device_caps->adapter_luid,
-            (GParamFlags) (GST_PARAM_CONDITIONALLY_AVAILABLE |
+            G_MININT64, G_MAXINT64, 0,
+            (GParamFlags) (GST_PARAM_DOC_SHOW_DEFAULT |
+                GST_PARAM_CONDITIONALLY_AVAILABLE |
                 G_PARAM_READABLE | G_PARAM_STATIC_STRINGS)));
   }
 
@@ -397,20 +510,30 @@ gst_mf_h265_enc_class_init (GstMFH265EncClass * klass, gpointer data)
   g_free (long_name);
   g_free (classification);
 
-  gst_element_class_add_pad_template (element_class,
-      gst_pad_template_new ("sink", GST_PAD_SINK, GST_PAD_ALWAYS,
-          cdata->sink_caps));
-  gst_element_class_add_pad_template (element_class,
-      gst_pad_template_new ("src", GST_PAD_SRC, GST_PAD_ALWAYS,
-          cdata->src_caps));
+  pad_templ = gst_pad_template_new ("sink",
+      GST_PAD_SINK, GST_PAD_ALWAYS, cdata->sink_caps);
+  doc_caps = gst_caps_from_string (DOC_SINK_CAPS);
+  gst_pad_template_set_documentation_caps (pad_templ, doc_caps);
+  gst_caps_unref (doc_caps);
+  gst_element_class_add_pad_template (element_class, pad_templ);
 
-  mfenc_class->set_option = GST_DEBUG_FUNCPTR (gst_mf_h265_enc_set_option);
-  mfenc_class->set_src_caps = GST_DEBUG_FUNCPTR (gst_mf_h265_enc_set_src_caps);
+  pad_templ = gst_pad_template_new ("src",
+      GST_PAD_SRC, GST_PAD_ALWAYS, cdata->src_caps);
+  doc_caps = gst_caps_from_string (DOC_SRC_CAPS);
+  gst_pad_template_set_documentation_caps (pad_templ, doc_caps);
+  gst_caps_unref (doc_caps);
+  gst_element_class_add_pad_template (element_class, pad_templ);
 
-  mfenc_class->codec_id = MFVideoFormat_HEVC;
-  mfenc_class->enum_flags = cdata->enum_flags;
-  mfenc_class->device_index = cdata->device_index;
-  mfenc_class->device_caps = *device_caps;
+  encoder_class->set_option = GST_DEBUG_FUNCPTR (gst_mf_h265_enc_set_option);
+  encoder_class->set_src_caps =
+      GST_DEBUG_FUNCPTR (gst_mf_h265_enc_set_src_caps);
+  encoder_class->check_reconfigure =
+      GST_DEBUG_FUNCPTR (gst_mf_h265_enc_check_reconfigure);
+
+  encoder_class->codec_id = MFVideoFormat_HEVC;
+  encoder_class->enum_flags = cdata->enum_flags;
+  encoder_class->device_index = cdata->device_index;
+  encoder_class->device_caps = *device_caps;
 
   g_free (cdata->device_name);
   gst_caps_unref (cdata->sink_caps);
@@ -421,6 +544,8 @@ gst_mf_h265_enc_class_init (GstMFH265EncClass * klass, gpointer data)
 static void
 gst_mf_h265_enc_init (GstMFH265Enc * self)
 {
+  g_mutex_init (&self->prop_lock);
+
   self->bitrate = DEFAULT_BITRATE;
   self->rc_mode = DEFAULT_RC_MODE;
   self->max_bitrate = DEFAULT_MAX_BITRATE;
@@ -440,11 +565,21 @@ gst_mf_h265_enc_init (GstMFH265Enc * self)
 }
 
 static void
+gst_mf_h265_enc_finalize (GObject * object)
+{
+  GstMFH265Enc *self = (GstMFH265Enc *) (object);
+
+  g_mutex_clear (&self->prop_lock);
+
+  G_OBJECT_CLASS (parent_class)->finalize (object);
+}
+
+static void
 gst_mf_h265_enc_get_property (GObject * object, guint prop_id,
     GValue * value, GParamSpec * pspec)
 {
   GstMFH265Enc *self = (GstMFH265Enc *) (object);
-  GstMFVideoEncClass *klass = GST_MF_VIDEO_ENC_GET_CLASS (object);
+  GstMFVideoEncoderClass *klass = GST_MF_VIDEO_ENCODER_GET_CLASS (object);
 
   switch (prop_id) {
     case PROP_BITRATE:
@@ -511,67 +646,117 @@ gst_mf_h265_enc_get_property (GObject * object, guint prop_id,
 }
 
 static void
+update_boolean (GstMFH265Enc * self, gboolean * old_val, const GValue * new_val)
+{
+  gboolean val = g_value_get_boolean (new_val);
+
+  if (*old_val == val)
+    return;
+
+  *old_val = val;
+  self->prop_updated = TRUE;
+}
+
+static void
+update_int (GstMFH265Enc * self, gint * old_val, const GValue * new_val)
+{
+  gint val = g_value_get_int (new_val);
+
+  if (*old_val == val)
+    return;
+
+  *old_val = val;
+  self->prop_updated = TRUE;
+}
+
+static void
+update_uint (GstMFH265Enc * self, guint * old_val, const GValue * new_val)
+{
+  guint val = g_value_get_uint (new_val);
+
+  if (*old_val == val)
+    return;
+
+  *old_val = val;
+  self->prop_updated = TRUE;
+}
+
+static void
+update_enum (GstMFH265Enc * self, guint * old_val, const GValue * new_val)
+{
+  gint val = g_value_get_enum (new_val);
+
+  if (*old_val == (guint) val)
+    return;
+
+  *old_val = val;
+  self->prop_updated = TRUE;
+}
+
+static void
 gst_mf_h265_enc_set_property (GObject * object, guint prop_id,
     const GValue * value, GParamSpec * pspec)
 {
   GstMFH265Enc *self = (GstMFH265Enc *) (object);
 
+  g_mutex_lock (&self->prop_lock);
   switch (prop_id) {
     case PROP_BITRATE:
-      self->bitrate = g_value_get_uint (value);
+      update_uint (self, &self->bitrate, value);
       break;
     case PROP_RC_MODE:
-      self->rc_mode = g_value_get_enum (value);
+      update_enum (self, &self->rc_mode, value);
       break;
     case PROP_BUFFER_SIZE:
-      self->buffer_size = g_value_get_uint (value);
+      update_uint (self, &self->buffer_size, value);
       break;
     case PROP_MAX_BITRATE:
-      self->max_bitrate = g_value_get_uint (value);
+      update_uint (self, &self->max_bitrate, value);
       break;
     case PROP_QUALITY_VS_SPEED:
-      self->quality_vs_speed = g_value_get_uint (value);
+      update_uint (self, &self->quality_vs_speed, value);
       break;
     case PROP_BFRAMES:
-      self->bframes = g_value_get_uint (value);
+      update_uint (self, &self->bframes, value);
       break;
     case PROP_GOP_SIZE:
-      self->gop_size = g_value_get_int (value);
+      update_int (self, &self->gop_size, value);
       break;
     case PROP_THREADS:
-      self->threads = g_value_get_uint (value);
+      update_uint (self, &self->threads, value);
       break;
     case PROP_CONTENT_TYPE:
-      self->content_type = g_value_get_enum (value);
+      update_enum (self, &self->content_type, value);
       break;
     case PROP_QP:
-      self->qp = g_value_get_uint (value);
+      update_uint (self, &self->qp, value);
       break;
     case PROP_LOW_LATENCY:
-      self->low_latency = g_value_get_boolean (value);
+      update_boolean (self, &self->low_latency, value);
       break;
     case PROP_MIN_QP:
-      self->min_qp = g_value_get_uint (value);
+      update_uint (self, &self->min_qp, value);
       break;
     case PROP_MAX_QP:
-      self->max_qp = g_value_get_uint (value);
+      update_uint (self, &self->max_qp, value);
       break;
     case PROP_QP_I:
-      self->qp_i = g_value_get_uint (value);
+      update_uint (self, &self->qp_i, value);
       break;
     case PROP_QP_P:
-      self->qp_p = g_value_get_uint (value);
+      update_uint (self, &self->qp_p, value);
       break;
     case PROP_QP_B:
-      self->qp_b = g_value_get_uint (value);
+      update_uint (self, &self->qp_b, value);
       break;
     case PROP_REF:
-      self->max_num_ref = g_value_get_uint (value);
+      update_uint (self, &self->max_num_ref, value);
       break;
     default:
       G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
       break;
   }
+  g_mutex_unlock (&self->prop_lock);
 }
 
 static guint
@@ -608,20 +793,20 @@ gst_mf_h265_enc_content_type_to_enum (guint rc_mode)
   } G_STMT_END
 
 static gboolean
-gst_mf_h265_enc_set_option (GstMFVideoEnc * mfenc, GstVideoCodecState * state,
-    IMFMediaType * output_type)
+gst_mf_h265_enc_set_option (GstMFVideoEncoder * encoder,
+    GstVideoCodecState * state, IMFMediaType * output_type)
 {
-  GstMFH265Enc *self = (GstMFH265Enc *) mfenc;
-  GstMFVideoEncClass *klass = GST_MF_VIDEO_ENC_GET_CLASS (mfenc);
-  GstMFVideoEncDeviceCaps *device_caps = &klass->device_caps;
+  GstMFH265Enc *self = (GstMFH265Enc *) encoder;
+  GstMFVideoEncoderClass *klass = GST_MF_VIDEO_ENCODER_GET_CLASS (encoder);
+  GstMFVideoEncoderDeviceCaps *device_caps = &klass->device_caps;
   HRESULT hr;
-  GstMFTransform *transform = mfenc->transform;
+  GstMFTransform *transform = encoder->transform;
 
   hr = output_type->SetGUID (MF_MT_SUBTYPE, MFVideoFormat_HEVC);
   if (!gst_mf_result (hr))
     return FALSE;
 
-  if (GST_VIDEO_INFO_FORMAT (&mfenc->input_state->info) ==
+  if (GST_VIDEO_INFO_FORMAT (&encoder->input_state->info) ==
       GST_VIDEO_FORMAT_P010_10LE) {
     hr = output_type->SetUINT32 (MF_MT_MPEG2_PROFILE,
         eAVEncH265VProfile_Main_420_10);
@@ -633,10 +818,14 @@ gst_mf_h265_enc_set_option (GstMFVideoEnc * mfenc, GstVideoCodecState * state,
   if (!gst_mf_result (hr))
     return FALSE;
 
+  g_mutex_lock (&self->prop_lock);
   hr = output_type->SetUINT32 (MF_MT_AVG_BITRATE,
       MIN (self->bitrate * 1024, G_MAXUINT - 1));
-  if (!gst_mf_result (hr))
+  if (!gst_mf_result (hr)) {
+    GST_ERROR_OBJECT (self, "Failed to set bitrate");
+    g_mutex_unlock (&self->prop_lock);
     return FALSE;
+  }
 
   if (device_caps->rc_mode) {
     guint rc_mode;
@@ -667,12 +856,12 @@ gst_mf_h265_enc_set_option (GstMFVideoEnc * mfenc, GstVideoCodecState * state,
     WARNING_HR (hr, CODECAPI_AVEncCommonQualityVsSpeed);
   }
 
-  mfenc->has_reorder_frame = FALSE;
+  encoder->has_reorder_frame = FALSE;
   if (device_caps->bframes) {
     hr = gst_mf_transform_set_codec_api_uint32 (transform,
         &CODECAPI_AVEncMPVDefaultBPictureCount, self->bframes);
     if (SUCCEEDED (hr) && self->bframes > 0)
-      mfenc->has_reorder_frame = TRUE;
+      encoder->has_reorder_frame = TRUE;
 
     WARNING_HR (hr, CODECAPI_AVEncMPVDefaultBPictureCount);
   }
@@ -757,14 +946,17 @@ gst_mf_h265_enc_set_option (GstMFVideoEnc * mfenc, GstVideoCodecState * state,
     WARNING_HR (hr, CODECAPI_AVEncVideoMaxNumRefFrame);
   }
 
+  self->prop_updated = FALSE;
+  g_mutex_unlock (&self->prop_lock);
+
   return TRUE;
 }
 
 static gboolean
-gst_mf_h265_enc_set_src_caps (GstMFVideoEnc * mfenc,
+gst_mf_h265_enc_set_src_caps (GstMFVideoEncoder * encoder,
     GstVideoCodecState * state, IMFMediaType * output_type)
 {
-  GstMFH265Enc *self = (GstMFH265Enc *) mfenc;
+  GstMFH265Enc *self = (GstMFH265Enc *) encoder;
   GstVideoCodecState *out_state;
   GstStructure *s;
   GstCaps *out_caps;
@@ -774,13 +966,13 @@ gst_mf_h265_enc_set_src_caps (GstMFVideoEnc * mfenc,
   s = gst_caps_get_structure (out_caps, 0);
 
   gst_structure_set (s, "stream-format", G_TYPE_STRING, "byte-stream",
-      "alignment", G_TYPE_STRING, "au", NULL);
+      "alignment", G_TYPE_STRING, "au", nullptr);
 
-  if (GST_VIDEO_INFO_FORMAT (&mfenc->input_state->info) ==
+  if (GST_VIDEO_INFO_FORMAT (&encoder->input_state->info) ==
       GST_VIDEO_FORMAT_P010_10LE) {
-    gst_structure_set (s, "profile", G_TYPE_STRING, "main-10", NULL);
+    gst_structure_set (s, "profile", G_TYPE_STRING, "main-10", nullptr);
   } else {
-    gst_structure_set (s, "profile", G_TYPE_STRING, "main", NULL);
+    gst_structure_set (s, "profile", G_TYPE_STRING, "main", nullptr);
   }
 
   out_state = gst_video_encoder_set_output_state (GST_VIDEO_ENCODER (self),
@@ -794,12 +986,26 @@ gst_mf_h265_enc_set_src_caps (GstMFVideoEnc * mfenc,
   tags = gst_tag_list_new_empty ();
   gst_tag_list_add (tags, GST_TAG_MERGE_REPLACE, GST_TAG_ENCODER,
       gst_element_get_metadata (GST_ELEMENT_CAST (self),
-          GST_ELEMENT_METADATA_LONGNAME), NULL);
+          GST_ELEMENT_METADATA_LONGNAME), nullptr);
   gst_video_encoder_merge_tags (GST_VIDEO_ENCODER (self), tags,
       GST_TAG_MERGE_REPLACE);
   gst_tag_list_unref (tags);
 
   return TRUE;
+}
+
+static gboolean
+gst_mf_h265_enc_check_reconfigure (GstMFVideoEncoder * encoder)
+{
+  GstMFH265Enc *self = (GstMFH265Enc *) encoder;
+  gboolean ret;
+
+  g_mutex_lock (&self->prop_lock);
+  ret = self->prop_updated;
+  self->prop_updated = FALSE;
+  g_mutex_unlock (&self->prop_lock);
+
+  return ret;
 }
 
 void
@@ -808,11 +1014,11 @@ gst_mf_h265_enc_plugin_init (GstPlugin * plugin, guint rank,
 {
   GTypeInfo type_info = {
     sizeof (GstMFH265EncClass),
-    NULL,
-    NULL,
+    nullptr,
+    nullptr,
     (GClassInitFunc) gst_mf_h265_enc_class_init,
-    NULL,
-    NULL,
+    nullptr,
+    nullptr,
     sizeof (GstMFH265Enc),
     0,
     (GInstanceInitFunc) gst_mf_h265_enc_init,
@@ -821,5 +1027,6 @@ gst_mf_h265_enc_plugin_init (GstPlugin * plugin, guint rank,
 
   GST_DEBUG_CATEGORY_INIT (gst_mf_h265_enc_debug, "mfh265enc", 0, "mfh265enc");
 
-  gst_mf_video_enc_register (plugin, rank, &subtype, &type_info, d3d11_device);
+  gst_mf_video_encoder_register (plugin,
+      rank, &subtype, &type_info, d3d11_device);
 }

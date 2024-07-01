@@ -132,7 +132,7 @@ struct _GstH264DecoderClass
    *
    * Optional. Called whenever new #GstH264Picture is created.
    * Subclass can set implementation specific user data
-   * on the #GstH264Picture via gst_h264_picture_set_user_data()
+   * on the #GstH264Picture via gst_h264_picture_set_user_data
    */
   GstFlowReturn (*new_picture)      (GstH264Decoder * decoder,
                                      GstVideoCodecFrame * frame,
@@ -146,12 +146,12 @@ struct _GstH264DecoderClass
    *
    * Called when a new field picture is created for interlaced field picture.
    * Subclass can attach implementation specific user data on @second_field via
-   * gst_h264_picture_set_user_data()
+   * gst_h264_picture_set_user_data
    *
    * Since: 1.20
    */
   GstFlowReturn (*new_field_picture)  (GstH264Decoder * decoder,
-                                       const GstH264Picture * first_field,
+                                       GstH264Picture * first_field,
                                        GstH264Picture * second_field);
 
   /**

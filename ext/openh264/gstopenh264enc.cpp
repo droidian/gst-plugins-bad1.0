@@ -234,10 +234,7 @@ GST_STATIC_PAD_TEMPLATE ("src",
 /* class initialization */
 
 G_DEFINE_TYPE_WITH_CODE (GstOpenh264Enc, gst_openh264enc,
-    GST_TYPE_VIDEO_ENCODER,
-    G_IMPLEMENT_INTERFACE (GST_TYPE_PRESET, NULL);
-    GST_DEBUG_CATEGORY_INIT (gst_openh264enc_debug_category, "openh264enc", 0,
-        "debug category for openh264enc element"));
+    GST_TYPE_VIDEO_ENCODER, G_IMPLEMENT_INTERFACE (GST_TYPE_PRESET, NULL));
 GST_ELEMENT_REGISTER_DEFINE_CUSTOM (openh264enc, openh264enc_element_init);
 
 static void
@@ -711,11 +708,12 @@ gst_openh264enc_get_profile_from_caps (GstCaps *outcaps, GstCaps *allowed_caps)
 
   gst_structure_set (s, "profile", G_TYPE_STRING, profile, NULL);
   if (!g_strcmp0 (profile, "constrained-baseline") ||
-       !g_strcmp0 (profile, "baseline"))
+      !g_strcmp0 (profile, "baseline"))
     return PRO_BASELINE;
-   else if (!g_strcmp0 (profile, "main"))
+  else if (!g_strcmp0 (profile, "main"))
     return PRO_MAIN;
-   else if (!g_strcmp0 (profile, "high"))
+  else if (!g_strcmp0 (profile, "high") ||
+      !g_strcmp0 (profile, "constrained-high"))
     return PRO_HIGH;
 
   g_assert_not_reached ();
@@ -761,7 +759,13 @@ gst_openh264enc_set_format (GstVideoEncoder * encoder,
     WelsDestroySVCEncoder (openh264enc->encoder);
     openh264enc->encoder = NULL;
   }
-  WelsCreateSVCEncoder (&openh264enc->encoder);
+
+  if (WelsCreateSVCEncoder (&openh264enc->encoder) != 0) {
+    GST_ELEMENT_ERROR (openh264enc, LIBRARY, INIT, (NULL),
+        ("Failed to create OpenH264 encoder."));
+    return FALSE;
+  }
+
   unsigned int uiTraceLevel = WELS_LOG_ERROR;
   openh264enc->encoder->SetOption (ENCODER_OPTION_TRACE_LEVEL, &uiTraceLevel);
 
@@ -1056,13 +1060,13 @@ gst_openh264enc_finish (GstVideoEncoder * encoder)
 
   return GST_FLOW_OK;
 }
+
 static gboolean
 openh264enc_element_init (GstPlugin * plugin)
 {
-  if (openh264_element_init (plugin))
-    return gst_element_register (plugin, "openh264enc", GST_RANK_MARGINAL,
-                                 GST_TYPE_OPENH264ENC);
+  GST_DEBUG_CATEGORY_INIT (gst_openh264enc_debug_category, "openh264enc", 0,
+      "debug category for openh264enc element");
 
- GST_ERROR ("Incorrect library version loaded, expecting %s", g_strCodecVer);
- return FALSE;
+  return gst_element_register (plugin, "openh264enc", GST_RANK_MARGINAL,
+      GST_TYPE_OPENH264ENC);
 }

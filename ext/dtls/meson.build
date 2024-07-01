@@ -12,8 +12,9 @@ dtls_sources = [
   'gstdtlselement.c',
 ]
 
-openssl_dep = dependency('openssl', version : '>= 1.0.1', required : get_option('dtls'))
-libcrypto_dep = dependency('libcrypto', required : get_option('dtls'))
+dtls_option = get_option('dtls').enable_if(get_option('webrtc').enabled(), error_message: 'webrtc option is enabled')
+openssl_dep = dependency('openssl', version: '>= 1.0.1', required: dtls_option)
+libcrypto_dep = dependency('libcrypto', required: dtls_option)
 
 if openssl_dep.found() and libcrypto_dep.found()
   gstdtls = library('gstdtls',
@@ -24,6 +25,5 @@ if openssl_dep.found() and libcrypto_dep.found()
     install : true,
     install_dir : plugins_install_dir,
   )
-  pkgconfig.generate(gstdtls, install_dir : plugins_pkgconfig_install_dir)
   plugins += [gstdtls]
 endif

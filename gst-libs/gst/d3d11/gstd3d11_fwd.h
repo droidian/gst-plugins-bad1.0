@@ -18,8 +18,7 @@
  * Boston, MA 02110-1301, USA.
  */
 
-#ifndef __GST_D3D11_FWD_H__
-#define __GST_D3D11_FWD_H__
+#pragma once
 
 #include <gst/gst.h>
 #include <gst/d3d11/gstd3d11config.h>
@@ -29,31 +28,8 @@
 #include <initguid.h>
 #endif
 
-#if (GST_D3D11_HEADER_VERSION >= 4)
-#include <d3d11_4.h>
-#elif (GST_D3D11_HEADER_VERSION >= 3)
-#include <d3d11_3.h>
-#elif (GST_D3D11_HEADER_VERSION >= 2)
-#include <d3d11_2.h>
-#elif (GST_D3D11_HEADER_VERSION >= 1)
-#include <d3d11_1.h>
-#else
 #include <d3d11.h>
-#endif
-
-#if (GST_D3D11_DXGI_HEADER_VERSION >= 6)
-#include <dxgi1_6.h>
-#elif (GST_D3D11_DXGI_HEADER_VERSION >= 5)
-#include <dxgi1_5.h>
-#elif (GST_D3D11_DXGI_HEADER_VERSION >= 4)
-#include <dxgi1_4.h>
-#elif (GST_D3D11_DXGI_HEADER_VERSION >= 3)
-#include <dxgi1_3.h>
-#elif (GST_D3D11_DXGI_HEADER_VERSION >= 2)
-#include <dxgi1_2.h>
-#else
 #include <dxgi.h>
-#endif
 
 G_BEGIN_DECLS
 
@@ -77,8 +53,18 @@ typedef struct _GstD3D11BufferPool GstD3D11BufferPool;
 typedef struct _GstD3D11BufferPoolClass GstD3D11BufferPoolClass;
 typedef struct _GstD3D11BufferPoolPrivate GstD3D11BufferPoolPrivate;
 
+typedef struct _GstD3D11StagingBufferPool GstD3D11StagingBufferPool;
+typedef struct _GstD3D11StagingBufferPoolClass GstD3D11StagingBufferPoolClass;
+typedef struct _GstD3D11StagingBufferPoolPrivate GstD3D11StagingBufferPoolPrivate;
+
 typedef struct _GstD3D11Format GstD3D11Format;
+
+typedef struct _GstD3D11Converter GstD3D11Converter;
+typedef struct _GstD3D11ConverterClass GstD3D11ConverterClass;
+typedef struct _GstD3D11ConverterPrivate GstD3D11ConverterPrivate;
+
+typedef struct _GstD3D11Fence GstD3D11Fence;
+typedef struct _GstD3D11FencePrivate GstD3D11FencePrivate;
 
 G_END_DECLS
 
-#endif /* __GST_D3D11_FWD_H__ */

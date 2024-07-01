@@ -47,6 +47,8 @@
 #include "ksvideohelpers.h"
 #include "ksdeviceprovider.h"
 
+#include <versionhelpers.h>
+
 #define DEFAULT_DEVICE_PATH     NULL
 #define DEFAULT_DEVICE_NAME     NULL
 #define DEFAULT_DEVICE_INDEX    -1
@@ -169,8 +171,8 @@ gst_ks_video_src_class_init (GstKsVideoSrcClass * klass)
   gst_element_class_set_static_metadata (gstelement_class, "KsVideoSrc",
       "Source/Video/Hardware",
       "Stream data from a video capture device through Windows kernel streaming",
-      "Ole André Vadla Ravnås <ole.andre.ravnas@tandberg.com>\n"
-      "Haakon Sporsheim <hakon.sporsheim@tandberg.com>\n"
+      "Ole André Vadla Ravnås <ole.andre.ravnas@tandberg.com>, "
+      "Haakon Sporsheim <hakon.sporsheim@tandberg.com>, "
       "Andres Colubri <andres.colubri@gmail.com>");
 
   gst_element_class_add_pad_template (gstelement_class,
@@ -240,6 +242,21 @@ gst_ks_video_src_init (GstKsVideoSrc * self)
   priv->device_index = DEFAULT_DEVICE_INDEX;
   priv->do_stats = DEFAULT_DO_STATS;
   priv->enable_quirks = DEFAULT_ENABLE_QUIRKS;
+
+  /* MediaFoundation does not support MinGW build */
+#ifdef _MSC_VER
+  {
+    static gsize deprecated_warn = 0;
+
+    if (g_once_init_enter (&deprecated_warn)) {
+      if (IsWindows8OrGreater ()) {
+        g_warning ("\"ksvideosrc\" is deprecated and will be removed"
+            "in the future. Use \"mfvideosrc\" element instead");
+      }
+      g_once_init_leave (&deprecated_warn, 1);
+    }
+  }
+#endif
 }
 
 static void

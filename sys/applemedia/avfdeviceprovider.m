@@ -76,11 +76,16 @@ gst_av_capture_device_get_props (AVCaptureDevice *device)
     "avf.has_torch", G_TYPE_BOOLEAN, [device hasTorch],
   NULL);
 
+  g_free (unique_id);
+  g_free (model_id);
+
 #if !HAVE_IOS
   char *manufacturer = g_strdup ([[device manufacturer] UTF8String]);
   gst_structure_set (props,
     "avf.manufacturer", G_TYPE_STRING, manufacturer,
   NULL);
+
+  g_free (manufacturer);
 #endif
 
   return props;
@@ -92,8 +97,9 @@ gst_avf_device_provider_probe (GstDeviceProvider * provider)
   GList *result;
 
   result = NULL;
-
+G_GNUC_BEGIN_IGNORE_DEPRECATIONS
   NSArray *devices = [AVCaptureDevice devicesWithMediaType:AVMediaTypeVideo];
+G_GNUC_END_IGNORE_DEPRECATIONS
   AVCaptureVideoDataOutput *output = [[AVCaptureVideoDataOutput alloc] init];
   for (int i = 0; i < [devices count]; i++) {
     AVCaptureDevice *device = [devices objectAtIndex:i];

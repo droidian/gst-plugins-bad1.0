@@ -40,10 +40,11 @@ if build_gir
   library_def += {'gir': [gir]}
   if not static_build
     insertbin_gir = gnome.generate_gir(gstinsertbin, kwargs: gir)
+    library_def += {'gir_targets':  library_def.get('gir_targets', []) + [insertbin_gir]}
     gen_sources += insertbin_gir
   endif
 endif
-libraries += [[pkg_name, library_def]]
+gst_libraries += [[pkg_name, library_def]]
 
 gstinsertbin_dep = declare_dependency(link_with : gstinsertbin,
   include_directories : [libsinc],

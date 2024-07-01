@@ -31,7 +31,43 @@ typedef enum
   GST_WASAPI2_CLIENT_DEVICE_CLASS_CAPTURE = 0,
   GST_WASAPI2_CLIENT_DEVICE_CLASS_RENDER,
   GST_WASAPI2_CLIENT_DEVICE_CLASS_LOOPBACK_CAPTURE,
+  GST_WASAPI2_CLIENT_DEVICE_CLASS_INCLUDE_PROCESS_LOOPBACK_CAPTURE,
+  GST_WASAPI2_CLIENT_DEVICE_CLASS_EXCLUDE_PROCESS_LOOPBACK_CAPTURE,
 } GstWasapi2ClientDeviceClass;
+
+typedef enum
+{
+  GST_WASAPI2_OK,
+  GST_WASAPI2_DEVICE_NOT_FOUND,
+  GST_WASAPI2_ACTIVATION_FAILED,
+} GstWasapi2Result;
+
+static inline gboolean
+gst_wasapi2_device_class_is_loopback (GstWasapi2ClientDeviceClass device_class)
+{
+  switch (device_class) {
+    case GST_WASAPI2_CLIENT_DEVICE_CLASS_LOOPBACK_CAPTURE:
+      return TRUE;
+    default:
+      break;
+  }
+
+  return FALSE;
+}
+
+static inline gboolean
+gst_wasapi2_device_class_is_process_loopback (GstWasapi2ClientDeviceClass device_class)
+{
+  switch (device_class) {
+    case GST_WASAPI2_CLIENT_DEVICE_CLASS_INCLUDE_PROCESS_LOOPBACK_CAPTURE:
+    case GST_WASAPI2_CLIENT_DEVICE_CLASS_EXCLUDE_PROCESS_LOOPBACK_CAPTURE:
+      return TRUE;
+    default:
+      break;
+  }
+
+  return FALSE;
+}
 
 #define GST_TYPE_WASAPI2_CLIENT_DEVICE_CLASS (gst_wasapi2_client_device_class_get_type())
 GType gst_wasapi2_client_device_class_get_type (void);
@@ -43,13 +79,20 @@ G_DECLARE_FINAL_TYPE (GstWasapi2Client,
 GstWasapi2Client * gst_wasapi2_client_new (GstWasapi2ClientDeviceClass device_class,
                                            gint device_index,
                                            const gchar * device_id,
+                                           guint target_pid,
                                            gpointer dispatcher);
 
 gboolean           gst_wasapi2_client_ensure_activation (GstWasapi2Client * client);
 
 IAudioClient *     gst_wasapi2_client_get_handle (GstWasapi2Client * client);
 
+gboolean           gst_wasapi2_client_is_endpoint_muted (GstWasapi2Client * client);
+
 GstCaps *          gst_wasapi2_client_get_caps (GstWasapi2Client * client);
+
+GstWasapi2Result   gst_wasapi2_client_enumerate (GstWasapi2ClientDeviceClass device_class,
+                                                 gint device_index,
+                                                 GstWasapi2Client ** client);
 
 G_END_DECLS
 

@@ -53,10 +53,11 @@ if build_gir
   library_def += { 'gir': [gir]}
   if not static_build
     transcoder_gir = gnome.generate_gir(gst_transcoder, kwargs: gir)
+    library_def += {'gir_targets':  library_def.get('gir_targets', []) + [transcoder_gir]}
     transcoder_gen_sources += transcoder_gir
   endif
 endif
-libraries += [[pkg_name, library_def]]
+gst_libraries += [[pkg_name, library_def]]
 
 gst_transcoder_dep = declare_dependency(link_with: gst_transcoder,
   dependencies : [gst_dep, gstpbutils_dep],

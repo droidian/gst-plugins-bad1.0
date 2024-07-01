@@ -1,6 +1,10 @@
-if not get_option('tests').disabled() and gstcheck_dep.found()
+if get_option('tests').disabled() or static_build
+  subdir_done()
+endif
+
+if gstcheck_dep.found()
   subdir('check')
-  subdir('icles')
+  subdir('interactive')
   subdir('validate')
 endif
 if not get_option('examples').disabled()

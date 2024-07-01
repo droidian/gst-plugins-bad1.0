@@ -24,12 +24,10 @@
 
 #include "gsttranscoding.h"
 #include "gsttranscodeelements.h"
-#include <gst/gst-i18n-plugin.h>
+#include <glib/gi18n-lib.h>
 #include <gst/pbutils/pbutils.h>
 
 #include <gst/pbutils/missing-plugins.h>
-
-
 
 /**
  * GstTranscodeBin!sink_%u:
@@ -92,6 +90,8 @@ transcoding_stream_free (TranscodingStream * tstream)
 {
   gst_object_unref (tstream->stream);
   gst_object_unref (tstream->encodebin_pad);
+
+  g_free (tstream);
 }
 
 typedef struct
@@ -109,6 +109,7 @@ typedef struct
   GstElement *video_filter;
 
   GPtrArray *transcoding_streams;
+  gboolean upstream_selected;
 } GstTranscodeBin;
 
 typedef struct
@@ -123,9 +124,15 @@ typedef struct
 
 #define DEFAULT_AVOID_REENCODING   FALSE
 
+GST_DEBUG_CATEGORY_STATIC(gst_transcodebin_debug);
+#define GST_CAT_DEFAULT gst_transcodebin_debug
+
 G_DEFINE_TYPE (GstTranscodeBin, gst_transcode_bin, GST_TYPE_BIN);
 GST_ELEMENT_REGISTER_DEFINE_WITH_CODE (transcodebin, "transcodebin", GST_RANK_NONE,
       GST_TYPE_TRANSCODE_BIN, transcodebin_element_init (plugin));
+
+static GstPad *
+get_encodebin_pad_from_stream (GstTranscodeBin * self, GstStream * stream);
 
 enum
 {
@@ -173,15 +180,16 @@ filter_handles_any (GstElement * filter)
 
 static GstPad *
 _insert_filter (GstTranscodeBin * self, GstPad * sinkpad, GstPad * pad,
-    GstCaps * caps)
+    const GstCaps * filtercaps)
 {
   GstPad *filter_src = NULL, *filter_sink = NULL, *convert_sink, *convert_src;
   GstElement *filter = NULL, *convert;
   GstObject *filter_parent;
   const gchar *media_type;
   gboolean audio = TRUE;
+  GstCaps *caps;
 
-  media_type = gst_structure_get_name (gst_caps_get_structure (caps, 0));
+  media_type = gst_structure_get_name (gst_caps_get_structure (filtercaps, 0));
 
   if (self->video_filter && g_str_has_prefix (media_type, "video")) {
     audio = FALSE;
@@ -191,7 +199,7 @@ _insert_filter (GstTranscodeBin * self, GstPad * sinkpad, GstPad * pad,
       filter = self->video_filter;
     else
       GST_ERROR_OBJECT (pad, "decodebin pad does not produce raw data (%"
-          GST_PTR_FORMAT "), cannot add video filter '%s'", caps,
+          GST_PTR_FORMAT "), cannot add video filter '%s'", filtercaps,
           GST_ELEMENT_NAME (self->video_filter));
   } else if (self->audio_filter && g_str_has_prefix (media_type, "audio")) {
     if (!g_strcmp0 (media_type, "audio/x-raw")
@@ -199,7 +207,7 @@ _insert_filter (GstTranscodeBin * self, GstPad * sinkpad, GstPad * pad,
       filter = self->audio_filter;
     else
       GST_ERROR_OBJECT (pad, "decodebin pad does not produce raw data (%"
-          GST_PTR_FORMAT "), cannot add audio filter '%s'", caps,
+          GST_PTR_FORMAT "), cannot add audio filter '%s'", filtercaps,
           GST_ELEMENT_NAME (self->audio_filter));
   }
 
@@ -298,6 +306,9 @@ find_stream (GstTranscodeBin * self, const gchar * stream_id, GstPad * pad)
   TranscodingStream *res = NULL;
 
   GST_OBJECT_LOCK (self);
+  GST_DEBUG_OBJECT (self,
+      "Looking for stream %s in %u existing transcoding streams",
+      stream_id, self->transcoding_streams->len);
   for (i = 0; i < self->transcoding_streams->len; i = i + 1) {
     TranscodingStream *s = self->transcoding_streams->pdata[i];
 
@@ -312,25 +323,67 @@ find_stream (GstTranscodeBin * self, const gchar * stream_id, GstPad * pad)
 
 done:
   GST_OBJECT_UNLOCK (self);
+  GST_DEBUG_OBJECT (self, "Look-up result: %p", res);
+
+  return res;
+}
+
+static TranscodingStream *
+setup_stream (GstTranscodeBin * self, GstStream * stream)
+{
+  TranscodingStream *res = NULL;
+  GstPad *encodebin_pad = get_encodebin_pad_from_stream (self, stream);
+
+  GST_DEBUG_OBJECT (self,
+      "Encodebin pad for stream %" GST_PTR_FORMAT " : %" GST_PTR_FORMAT, stream,
+      encodebin_pad);
+  if (encodebin_pad) {
+    GST_INFO_OBJECT (self,
+        "Going to transcode stream %s (encodebin pad: %" GST_PTR_FORMAT ")",
+        gst_stream_get_stream_id (stream), encodebin_pad);
+
+    res = transcoding_stream_new (stream, encodebin_pad);
+    GST_OBJECT_LOCK (self);
+    g_ptr_array_add (self->transcoding_streams, res);
+    GST_OBJECT_UNLOCK (self);
+  }
 
   return res;
 }
 
 static void
 gst_transcode_bin_link_encodebin_pad (GstTranscodeBin * self, GstPad * pad,
-    const gchar * stream_id)
+    GstEvent * sstart)
 {
-  GstCaps *caps;
+  GstCaps *caps, *filtercaps;
   GstPadLinkReturn lret;
-  TranscodingStream *stream = find_stream (self, stream_id, NULL);
+  const gchar *stream_id;
+  TranscodingStream *stream;
+
+  gst_event_parse_stream_start (sstart, &stream_id);
+  stream = find_stream (self, stream_id, NULL);
 
   if (!stream) {
-    GST_ERROR_OBJECT (self, "%s -> Got not stream, decodebin3 bug?", stream_id);
-    return;
+    if (self->upstream_selected) {
+      GstStream *tmpstream;
+
+      gst_event_parse_stream (sstart, &tmpstream);
+
+      stream = setup_stream (self, tmpstream);
+
+      gst_object_unref (tmpstream);
+    }
+
+    if (!stream) {
+      GST_ERROR_OBJECT (self, "Could not find any stream with ID: %s",
+          stream_id);
+      return;
+    }
   }
 
-  caps = gst_pad_query_caps (pad, NULL);
-  pad = _insert_filter (self, stream->encodebin_pad, pad, caps);
+  filtercaps = gst_pad_query_caps (pad, NULL);
+  pad = _insert_filter (self, stream->encodebin_pad, pad, filtercaps);
+  gst_caps_unref (filtercaps);
   lret = gst_pad_link (pad, stream->encodebin_pad);
   switch (lret) {
     case GST_PAD_LINK_OK:
@@ -367,19 +420,43 @@ gst_transcode_bin_link_encodebin_pad (GstTranscodeBin * self, GstPad * pad,
   }
 }
 
+static void
+query_upstream_selectable (GstTranscodeBin * self, GstPad * pad)
+{
+  GstQuery *query;
+  gboolean result;
+
+  /* Query whether upstream can handle stream selection or not */
+  query = gst_query_new_selectable ();
+  result = GST_PAD_IS_SINK (pad) ? gst_pad_peer_query (pad, query)
+      : gst_pad_query (pad, query);
+  if (result) {
+    GST_FIXME_OBJECT (self,
+        "We force `transcodebin` to upstream selection"
+        " mode if *any* of the inputs is. This means things might break if"
+        " there's a mix");
+    gst_query_parse_selectable (query, &self->upstream_selected);
+    GST_DEBUG_OBJECT (pad, "Upstream is selectable : %d",
+        self->upstream_selected);
+  } else {
+    self->upstream_selected = FALSE;
+    GST_DEBUG_OBJECT (pad, "Upstream does not handle SELECTABLE query");
+  }
+  gst_query_unref (query);
+}
+
 static GstPadProbeReturn
 wait_stream_start_probe (GstPad * pad,
     GstPadProbeInfo * info, GstTranscodeBin * self)
 {
-  const gchar *stream_id;
-
   if (GST_EVENT_TYPE (info->data) != GST_EVENT_STREAM_START)
     return GST_PAD_PROBE_OK;
 
-  gst_event_parse_stream_start (info->data, &stream_id);
-  GST_INFO_OBJECT (self, "Got pad %" GST_PTR_FORMAT " with stream ID: %s",
-      pad, stream_id);
-  gst_transcode_bin_link_encodebin_pad (self, pad, stream_id);
+  GST_INFO_OBJECT (self,
+      "Got pad %" GST_PTR_FORMAT " with stream:: %" GST_PTR_FORMAT, pad,
+      info->data);
+  query_upstream_selectable (self, pad);
+  gst_transcode_bin_link_encodebin_pad (self, pad, info->data);
 
   return GST_PAD_PROBE_REMOVE;
 }
@@ -399,7 +476,8 @@ decodebin_pad_added_cb (GstElement * decodebin, GstPad * pad,
     gst_event_parse_stream_start (sstart_event, &stream_id);
     GST_INFO_OBJECT (self, "Got pad %" GST_PTR_FORMAT " with stream ID: %s",
         pad, stream_id);
-    gst_transcode_bin_link_encodebin_pad (self, pad, stream_id);
+    query_upstream_selectable (self, pad);
+    gst_transcode_bin_link_encodebin_pad (self, pad, sstart_event);
     return;
   }
 
@@ -472,7 +550,7 @@ no_profile:
 }
 
 static GstPad *
-get_encodebin_pad_for_caps (GstTranscodeBin * self, GstCaps * srccaps)
+get_encodebin_pad_for_caps (GstTranscodeBin * self, const GstCaps * srccaps)
 {
   GstPad *res = NULL;
   GstIterator *pads;
@@ -549,8 +627,7 @@ caps_is_raw (GstCaps * caps, GstStreamType stype)
 }
 
 static GstPad *
-get_encodebin_pad_from_stream (GstTranscodeBin * self,
-    GstEncodingProfile * profile, GstStream * stream)
+get_encodebin_pad_from_stream (GstTranscodeBin * self, GstStream * stream)
 {
   GstCaps *caps = gst_stream_get_caps (stream);
   GstPad *sinkpad = get_encodebin_pad_for_caps (self, caps);
@@ -572,6 +649,7 @@ get_encodebin_pad_from_stream (GstTranscodeBin * self,
     sinkpad = get_encodebin_pad_for_caps (self, caps);
   }
 
+  gst_caps_unref (caps);
   return sinkpad;
 }
 
@@ -597,22 +675,9 @@ select_stream_cb (GstElement * decodebin,
 
   for (i = 0; i < gst_stream_collection_get_size (collection); i++) {
     GstStream *tmpstream = gst_stream_collection_get_stream (collection, i);
-    GstPad *encodebin_pad =
-        get_encodebin_pad_from_stream (self, self->profile, tmpstream);
 
-    if (encodebin_pad) {
-      if (stream == tmpstream)
-        transcode_stream = TRUE;
-
-      GST_INFO_OBJECT (self,
-          "Going to transcode stream %s (encodebin pad: %" GST_PTR_FORMAT,
-          gst_stream_get_stream_id (tmpstream), encodebin_pad);
-
-      GST_OBJECT_LOCK (self);
-      g_ptr_array_add (self->transcoding_streams,
-          transcoding_stream_new (tmpstream, encodebin_pad));
-      GST_OBJECT_UNLOCK (self);
-    }
+    if (setup_stream (self, tmpstream) && stream == tmpstream)
+      transcode_stream = TRUE;
   }
 
   GST_OBJECT_LOCK (self);
@@ -656,9 +721,11 @@ _setup_avoid_reencoding (GstTranscodeBin * self)
 
     restrictions = gst_encoding_profile_get_restriction (profile);
 
-    if (restrictions && gst_caps_is_any (restrictions)) {
+    if (restrictions) {
+      gboolean is_any = gst_caps_is_any (restrictions);
       gst_caps_unref (restrictions);
-      continue;
+      if (is_any)
+        continue;
     }
 
     encodecaps = gst_encoding_profile_get_format (profile);
@@ -737,6 +804,21 @@ remove_all_children (GstTranscodeBin * self)
   }
 }
 
+static gboolean
+sink_event_function (GstPad * sinkpad, GstTranscodeBin * self, GstEvent * event)
+{
+
+  switch (GST_EVENT_TYPE (event)) {
+    case GST_EVENT_STREAM_START:
+      query_upstream_selectable (self, sinkpad);
+      break;
+    default:
+      break;
+  }
+
+  return gst_pad_event_default (sinkpad, GST_OBJECT (self), event);
+}
+
 static GstStateChangeReturn
 gst_transcode_bin_change_state (GstElement * element, GstStateChange transition)
 {
@@ -799,6 +881,7 @@ gst_transcode_bin_dispose (GObject * object)
   g_clear_object (&self->video_filter);
   g_clear_object (&self->audio_filter);
   g_clear_pointer (&self->transcoding_streams, g_ptr_array_unref);
+  gst_clear_object (&self->profile);
 
   G_OBJECT_CLASS (gst_transcode_bin_parent_class)->dispose (object);
 }
@@ -851,6 +934,7 @@ gst_transcode_bin_request_pad (GstElement * element, GstPadTemplate * temp,
   }
 
   gpad = gst_ghost_pad_new_from_template (name, decodebin_pad, temp);
+  gst_pad_set_event_function (gpad, (GstPadEventFunction) sink_event_function);
   gst_element_add_pad (element, GST_PAD (gpad));
   gst_object_unref (decodebin_pad);
 
@@ -932,6 +1016,9 @@ gst_transcode_bin_class_init (GstTranscodeBinClass * klass)
   object_class->dispose = gst_transcode_bin_dispose;
   object_class->get_property = gst_transcode_bin_get_property;
   object_class->set_property = gst_transcode_bin_set_property;
+
+  GST_DEBUG_CATEGORY_INIT (gst_transcodebin_debug, "transcodebin", 0,
+      "Transcodebin element");
 
   gstelement_klass = (GstElementClass *) klass;
   gstelement_klass->change_state =

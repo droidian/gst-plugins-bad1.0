@@ -28,12 +28,17 @@
 #endif
 
 #include "gstvaav1dec.h"
+#include "gstvaav1enc.h"
 #include "gstvacaps.h"
+#include "gstvacompositor.h"
 #include "gstvadeinterlace.h"
 #include "gstvadevice.h"
 #include "gstvafilter.h"
 #include "gstvah264dec.h"
+#include "gstvah264enc.h"
 #include "gstvah265dec.h"
+#include "gstvah265enc.h"
+#include "gstvajpegdec.h"
 #include "gstvampeg2dec.h"
 #include "gstvaprofile.h"
 #include "gstvavp8dec.h"
@@ -43,14 +48,18 @@
 #define GST_CAT_DEFAULT gstva_debug
 GST_DEBUG_CATEGORY (gstva_debug);
 
-/* big bad mutex to exclusive access to shared stream buffers, such as
- * DMABuf after a tee */
-GRecMutex GST_VA_SHARED_LOCK = { 0, };
+#ifdef G_OS_WIN32
+/* Windows support is still experimental */
+#define GST_VA_RANK_PRIMARY GST_RANK_NONE
+#else
+#define GST_VA_RANK_PRIMARY (GST_RANK_PRIMARY + 1)
+#endif
 
 static void
 plugin_add_dependencies (GstPlugin * plugin)
 {
-  const gchar *env_vars[] = { "LIBVA_DRIVER_NAME", NULL };
+#ifndef G_OS_WIN32
+  const gchar *env_vars[] = { "LIBVA_DRIVER_NAME", "GST_VA_ALL_DRIVERS", NULL };
   const gchar *kernel_paths[] = { "/dev/dri", NULL };
   const gchar *kernel_names[] = { "renderD", NULL };
 
@@ -58,7 +67,8 @@ plugin_add_dependencies (GstPlugin * plugin)
   gst_plugin_add_dependency (plugin, NULL, kernel_paths, kernel_names,
       GST_PLUGIN_DEPENDENCY_FLAG_FILE_NAME_IS_PREFIX);
 
-  /* features get updated upon changes on LIBVA_DRIVER_NAME envvar */
+  /* features get updated upon changes on LIBVA_DRIVER_NAME and
+   * GST_VA_ALL_DRIVERS envvar */
   gst_plugin_add_dependency (plugin, env_vars, NULL, NULL,
       GST_PLUGIN_DEPENDENCY_FLAG_NONE);
 
@@ -68,6 +78,7 @@ plugin_add_dependencies (GstPlugin * plugin)
       LIBVA_DRIVERS_PATH, "_drv_video.so",
       GST_PLUGIN_DEPENDENCY_FLAG_FILE_NAME_IS_SUFFIX |
       GST_PLUGIN_DEPENDENCY_FLAG_PATHS_ARE_DEFAULT_ONLY);
+#endif
 }
 
 static void
@@ -98,48 +109,53 @@ plugin_register_decoders (GstPlugin * plugin, GstVaDevice * device,
     switch (codec) {
       case H264:
         if (!gst_va_h264_dec_register (plugin, device, sinkcaps, srccaps,
-                GST_RANK_NONE)) {
+                GST_VA_RANK_PRIMARY)) {
           GST_WARNING ("Failed to register H264 decoder: %s",
               device->render_device_path);
         }
         break;
       case HEVC:
         if (!gst_va_h265_dec_register (plugin, device, sinkcaps, srccaps,
-                GST_RANK_NONE)) {
+                GST_VA_RANK_PRIMARY)) {
           GST_WARNING ("Failed to register H265 decoder: %s",
               device->render_device_path);
         }
         break;
       case VP8:
         if (!gst_va_vp8_dec_register (plugin, device, sinkcaps, srccaps,
-                GST_RANK_NONE)) {
+                GST_VA_RANK_PRIMARY)) {
           GST_WARNING ("Failed to register VP8 decoder: %s",
               device->render_device_path);
         }
         break;
       case VP9:
         if (!gst_va_vp9_dec_register (plugin, device, sinkcaps, srccaps,
-                GST_RANK_NONE)) {
+                GST_VA_RANK_PRIMARY)) {
           GST_WARNING ("Failed to register VP9 decoder: %s",
               device->render_device_path);
         }
         break;
       case MPEG2:
         if (!gst_va_mpeg2_dec_register (plugin, device, sinkcaps, srccaps,
-                GST_RANK_NONE)) {
+                GST_VA_RANK_PRIMARY)) {
           GST_WARNING ("Failed to register Mpeg2 decoder: %s",
               device->render_device_path);
         }
         break;
-#if VA_CHECK_VERSION(1, 8, 0)
       case AV1:
         if (!gst_va_av1_dec_register (plugin, device, sinkcaps, srccaps,
-                GST_RANK_NONE)) {
+                GST_VA_RANK_PRIMARY)) {
           GST_WARNING ("Failed to register AV1 decoder: %s",
               device->render_device_path);
         }
         break;
-#endif
+      case JPEG:
+        if (!gst_va_jpeg_dec_register (plugin, device, sinkcaps, srccaps,
+                GST_RANK_NONE)) {
+          GST_WARNING ("Failed to register JPEG decoder: %s",
+              device->render_device_path);
+        }
+        break;
       default:
         GST_DEBUG ("No decoder implementation for %" GST_FOURCC_FORMAT,
             GST_FOURCC_ARGS (codec));
@@ -157,12 +173,6 @@ plugin_register_encoders (GstPlugin * plugin, GstVaDevice * device,
 {
   GHashTableIter iter;
   gpointer key, value;
-  const gchar *str;
-
-  if (entrypoint == VAEntrypointEncSliceLP)
-    str = "low power ";
-  else
-    str = "";
 
   g_hash_table_iter_init (&iter, encoders);
   while (g_hash_table_iter_next (&iter, &key, &value)) {
@@ -177,10 +187,41 @@ plugin_register_encoders (GstPlugin * plugin, GstVaDevice * device,
             &srccaps, &sinkcaps))
       continue;
 
-    GST_LOG ("%d encoder %scodec: %" GST_FOURCC_FORMAT, profiles->len, str,
+    GST_LOG ("%d encoder %scodec: %" GST_FOURCC_FORMAT, profiles->len,
+        (entrypoint == VAEntrypointEncSliceLP) ? "low power " : "",
         GST_FOURCC_ARGS (codec));
     GST_LOG ("sink caps: %" GST_PTR_FORMAT, sinkcaps);
     GST_LOG ("src caps: %" GST_PTR_FORMAT, srccaps);
+
+    switch (codec) {
+      case H264:
+        if (!gst_va_h264_enc_register (plugin, device, sinkcaps, srccaps,
+                GST_RANK_NONE, entrypoint)) {
+          GST_WARNING ("Failed to register H264 encoder: %s",
+              device->render_device_path);
+        }
+        break;
+      case HEVC:
+        if (!gst_va_h265_enc_register (plugin, device, sinkcaps, srccaps,
+                GST_RANK_NONE, entrypoint)) {
+          GST_WARNING ("Failed to register H265 encoder: %s",
+              device->render_device_path);
+        }
+        break;
+#if VA_CHECK_VERSION(1, 15, 0)
+      case AV1:
+        if (!gst_va_av1_enc_register (plugin, device, sinkcaps, srccaps,
+                GST_RANK_NONE, entrypoint)) {
+          GST_WARNING ("Failed to register AV1 encoder: %s",
+              device->render_device_path);
+        }
+        break;
+#endif
+      default:
+        GST_DEBUG ("No encoder implementation for %" GST_FOURCC_FORMAT,
+            GST_FOURCC_ARGS (codec));
+        break;
+    }
 
     gst_caps_unref (srccaps);
     gst_caps_unref (sinkcaps);
@@ -191,16 +232,18 @@ static void
 plugin_register_vpp (GstPlugin * plugin, GstVaDevice * device)
 {
   GstVaFilter *filter;
-  gboolean has_colorbalance, has_deinterlace;
+  gboolean has_colorbalance, has_deinterlace, has_compose;
 
   has_colorbalance = FALSE;
   has_deinterlace = FALSE;
+  has_compose = FALSE;
   filter = gst_va_filter_new (device->display);
   if (gst_va_filter_open (filter)) {
     has_colorbalance =
         gst_va_filter_has_filter (filter, VAProcFilterColorBalance);
     has_deinterlace =
         gst_va_filter_has_filter (filter, VAProcFilterDeinterlacing);
+    has_compose = gst_va_filter_has_compose (filter);
   } else {
     GST_WARNING ("Failed open VA filter");
     gst_object_unref (filter);
@@ -214,6 +257,13 @@ plugin_register_vpp (GstPlugin * plugin, GstVaDevice * device)
   if (has_deinterlace) {
     if (!gst_va_deinterlace_register (plugin, device, GST_RANK_NONE)) {
       GST_WARNING ("Failed to register deinterlace: %s",
+          device->render_device_path);
+    }
+  }
+
+  if (has_compose) {
+    if (!gst_va_compositor_register (plugin, device, GST_RANK_NONE)) {
+      GST_WARNING ("Failed to register compositor: %s",
           device->render_device_path);
     }
   }
@@ -261,7 +311,7 @@ plugin_register_elements (GstPlugin * plugin, GstVaDevice * device)
 
   status = vaQueryConfigProfiles (dpy, profiles, &num_profiles);
   if (status != VA_STATUS_SUCCESS) {
-    GST_ERROR ("vaQueryConfigProfile: %s", vaErrorStr (status));
+    GST_WARNING ("vaQueryConfigProfile: %s", vaErrorStr (status));
     goto bail;
   }
 
@@ -269,7 +319,7 @@ plugin_register_elements (GstPlugin * plugin, GstVaDevice * device)
     status = vaQueryConfigEntrypoints (dpy, profiles[i], entrypoints,
         &num_entrypoints);
     if (status != VA_STATUS_SUCCESS) {
-      GST_ERROR ("vaQueryConfigEntrypoints: %s", vaErrorStr (status));
+      GST_WARNING ("vaQueryConfigEntrypoints: %s", vaErrorStr (status));
       goto bail;
     }
 
@@ -312,22 +362,18 @@ static gboolean
 plugin_init (GstPlugin * plugin)
 {
   GList *devices, *dev;
-  gboolean ret = TRUE;
 
   GST_DEBUG_CATEGORY_INIT (gstva_debug, "va", 0, "VA general debug");
 
   plugin_add_dependencies (plugin);
 
   devices = gst_va_device_find_devices ();
-  for (dev = devices; dev; dev = g_list_next (dev)) {
-    if (!plugin_register_elements (plugin, dev->data)) {
-      ret = FALSE;
-      break;
-    }
-  }
+  for (dev = devices; dev; dev = g_list_next (dev))
+    plugin_register_elements (plugin, dev->data);
+
   gst_va_device_list_free (devices);
 
-  return ret;
+  return TRUE;
 }
 
 GST_PLUGIN_DEFINE (GST_VERSION_MAJOR,

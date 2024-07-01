@@ -27,29 +27,18 @@
  * initguid.h must be included in the C file before mmdeviceapi.h
  * which is included in gstwasapiutil.h.
  */
-#ifdef _MSC_VER
 #include <initguid.h>
-#endif
 #include "gstwasapiutil.h"
 #include "gstwasapidevice.h"
 
 GST_DEBUG_CATEGORY_EXTERN (gst_wasapi_debug);
 #define GST_CAT_DEFAULT gst_wasapi_debug
 
-/* This was only added to MinGW in ~2015 and our Cerbero toolchain is too old */
-#if defined(_MSC_VER)
 #include <functiondiscoverykeys_devpkey.h>
-#elif !defined(PKEY_Device_FriendlyName)
-#include <initguid.h>
-#include <propkey.h>
-DEFINE_PROPERTYKEY (PKEY_Device_FriendlyName, 0xa45c254e, 0xdf1c, 0x4efd, 0x80,
-    0x20, 0x67, 0xd1, 0x46, 0xa8, 0x50, 0xe0, 14);
-DEFINE_PROPERTYKEY (PKEY_AudioEngine_DeviceFormat, 0xf19f064d, 0x82c, 0x4e27,
-    0xbc, 0x73, 0x68, 0x82, 0xa1, 0xbb, 0x8e, 0x4c, 0);
-#endif
 
 /* __uuidof is only available in C++, so we hard-code the GUID values for all
- * these. This is ok because these are ABI. */
+ * these. This is ok because these are ABI. MSYS2 provides these in C. */
+#ifndef HAVE_AUDCLNT_GUIDS
 const CLSID CLSID_MMDeviceEnumerator = { 0xbcde0395, 0xe52f, 0x467c,
   {0x8e, 0x3d, 0xc4, 0x57, 0x92, 0x91, 0x69, 0x2e}
 };
@@ -66,10 +55,6 @@ const IID IID_IAudioClient = { 0x1cb9ad4c, 0xdbfa, 0x4c32,
   {0xb1, 0x78, 0xc2, 0xf5, 0x68, 0xa7, 0x03, 0xb2}
 };
 
-const IID IID_IAudioClient3 = { 0x7ed4ee07, 0x8e67, 0x4cd4,
-  {0x8c, 0x1a, 0x2b, 0x7a, 0x59, 0x87, 0xad, 0x42}
-};
-
 const IID IID_IAudioClock = { 0xcd63314f, 0x3fba, 0x4a1b,
   {0x81, 0x2c, 0xef, 0x96, 0x35, 0x87, 0x28, 0xe7}
 };
@@ -80,6 +65,79 @@ const IID IID_IAudioCaptureClient = { 0xc8adbd64, 0xe71e, 0x48a0,
 
 const IID IID_IAudioRenderClient = { 0xf294acfc, 0x3146, 0x4483,
   {0xa7, 0xbf, 0xad, 0xdc, 0xa7, 0xc2, 0x60, 0xe2}
+};
+#endif
+
+#ifndef HAVE_AUDCLNT3_GUID
+const IID IID_IAudioClient3 = { 0x7ed4ee07, 0x8e67, 0x4cd4,
+  {0x8c, 0x1a, 0x2b, 0x7a, 0x59, 0x87, 0xad, 0x42}
+};
+#endif
+
+/* Desktop only defines */
+#ifndef KSAUDIO_SPEAKER_MONO
+#define KSAUDIO_SPEAKER_MONO            (SPEAKER_FRONT_CENTER)
+#endif
+#ifndef KSAUDIO_SPEAKER_1POINT1
+#define KSAUDIO_SPEAKER_1POINT1         (SPEAKER_FRONT_CENTER | SPEAKER_LOW_FREQUENCY)
+#endif
+#ifndef KSAUDIO_SPEAKER_STEREO
+#define KSAUDIO_SPEAKER_STEREO          (SPEAKER_FRONT_LEFT | SPEAKER_FRONT_RIGHT)
+#endif
+#ifndef KSAUDIO_SPEAKER_2POINT1
+#define KSAUDIO_SPEAKER_2POINT1         (SPEAKER_FRONT_LEFT | SPEAKER_FRONT_RIGHT | SPEAKER_LOW_FREQUENCY)
+#endif
+#ifndef KSAUDIO_SPEAKER_3POINT0
+#define KSAUDIO_SPEAKER_3POINT0         (SPEAKER_FRONT_LEFT | SPEAKER_FRONT_RIGHT | SPEAKER_FRONT_CENTER)
+#endif
+#ifndef KSAUDIO_SPEAKER_3POINT1
+#define KSAUDIO_SPEAKER_3POINT1         (SPEAKER_FRONT_LEFT | SPEAKER_FRONT_RIGHT | \
+                                         SPEAKER_FRONT_CENTER | SPEAKER_LOW_FREQUENCY)
+#endif
+#ifndef KSAUDIO_SPEAKER_QUAD
+#define KSAUDIO_SPEAKER_QUAD            (SPEAKER_FRONT_LEFT | SPEAKER_FRONT_RIGHT | \
+                                         SPEAKER_BACK_LEFT  | SPEAKER_BACK_RIGHT)
+#endif
+#define KSAUDIO_SPEAKER_SURROUND        (SPEAKER_FRONT_LEFT | SPEAKER_FRONT_RIGHT | \
+                                         SPEAKER_FRONT_CENTER | SPEAKER_BACK_CENTER)
+#ifndef KSAUDIO_SPEAKER_5POINT0
+#define KSAUDIO_SPEAKER_5POINT0         (SPEAKER_FRONT_LEFT | SPEAKER_FRONT_RIGHT | SPEAKER_FRONT_CENTER | \
+                                         SPEAKER_SIDE_LEFT  | SPEAKER_SIDE_RIGHT)
+#endif
+#define KSAUDIO_SPEAKER_5POINT1         (SPEAKER_FRONT_LEFT | SPEAKER_FRONT_RIGHT | \
+                                         SPEAKER_FRONT_CENTER | SPEAKER_LOW_FREQUENCY | \
+                                         SPEAKER_BACK_LEFT  | SPEAKER_BACK_RIGHT)
+#ifndef KSAUDIO_SPEAKER_7POINT0
+#define KSAUDIO_SPEAKER_7POINT0         (SPEAKER_FRONT_LEFT | SPEAKER_FRONT_RIGHT | SPEAKER_FRONT_CENTER | \
+                                         SPEAKER_BACK_LEFT | SPEAKER_BACK_RIGHT | \
+                                         SPEAKER_SIDE_LEFT | SPEAKER_SIDE_RIGHT)
+#endif
+#ifndef KSAUDIO_SPEAKER_7POINT1
+#define KSAUDIO_SPEAKER_7POINT1         (SPEAKER_FRONT_LEFT | SPEAKER_FRONT_RIGHT | \
+                                         SPEAKER_FRONT_CENTER | SPEAKER_LOW_FREQUENCY | \
+                                         SPEAKER_BACK_LEFT | SPEAKER_BACK_RIGHT | \
+                                         SPEAKER_FRONT_LEFT_OF_CENTER | SPEAKER_FRONT_RIGHT_OF_CENTER)
+#endif
+
+static DWORD default_ch_masks[] = {
+  0,
+  KSAUDIO_SPEAKER_MONO,
+  /* 2ch */
+  KSAUDIO_SPEAKER_STEREO,
+  /* 2.1ch */
+  /* KSAUDIO_SPEAKER_3POINT0 ? */
+  KSAUDIO_SPEAKER_2POINT1,
+  /* 4ch */
+  /* KSAUDIO_SPEAKER_3POINT1 or KSAUDIO_SPEAKER_SURROUND ? */
+  KSAUDIO_SPEAKER_QUAD,
+  /* 5ch */
+  KSAUDIO_SPEAKER_5POINT0,
+  /* 5.1ch */
+  KSAUDIO_SPEAKER_5POINT1,
+  /* 7ch */
+  KSAUDIO_SPEAKER_7POINT0,
+  /* 7.1ch */
+  KSAUDIO_SPEAKER_7POINT1,
 };
 
 /* *INDENT-OFF* */
@@ -349,6 +407,7 @@ gst_wasapi_util_get_devices (GstMMDeviceEnumerator * self,
     GstDevice *device;
     GstStructure *props;
     GstCaps *caps;
+    gboolean parse_ret;
 
     hr = IMMDeviceCollection_Item (device_collection, ii, &item);
     if (hr != S_OK)
@@ -411,8 +470,12 @@ gst_wasapi_util_get_devices (GstMMDeviceEnumerator * self,
       goto next;
     }
 
-    if (!gst_wasapi_util_parse_waveformatex ((WAVEFORMATEXTENSIBLE *) format,
-            gst_static_caps_get (&scaps), &caps, NULL))
+    parse_ret =
+        gst_wasapi_util_parse_waveformatex ((WAVEFORMATEXTENSIBLE *) format,
+        gst_static_caps_get (&scaps), &caps, NULL);
+    CoTaskMemFree (format);
+
+    if (!parse_ret)
       goto next;
 
     /* Set some useful properties */
@@ -498,7 +561,7 @@ gst_wasapi_util_get_device_format (GstElement * self,
       return FALSE;
     }
 
-    format = malloc (var.blob.cbSize);
+    format = CoTaskMemAlloc (var.blob.cbSize);
     memcpy (format, var.blob.pBlobData, var.blob.cbSize);
 
     PropVariantClear (&var);
@@ -512,7 +575,7 @@ gst_wasapi_util_get_device_format (GstElement * self,
     goto out;
 
   GST_ERROR_OBJECT (self, "AudioEngine DeviceFormat not supported");
-  free (format);
+  CoTaskMemFree (format);
   return FALSE;
 
 out:
@@ -522,7 +585,7 @@ out:
 
 gboolean
 gst_wasapi_util_get_device (GstMMDeviceEnumerator * self,
-    gint data_flow, gint role, const wchar_t * device_strid,
+    gint data_flow, gint role, const wchar_t *device_strid,
     IMMDevice ** ret_device)
 {
   gboolean res = FALSE;
@@ -704,6 +767,17 @@ gst_wasapi_util_waveformatex_to_channel_mask (WAVEFORMATEXTENSIBLE * format,
   WORD nChannels = format->Format.nChannels;
   DWORD dwChannelMask = format->dwChannelMask;
   GstAudioChannelPosition *pos = NULL;
+
+  if (nChannels > 2 && !dwChannelMask) {
+    GST_WARNING ("Unknown channel mask value for %d channel stream", nChannels);
+
+    if (nChannels >= G_N_ELEMENTS (default_ch_masks)) {
+      GST_ERROR ("Too many channels %d", nChannels);
+      return 0;
+    }
+
+    dwChannelMask = default_ch_masks[nChannels];
+  }
 
   pos = g_new (GstAudioChannelPosition, nChannels);
   gst_wasapi_util_channel_position_all_none (nChannels, pos);

@@ -26,6 +26,7 @@
 #include "glcontexthelper.h"
 
 #import <AVFoundation/AVFoundation.h>
+#import <CoreMedia/CoreMedia.h>
 #if !HAVE_IOS
 #import <AppKit/AppKit.h>
 #endif
@@ -33,6 +34,7 @@
 #include <gst/gl/gstglcontext.h>
 #include "coremediabuffer.h"
 #include "videotexturecache-gl.h"
+#include "helpers.h"
 
 #define DEFAULT_DEVICE_INDEX  -1
 #define DEFAULT_POSITION      GST_AVF_VIDEO_SOURCE_POSITION_DEFAULT
@@ -48,7 +50,6 @@
 GST_DEBUG_CATEGORY (gst_avf_video_src_debug);
 #define GST_CAT_DEFAULT gst_avf_video_src_debug
 
-static GstVideoFormat get_gst_video_format(NSNumber *pixel_format);
 static CMVideoDimensions
 get_oriented_dimensions(GstAVFVideoSourceOrientation orientation, CMVideoDimensions dimensions);
 
@@ -176,6 +177,10 @@ gst_avf_video_source_device_type_get_type (void)
   AVCaptureConnection *connection;
   CMClockRef inputClock;
 
+  NSCondition *permissionCond;
+  BOOL permissionRequestPending;
+  BOOL permissionStopRequest;
+
   dispatch_queue_t mainQueue;
   dispatch_queue_t workerQueue;
   NSConditionLock *bufQueueLock;
@@ -194,6 +199,10 @@ gst_avf_video_source_device_type_get_type (void)
   BOOL captureScreen;
   BOOL captureScreenCursor;
   BOOL captureScreenMouseClicks;
+  guint cropX;
+  guint cropY;
+  guint cropWidth;
+  guint cropHeight;
 
   BOOL useVideoMeta;
   GstGLContextHelper *ctxh;
@@ -214,6 +223,10 @@ gst_avf_video_source_device_type_get_type (void)
 @property BOOL captureScreen;
 @property BOOL captureScreenCursor;
 @property BOOL captureScreenMouseClicks;
+@property guint cropX;
+@property guint cropY;
+@property guint cropWidth;
+@property guint cropHeight;
 
 - (BOOL)openScreenInput;
 - (BOOL)openDeviceInput;
@@ -225,9 +238,7 @@ gst_avf_video_source_device_type_get_type (void)
 - (float)getScaleFactorFromDeviceIndex;
 #endif
 - (GstCaps *)getDeviceCaps;
-- (BOOL)setDeviceCaps:(GstVideoInfo *)info;
-- (BOOL)getSessionPresetCaps:(GstCaps *)result;
-- (BOOL)setSessionPresetCaps:(GstVideoInfo *)info;
+- (BOOL)setDeviceCaps:(const GstVideoInfo *)info;
 - (GstCaps *)getCaps;
 - (BOOL)setCaps:(GstCaps *)new_caps;
 - (BOOL)start;
@@ -236,7 +247,6 @@ gst_avf_video_source_device_type_get_type (void)
 - (BOOL)unlockStop;
 - (BOOL)query:(GstQuery *)query;
 - (void)setContext:(GstContext *)context;
-- (GstStateChangeReturn)changeState:(GstStateChange)transition;
 - (GstFlowReturn)create:(GstBuffer **)buf;
 - (GstCaps *)fixate:(GstCaps *)caps;
 - (BOOL)decideAllocation:(GstQuery *)query;
@@ -256,7 +266,7 @@ static AVCaptureDeviceType GstAVFVideoSourceDeviceType2AVCaptureDeviceType(GstAV
     case GST_AVF_VIDEO_SOURCE_DEVICE_TYPE_BUILT_IN_TELEPHOTO_CAMERA:
       return AVCaptureDeviceTypeBuiltInTelephotoCamera;
     case GST_AVF_VIDEO_SOURCE_DEVICE_TYPE_BUILT_IN_DUAL_CAMERA:
-      return AVCaptureDeviceTypeBuiltInDuoCamera;
+      return AVCaptureDeviceTypeBuiltInDualCamera;
     case GST_AVF_VIDEO_SOURCE_DEVICE_TYPE_DEFAULT:
       g_assert_not_reached();
   }
@@ -294,7 +304,7 @@ static AVCaptureVideoOrientation GstAVFVideoSourceOrientation2AVCaptureVideoOrie
 @implementation GstAVFVideoSrcImpl
 
 @synthesize deviceIndex, deviceName, position, orientation, deviceType, doStats,
-    fps, captureScreen, captureScreenCursor, captureScreenMouseClicks;
+    fps, captureScreen, captureScreenCursor, captureScreenMouseClicks, cropX, cropY, cropWidth, cropHeight;
 
 - (id)init
 {
@@ -324,6 +334,8 @@ static AVCaptureVideoOrientation GstAVFVideoSourceOrientation2AVCaptureVideoOrie
     workerQueue =
         dispatch_queue_create ("org.freedesktop.gstreamer.avfvideosrc.output", NULL);
 
+    permissionCond = [[NSCondition alloc] init];
+
     gst_base_src_set_live (baseSrc, TRUE);
     gst_base_src_set_format (baseSrc, GST_FORMAT_TIME);
   }
@@ -335,12 +347,60 @@ static AVCaptureVideoOrientation GstAVFVideoSourceOrientation2AVCaptureVideoOrie
 {
   mainQueue = NULL;
   workerQueue = NULL;
+
+  permissionCond = nil;
 }
 
 - (BOOL)openDeviceInput
 {
   NSString *mediaType = AVMediaTypeVideo;
   NSError *err;
+
+  // Since Mojave, permissions are now supposed to be explicitly granted
+  // before capturing from the camera
+  if (@available(macOS 10.14, *)) {
+    // Check if permission has already been granted (or denied)
+    AVAuthorizationStatus authStatus = [AVCaptureDevice authorizationStatusForMediaType:AVMediaTypeVideo];
+    switch (authStatus) {
+      case AVAuthorizationStatusDenied:
+        // The user has explicitly denied permission for media capture.
+        GST_ELEMENT_ERROR (element, RESOURCE, NOT_AUTHORIZED,
+          ("Device video access permission has been explicitly denied before"), ("Authorization status: %d", (int)authStatus));
+          return NO;
+      case AVAuthorizationStatusRestricted:
+        // The user is not allowed to access media capture devices.
+        GST_ELEMENT_ERROR (element, RESOURCE, NOT_AUTHORIZED,
+          ("Device video access permission cannot be granted by the user"), ("Authorization status: %d", (int)authStatus));
+        return NO;
+      case AVAuthorizationStatusAuthorized:
+        // The user has explicitly granted permission for media capture,
+        // or explicit user permission is not necessary for the media type in question.
+        GST_DEBUG_OBJECT (element, "Device video access permission has already been granted");
+        break;
+      case AVAuthorizationStatusNotDetermined:
+        // Explicit user permission is required for media capture,
+        // but the user has not yet granted or denied such permission.
+        GST_DEBUG_OBJECT (element, "Requesting device video access permission");
+
+        [permissionCond lock];
+        permissionRequestPending = YES;
+        [permissionCond unlock];
+
+        [AVCaptureDevice requestAccessForMediaType:AVMediaTypeVideo completionHandler:^(BOOL granted) {
+          GST_DEBUG_OBJECT (element, "Device video access permission %s", granted ? "granted" : "not granted");
+          // Check if permission has been granted
+          if (!granted) {
+             GST_ELEMENT_ERROR (element, RESOURCE, NOT_AUTHORIZED,
+               ("Device video access permission has been denied"), ("Authorization status: %d", (int)AVAuthorizationStatusDenied));
+          }
+          [permissionCond lock];
+          permissionRequestPending = NO;
+          [permissionCond broadcast];
+          [permissionCond unlock];
+        }];
+        break;
+    }
+  }
 
   if (deviceIndex == DEFAULT_DEVICE_INDEX) {
 #ifdef HAVE_IOS
@@ -361,7 +421,9 @@ static AVCaptureVideoOrientation GstAVFVideoSourceOrientation2AVCaptureVideoOrie
       return NO;
     }
   } else { // deviceIndex takes priority over position and deviceType
+G_GNUC_BEGIN_IGNORE_DEPRECATIONS
     NSArray *devices = [AVCaptureDevice devicesWithMediaType:mediaType];
+G_GNUC_END_IGNORE_DEPRECATIONS
     if (deviceIndex >= [devices count]) {
       GST_ELEMENT_ERROR (element, RESOURCE, NOT_FOUND,
                           ("Invalid video capture device index"), (NULL));
@@ -393,6 +455,7 @@ static AVCaptureVideoOrientation GstAVFVideoSourceOrientation2AVCaptureVideoOrie
   return NO;
 #else
   CGDirectDisplayID displayId;
+  int screenHeight, screenWidth;
 
   GST_DEBUG_OBJECT (element, "Opening screen input");
 
@@ -402,7 +465,6 @@ static AVCaptureVideoOrientation GstAVFVideoSourceOrientation2AVCaptureVideoOrie
 
   AVCaptureScreenInput *screenInput =
       [[AVCaptureScreenInput alloc] initWithDisplayID:displayId];
-
 
   @try {
     [screenInput setValue:[NSNumber numberWithBool:captureScreenCursor]
@@ -415,6 +477,24 @@ static AVCaptureVideoOrientation GstAVFVideoSourceOrientation2AVCaptureVideoOrie
     }
     GST_WARNING ("Capturing cursor is only supported in OS X >= 10.8");
   }
+
+  screenHeight = CGDisplayPixelsHigh (displayId);
+  screenWidth = CGDisplayPixelsWide (displayId);
+
+  if (cropX + cropWidth > screenWidth || cropY + cropHeight > screenHeight) {
+    GST_WARNING ("Capture region outside of screen bounds, ignoring");
+  } else {
+    /* If width/height is not specified, assume max possible values */
+    int rectWidth = cropWidth ? cropWidth : (screenWidth - cropX);
+    int rectHeight = cropHeight ? cropHeight : (screenHeight - cropY);
+
+    /* cropRect (0,0) is bottom left, which feels counterintuitive.
+     * Make cropY relative to the top edge instead */
+    CGRect cropRect = CGRectMake (cropX, screenHeight - cropY - rectHeight,
+                                  rectWidth, rectHeight);
+    [screenInput setCropRect:cropRect];
+  }
+
   screenInput.capturesMouseClicks = captureScreenMouseClicks;
   input = screenInput;
   return YES;
@@ -427,60 +507,6 @@ static AVCaptureVideoOrientation GstAVFVideoSourceOrientation2AVCaptureVideoOrie
 
   GST_DEBUG_OBJECT (element, "Opening device");
 
-  // Since Mojave, permissions are now supposed to be explicitly granted 
-  // before performing anything on a device
-  if (@available(macOS 10.14, *)) {
-    if (captureScreen)
-      goto checked;
-
-    // Check if permission has already been granted (or denied)
-    AVAuthorizationStatus authStatus = [AVCaptureDevice authorizationStatusForMediaType:AVMediaTypeVideo];
-    switch (authStatus) {
-      case AVAuthorizationStatusDenied:
-        // The user has explicitly denied permission for media capture.
-        GST_ELEMENT_ERROR (element, RESOURCE, NOT_AUTHORIZED,
-          ("Device video access permission has been explicitly denied before"), ("Authorization status: %d", (int)authStatus));
-          return success;
-      case AVAuthorizationStatusRestricted:
-        // The user is not allowed to access media capture devices.
-        GST_ELEMENT_ERROR (element, RESOURCE, NOT_AUTHORIZED,
-          ("Device video access permission cannot be granted by the user"), ("Authorization status: %d", (int)authStatus));
-        return success;
-      case AVAuthorizationStatusAuthorized:
-        // The user has explicitly granted permission for media capture,
-        // or explicit user permission is not necessary for the media type in question.
-        GST_DEBUG_OBJECT (element, "Device video access permission has already been granted");
-        break;
-      case AVAuthorizationStatusNotDetermined:
-        ;
-        // Explicit user permission is required for media capture,
-        // but the user has not yet granted or denied such permission.
-        dispatch_semaphore_t sema = dispatch_semaphore_create(0);
-        dispatch_sync (mainQueue, ^{
-          [AVCaptureDevice requestAccessForMediaType:AVMediaTypeVideo completionHandler:^(BOOL granted) {
-            GST_DEBUG_OBJECT (element, "Device video access permission %s", granted ? "granted" : "not granted");
-            dispatch_semaphore_signal(sema);
-          }];
-        });
-        // Block on dialog being answered
-        if (![NSThread isMainThread]) {
-            dispatch_semaphore_wait(sema, DISPATCH_TIME_FOREVER);
-        } else {
-            while (dispatch_semaphore_wait(sema, DISPATCH_TIME_NOW)) {
-                [[NSRunLoop currentRunLoop] runMode:NSDefaultRunLoopMode beforeDate:[NSDate dateWithTimeIntervalSinceNow:0]];
-            }
-        }
-        // Check if permission has been granted
-        AVAuthorizationStatus videoAuthorizationStatus = [AVCaptureDevice authorizationStatusForMediaType:AVMediaTypeVideo];
-        if (videoAuthorizationStatus != AVAuthorizationStatusAuthorized) {
-          GST_ELEMENT_ERROR (element, RESOURCE, NOT_AUTHORIZED,
-            ("Device video access permission has just been denied"), ("Authorization status: %d", (int)videoAuthorizationStatus));
-          return success;
-        }
-    }
-  }
-
-checked:
   dispatch_sync (mainQueue, ^{
     BOOL ret;
 
@@ -509,11 +535,10 @@ checked:
       connection.videoOrientation = GstAVFVideoSourceOrientation2AVCaptureVideoOrientation(orientation);
 #endif
     inputClock = ((AVCaptureInputPort *)connection.inputPorts[0]).clock;
-
     *successPtr = YES;
   });
 
-  GST_DEBUG_OBJECT (element, "Opening device %s", success ? "succeed" : "failed");
+  GST_DEBUG_OBJECT (element, "Opening device %s", success ? "succeeded" : "failed");
 
   return success;
 }
@@ -565,7 +590,7 @@ checked:
 
 - (GstVideoFormat)getGstVideoFormat:(NSNumber *)pixel_format
 {
-  GstVideoFormat gst_format = get_gst_video_format(pixel_format);
+  GstVideoFormat gst_format = gst_video_format_from_cvpixelformat ([pixel_format integerValue]);
   if (gst_format == GST_VIDEO_FORMAT_UNKNOWN) {
     GST_LOG_OBJECT (element, "Pixel format %s is not handled by avfvideosrc",
         [[pixel_format stringValue] UTF8String]);
@@ -622,58 +647,28 @@ checked:
   return device_caps;
 }
 
-- (BOOL)setDeviceCaps:(GstVideoInfo *)info
+- (BOOL)setDeviceCaps:(const GstVideoInfo *)info
 {
-  double framerate;
   gboolean found_format = FALSE, found_framerate = FALSE;
-  NSArray *formats = [device valueForKey:@"formats"];
-  gst_util_fraction_to_double (info->fps_n, info->fps_d, &framerate);
 
   GST_DEBUG_OBJECT (element, "Setting device caps");
 
   if ([device lockForConfiguration:NULL] == YES) {
-    for (NSObject *f in formats) {
-      CMFormatDescriptionRef formatDescription = (__bridge CMFormatDescriptionRef) [f performSelector:@selector(formatDescription)];
-      CMVideoDimensions dimensions = CMVideoFormatDescriptionGetDimensions(formatDescription);
+    for (AVCaptureDeviceFormat *fmt in device.formats.reverseObjectEnumerator) {
+      CMVideoDimensions dimensions = CMVideoFormatDescriptionGetDimensions (fmt.formatDescription);
       dimensions = [self orientedDimensions:dimensions];
       if (dimensions.width == info->width && dimensions.height == info->height) {
         found_format = TRUE;
-        [device setValue:f forKey:@"activeFormat"];
-        for (NSObject *rate in [f valueForKey:@"videoSupportedFrameRateRanges"]) {
-          gdouble min_frame_rate, max_frame_rate;
-
-          [[rate valueForKey:@"minFrameRate"] getValue:&min_frame_rate];
-          [[rate valueForKey:@"maxFrameRate"] getValue:&max_frame_rate];
-          if ((framerate >= min_frame_rate - 0.00001) &&
-              (framerate <= max_frame_rate + 0.00001)) {
-            NSValue *frame_duration_value;
+        device.activeFormat = fmt;
+        for (AVFrameRateRange *range in fmt.videoSupportedFrameRateRanges) {
+          CMTime dur = CMTimeMake (info->fps_d, info->fps_n);
+          if (CMTIME_COMPARE_INLINE (range.minFrameDuration, <=, dur) &&
+              CMTIME_COMPARE_INLINE (range.maxFrameDuration, >=, dur)) {
+            device.activeVideoMinFrameDuration = dur;
+            device.activeVideoMaxFrameDuration = dur;
             found_framerate = TRUE;
-            if (min_frame_rate == max_frame_rate) {
-              /* on mac we get tight ranges and an exception is raised if the
-               * frame duration doesn't match the one reported in the range to
-               * the last decimal point
-               */
-              frame_duration_value = [rate valueForKey:@"minFrameDuration"];
-            } else {
-              // Invert fps_n and fps_d to get frame duration value and timescale (or numerator and denominator)
-              frame_duration_value = [NSValue valueWithCMTime:CMTimeMake (info->fps_d, info->fps_n)];
-            }
-            [device setValue:frame_duration_value forKey:@"activeVideoMinFrameDuration"];
-            @try {
-              /* Only available on OSX >= 10.8 and iOS >= 7.0 */
-              [device setValue:frame_duration_value forKey:@"activeVideoMaxFrameDuration"];
-            } @catch (NSException *exception) {
-              if (![[exception name] isEqualToString:NSUndefinedKeyException]) {
-                GST_WARNING ("An unexcepted error occurred: %s",
-                              [exception.reason UTF8String]);
-              }
-            }
             break;
           }
-        }
-
-        if (found_framerate) {
-          break;
         }
       }
     }
@@ -692,72 +687,6 @@ checked:
   return YES;
 }
 
-- (BOOL)getSessionPresetCaps:(GstCaps *)result
-{
-  NSArray *pixel_formats = output.availableVideoCVPixelFormatTypes;
-  for (NSNumber *pixel_format in pixel_formats) {
-    GstVideoFormat gst_format = [self getGstVideoFormat:pixel_format];
-    if (gst_format == GST_VIDEO_FORMAT_UNKNOWN)
-      continue;
-
-#if HAVE_IOS
-    if ([session canSetSessionPreset:AVCaptureSessionPreset1920x1080])
-      gst_caps_append (result, GST_AVF_CAPS_NEW (gst_format, 1920, 1080, DEVICE_FPS_N, DEVICE_FPS_D));
-#endif
-    if ([session canSetSessionPreset:AVCaptureSessionPreset1280x720])
-      gst_caps_append (result, GST_AVF_CAPS_NEW (gst_format, 1280, 720, DEVICE_FPS_N, DEVICE_FPS_D));
-    if ([session canSetSessionPreset:AVCaptureSessionPreset640x480])
-      gst_caps_append (result, GST_AVF_CAPS_NEW (gst_format, 640, 480, DEVICE_FPS_N, DEVICE_FPS_D));
-    if ([session canSetSessionPreset:AVCaptureSessionPresetMedium])
-      gst_caps_append (result, GST_AVF_CAPS_NEW (gst_format, 480, 360, DEVICE_FPS_N, DEVICE_FPS_D));
-    if ([session canSetSessionPreset:AVCaptureSessionPreset352x288])
-      gst_caps_append (result, GST_AVF_CAPS_NEW (gst_format, 352, 288, DEVICE_FPS_N, DEVICE_FPS_D));
-    if ([session canSetSessionPreset:AVCaptureSessionPresetLow])
-      gst_caps_append (result, GST_AVF_CAPS_NEW (gst_format, 192, 144, DEVICE_FPS_N, DEVICE_FPS_D));
-  }
-
-  GST_LOG_OBJECT (element, "Session presets returned the following caps %" GST_PTR_FORMAT, result);
-
-  return YES;
-}
-
-- (BOOL)setSessionPresetCaps:(GstVideoInfo *)info;
-{
-  GST_DEBUG_OBJECT (element, "Setting session presset caps");
-
-  if ([device lockForConfiguration:NULL] != YES) {
-    GST_WARNING ("Couldn't lock device for configuration");
-    return NO;
-  }
-
-  switch (info->width) {
-  case 192:
-    session.sessionPreset = AVCaptureSessionPresetLow;
-    break;
-  case 352:
-    session.sessionPreset = AVCaptureSessionPreset352x288;
-    break;
-  case 480:
-    session.sessionPreset = AVCaptureSessionPresetMedium;
-    break;
-  case 640:
-    session.sessionPreset = AVCaptureSessionPreset640x480;
-    break;
-  case 1280:
-    session.sessionPreset = AVCaptureSessionPreset1280x720;
-    break;
-#if HAVE_IOS
-  case 1920:
-    session.sessionPreset = AVCaptureSessionPreset1920x1080;
-    break;
-#endif
-  default:
-    GST_WARNING ("Unsupported capture dimensions %dx%d", info->width, info->height);
-    return NO;
-  }
-  return YES;
-}
-
 - (GstCaps *)getCaps
 {
   GstCaps *result;
@@ -771,7 +700,14 @@ checked:
 
   if (captureScreen) {
 #if !HAVE_IOS
-    CGRect rect = CGDisplayBounds ([self getDisplayIdFromDeviceIndex]);
+    CGRect rect;
+    AVCaptureScreenInput *screenInput = (AVCaptureScreenInput *)input;
+    if (CGRectIsEmpty (screenInput.cropRect)) {
+      rect = CGDisplayBounds ([self getDisplayIdFromDeviceIndex]);
+    } else {
+      rect = screenInput.cropRect;
+    }
+
     float scale = [self getScaleFactorFromDeviceIndex];
     for (NSNumber *pixel_format in pixel_formats) {
       GstVideoFormat gst_format = [self getGstVideoFormat:pixel_format];
@@ -783,24 +719,13 @@ checked:
             NULL));
     }
 #else
+    (void) pixel_formats;
     GST_WARNING ("Screen capture is not supported by iOS");
 #endif
     return result;
   }
 
-  @try {
-    result = gst_caps_merge (result, [self getDeviceCaps]);
-  } @catch (NSException *exception) {
-    if (![[exception name] isEqualToString:NSUndefinedKeyException]) {
-      GST_WARNING ("An unexcepted error occurred: %s", [exception.reason UTF8String]);
-      return result;
-    }
-
-    /* Fallback on session presets API for iOS < 7.0 */
-    [self getSessionPresetCaps:result];
-  }
-
-  return result;
+  return gst_caps_merge (result, [self getDeviceCaps]);
 }
 
 - (BOOL)setCaps:(GstCaps *)new_caps
@@ -817,7 +742,13 @@ checked:
   latency = gst_util_uint64_scale (GST_SECOND, info.fps_d, info.fps_n);
 
   dispatch_sync (mainQueue, ^{
-    int newformat;
+    GST_INFO_OBJECT (element,
+        "width: %d height: %d format: %s", width, height,
+        gst_video_format_to_string (format));
+    int video_format = gst_video_format_to_cvpixelformat (format);
+    output.videoSettings = [NSDictionary
+        dictionaryWithObject:[NSNumber numberWithInt:video_format]
+        forKey:(NSString*)kCVPixelBufferPixelFormatTypeKey];
 
     if (captureScreen) {
 #if !HAVE_IOS
@@ -829,61 +760,33 @@ checked:
       return;
 #endif
     } else {
-      @try {
-
-        /* formats and activeFormat keys are only available on OSX >= 10.7 and iOS >= 7.0 */
-        *successPtr = [self setDeviceCaps:(GstVideoInfo *)&info];
-        if (*successPtr != YES)
-          return;
-
-      } @catch (NSException *exception) {
-
-        if (![[exception name] isEqualToString:NSUndefinedKeyException]) {
-          GST_WARNING ("An unexcepted error occurred: %s", [exception.reason UTF8String]);
-          *successPtr = NO;
-          return;
-        }
-
-        /* Fallback on session presets API for iOS < 7.0 */
-        *successPtr = [self setSessionPresetCaps:(GstVideoInfo *)&info];
-        if (*successPtr != YES)
-          return;
+      if (![self setDeviceCaps:&info]) {
+        *successPtr = NO;
+        return;
       }
     }
-
-    switch (format) {
-      case GST_VIDEO_FORMAT_NV12:
-        newformat = kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange;
-        break;
-      case GST_VIDEO_FORMAT_UYVY:
-        newformat = kCVPixelFormatType_422YpCbCr8;
-        break;
-      case GST_VIDEO_FORMAT_YUY2:
-        newformat = kCVPixelFormatType_422YpCbCr8_yuvs;
-        break;
-      case GST_VIDEO_FORMAT_BGRA:
-        newformat = kCVPixelFormatType_32BGRA;
-        break;
-      default:
-        *successPtr = NO;
-        GST_WARNING ("Unsupported output format %s",
-            gst_video_format_to_string (format));
-        return;
-    }
-
-    GST_INFO_OBJECT (element,
-        "width: %d height: %d format: %s", width, height,
-        gst_video_format_to_string (format));
-
-    output.videoSettings = [NSDictionary
-        dictionaryWithObject:[NSNumber numberWithInt:newformat]
-        forKey:(NSString*)kCVPixelBufferPixelFormatTypeKey];
 
     gst_caps_replace (&caps, new_caps);
     GST_INFO_OBJECT (element, "configured caps %"GST_PTR_FORMAT, caps);
 
-    if (![session isRunning])
-      [session startRunning];
+    if (![session isRunning]) {
+      BOOL stopping = NO;
+
+      /* If permissions are still pending, wait for a response before
+       * starting the capture running, or else we'll get black frames */
+      [permissionCond lock];
+      if (permissionRequestPending && !permissionStopRequest) {
+        GST_DEBUG_OBJECT (element, "Waiting for pending device access permission.");
+        do {
+          [permissionCond wait];
+        } while (permissionRequestPending && !permissionStopRequest);
+      }
+      stopping = permissionStopRequest;
+      [permissionCond unlock];
+
+      if (!stopping)
+        [session startRunning];
+    }
 
     /* Unlock device configuration only after session is started so the session
      * won't reset the capture formats */
@@ -895,6 +798,14 @@ checked:
 
 - (BOOL)start
 {
+  [permissionCond lock];
+  permissionRequestPending = NO;
+  permissionStopRequest = NO;
+  [permissionCond unlock];
+
+  if (![self openDevice])
+    return NO;
+
   bufQueueLock = [[NSConditionLock alloc] initWithCondition:NO_BUFFERS];
   bufQueue = [[NSMutableArray alloc] initWithCapacity:BUFFER_QUEUE_SIZE];
   stopRequest = NO;
@@ -925,6 +836,8 @@ checked:
     gst_gl_context_helper_free (ctxh);
   ctxh = NULL;
 
+  [self closeDevice];
+
   return YES;
 }
 
@@ -933,7 +846,7 @@ checked:
   BOOL result = NO;
 
   if (GST_QUERY_TYPE (query) == GST_QUERY_LATENCY) {
-    if (device != nil && caps != NULL) {
+    if (input != nil && caps != NULL) {
       GstClockTime min_latency, max_latency;
 
       min_latency = max_latency = latency;
@@ -957,6 +870,11 @@ checked:
   stopRequest = YES;
   [bufQueueLock unlockWithCondition:HAS_BUFFER_OR_STOP_REQUEST];
 
+  [permissionCond lock];
+  permissionStopRequest = YES;
+  [permissionCond broadcast];
+  [permissionCond unlock];
+
   return YES;
 }
 
@@ -966,24 +884,11 @@ checked:
   stopRequest = NO;
   [bufQueueLock unlockWithCondition:([bufQueue count] == 0) ? NO_BUFFERS : HAS_BUFFER_OR_STOP_REQUEST];
 
+  [permissionCond lock];
+  permissionStopRequest = NO;
+  [permissionCond unlock];
+
   return YES;
-}
-
-- (GstStateChangeReturn)changeState:(GstStateChange)transition
-{
-  GstStateChangeReturn ret;
-
-  if (transition == GST_STATE_CHANGE_NULL_TO_READY) {
-    if (![self openDevice])
-      return GST_STATE_CHANGE_FAILURE;
-  }
-
-  ret = GST_ELEMENT_CLASS (parent_class)->change_state (element, transition);
-
-  if (transition == GST_STATE_CHANGE_READY_TO_NULL)
-    [self closeDevice];
-
-  return ret;
 }
 
 - (void)captureOutput:(AVCaptureOutput *)captureOutput
@@ -1089,7 +994,7 @@ didOutputSampleBuffer:(CMSampleBufferRef)sampleBuffer
   /* crank up to 11. This is what the presets do, but we don't use the presets
    * in ios >= 7.0 */
   gst_structure_fixate_field_nearest_int (structure, "height", G_MAXINT);
-  gst_structure_fixate_field_nearest_fraction (structure, "framerate", G_MAXINT, 1);
+  gst_structure_fixate_field_nearest_fraction (structure, "framerate", 30, 1);
 
   return gst_caps_fixate (new_caps);
 }
@@ -1244,6 +1149,10 @@ enum
   PROP_CAPTURE_SCREEN,
   PROP_CAPTURE_SCREEN_CURSOR,
   PROP_CAPTURE_SCREEN_MOUSE_CLICKS,
+  PROP_CAPTURE_SCREEN_CROP_X,
+  PROP_CAPTURE_SCREEN_CROP_Y,
+  PROP_CAPTURE_SCREEN_CROP_WIDTH,
+  PROP_CAPTURE_SCREEN_CROP_HEIGHT,
 #endif
 };
 
@@ -1253,8 +1162,6 @@ static void gst_avf_video_src_get_property (GObject * object, guint prop_id,
     GValue * value, GParamSpec * pspec);
 static void gst_avf_video_src_set_property (GObject * object, guint prop_id,
     const GValue * value, GParamSpec * pspec);
-static GstStateChangeReturn gst_avf_video_src_change_state (
-    GstElement * element, GstStateChange transition);
 static GstCaps * gst_avf_video_src_get_caps (GstBaseSrc * basesrc,
     GstCaps * filter);
 static gboolean gst_avf_video_src_set_caps (GstBaseSrc * basesrc,
@@ -1286,7 +1193,6 @@ gst_avf_video_src_class_init (GstAVFVideoSrcClass * klass)
   gobject_class->get_property = gst_avf_video_src_get_property;
   gobject_class->set_property = gst_avf_video_src_set_property;
 
-  gstelement_class->change_state = gst_avf_video_src_change_state;
   gstelement_class->set_context = gst_avf_video_src_set_context;
 
   gstbasesrc_class->get_caps = gst_avf_video_src_get_caps;
@@ -1303,7 +1209,7 @@ gst_avf_video_src_class_init (GstAVFVideoSrcClass * klass)
 
   gst_element_class_set_metadata (gstelement_class,
       "Video Source (AVFoundation)", "Source/Video/Hardware",
-      "Reads frames from an iOS AVFoundation device",
+      "Reads frames from an iOS/MacOS AVFoundation device",
       "Ole André Vadla Ravnås <oleavr@soundrop.com>");
 
   gst_element_class_add_static_pad_template (gstelement_class, &src_template);
@@ -1353,10 +1259,26 @@ gst_avf_video_src_class_init (GstAVFVideoSrcClass * klass)
       g_param_spec_boolean ("capture-screen-mouse-clicks", "Enable mouse clicks capture",
           "Enable mouse clicks capture while capturing screen", FALSE,
           G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
+  g_object_class_install_property (gobject_class, PROP_CAPTURE_SCREEN_CROP_X,
+      g_param_spec_uint ("screen-crop-x", "Screen capture crop X",
+          "Horizontal coordinate of top left corner of the screen capture area",
+          0, G_MAXUINT, 0, G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
+  g_object_class_install_property (gobject_class, PROP_CAPTURE_SCREEN_CROP_Y,
+      g_param_spec_uint ("screen-crop-y", "Screen capture crop Y",
+          "Vertical coordinate of top left corner of the screen capture area",
+          0, G_MAXUINT, 0, G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
+  g_object_class_install_property (gobject_class, PROP_CAPTURE_SCREEN_CROP_WIDTH,
+      g_param_spec_uint ("screen-crop-width", "Screen capture crop width",
+          "Width of the screen capture area (0 = maximum)",
+          0, G_MAXUINT, 0, G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
+  g_object_class_install_property (gobject_class, PROP_CAPTURE_SCREEN_CROP_HEIGHT,
+      g_param_spec_uint ("screen-crop-height", "Screen capture crop height",
+          "Height of the screen capture area (0 = maximum)",
+          0, G_MAXUINT, 0, G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
 #endif
 
   GST_DEBUG_CATEGORY_INIT (gst_avf_video_src_debug, "avfvideosrc",
-      0, "iOS AVFoundation video source");
+      0, "iOS/MacOS AVFoundation video source");
 
   gst_type_mark_as_plugin_api (GST_TYPE_AVF_VIDEO_SOURCE_POSITION, 0);
   gst_type_mark_as_plugin_api (GST_TYPE_AVF_VIDEO_SOURCE_ORIENTATION, 0);
@@ -1394,6 +1316,18 @@ gst_avf_video_src_get_property (GObject * object, guint prop_id, GValue * value,
     case PROP_CAPTURE_SCREEN_MOUSE_CLICKS:
       g_value_set_boolean (value, impl.captureScreenMouseClicks);
       break;
+    case PROP_CAPTURE_SCREEN_CROP_X:
+      g_value_set_uint (value, impl.cropX);
+      break;
+    case PROP_CAPTURE_SCREEN_CROP_Y:
+      g_value_set_uint (value, impl.cropY);
+      break;
+    case PROP_CAPTURE_SCREEN_CROP_WIDTH:
+      g_value_set_uint (value, impl.cropWidth);
+      break;
+    case PROP_CAPTURE_SCREEN_CROP_HEIGHT:
+      g_value_set_uint (value, impl.cropHeight);
+      break;
 #endif
     case PROP_DEVICE_INDEX:
       g_value_set_int (value, impl.deviceIndex);
@@ -1402,13 +1336,13 @@ gst_avf_video_src_get_property (GObject * object, guint prop_id, GValue * value,
       g_value_set_string (value, impl.deviceName);
       break;
     case PROP_POSITION:
-      g_value_set_enum(value, impl.position);
+      g_value_set_enum (value, impl.position);
       break;
     case PROP_ORIENTATION:
-      g_value_set_enum(value, impl.orientation);
+      g_value_set_enum (value, impl.orientation);
       break;
     case PROP_DEVICE_TYPE:
-      g_value_set_enum(value, impl.deviceType);
+      g_value_set_enum (value, impl.deviceType);
       break;
     case PROP_DO_STATS:
       g_value_set_boolean (value, impl.doStats);
@@ -1441,6 +1375,18 @@ gst_avf_video_src_set_property (GObject * object, guint prop_id,
     case PROP_CAPTURE_SCREEN_MOUSE_CLICKS:
       impl.captureScreenMouseClicks = g_value_get_boolean (value);
       break;
+    case PROP_CAPTURE_SCREEN_CROP_X:
+      impl.cropX = g_value_get_uint (value);
+      break;
+    case PROP_CAPTURE_SCREEN_CROP_Y:
+      impl.cropY = g_value_get_uint (value);
+      break;
+    case PROP_CAPTURE_SCREEN_CROP_WIDTH:
+      impl.cropWidth = g_value_get_uint (value);
+      break;
+    case PROP_CAPTURE_SCREEN_CROP_HEIGHT:
+      impl.cropHeight = g_value_get_uint (value);
+      break;
 #endif
     case PROP_DEVICE_INDEX:
       impl.deviceIndex = g_value_get_int (value);
@@ -1461,16 +1407,6 @@ gst_avf_video_src_set_property (GObject * object, guint prop_id,
       G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
       break;
   }
-}
-
-static GstStateChangeReturn
-gst_avf_video_src_change_state (GstElement * element, GstStateChange transition)
-{
-  GstStateChangeReturn ret;
-
-  ret = [GST_AVF_VIDEO_SRC_IMPL (element) changeState: transition];
-
-  return ret;
 }
 
 static GstCaps *
@@ -1584,63 +1520,71 @@ gst_avf_video_src_set_context (GstElement * element, GstContext * context)
 GstCaps*
 gst_av_capture_device_get_caps (AVCaptureDevice *device, AVCaptureVideoDataOutput *output, GstAVFVideoSourceOrientation orientation)
 {
-  NSArray *formats = [device valueForKey:@"formats"];
-  NSArray *pixel_formats = output.availableVideoCVPixelFormatTypes;
   GstCaps *result_caps, *result_gl_caps;
+  gboolean is_gl_format;
 #if !HAVE_IOS
-  GstVideoFormat gl_format = GST_VIDEO_FORMAT_UYVY;
+  GstVideoFormat gl_formats[] = { GST_VIDEO_FORMAT_UYVY, GST_VIDEO_FORMAT_YUY2, 0 };
 #else
-  GstVideoFormat gl_format = GST_VIDEO_FORMAT_NV12;
+  GstVideoFormat gl_formats[] = { GST_VIDEO_FORMAT_NV12, 0 };
 #endif
 
   result_caps = gst_caps_new_empty ();
   result_gl_caps = gst_caps_new_empty ();
 
-  /* Do not use AVCaptureDeviceFormat or AVFrameRateRange only
-   * available in iOS >= 7.0. We use a dynamic approach with key-value
-   * coding or performSelector */
-  for (NSObject *f in [formats reverseObjectEnumerator]) {
-    /* formatDescription can't be retrieved with valueForKey so use a selector here */
-    CMFormatDescriptionRef formatDescription = (__bridge CMFormatDescriptionRef) [f performSelector:@selector(formatDescription)];
-    CMVideoDimensions dimensions = CMVideoFormatDescriptionGetDimensions (formatDescription);
+  /* Iterate in reverse order so UYVY is first and BGRA is last */
+  for (AVCaptureDeviceFormat *format in device.formats.reverseObjectEnumerator) {
+    CMVideoDimensions dimensions = CMVideoFormatDescriptionGetDimensions (format.formatDescription);
     dimensions = get_oriented_dimensions (orientation, dimensions);
 
-    for (NSObject *rate in [f valueForKey:@"videoSupportedFrameRateRanges"]) {
+    for (AVFrameRateRange *range in format.videoSupportedFrameRateRanges) {
       int min_fps_n, min_fps_d, max_fps_n, max_fps_d;
-      gdouble min_fps, max_fps;
 
-      [[rate valueForKey:@"minFrameRate"] getValue:&min_fps];
-      gst_util_double_to_fraction (min_fps, &min_fps_n, &min_fps_d);
+      /* CMTime duration is the inverse of fps*/
+      min_fps_n = range.maxFrameDuration.timescale;
+      min_fps_d = range.maxFrameDuration.value;
+      max_fps_n = range.minFrameDuration.timescale;
+      max_fps_d = range.minFrameDuration.value;
 
-      [[rate valueForKey:@"maxFrameRate"] getValue:&max_fps];
-      gst_util_double_to_fraction (max_fps, &max_fps_n, &max_fps_d);
+      GST_DEBUG ("dimensions %ix%i fps range is [%i/%i, %i/%i]",
+          dimensions.width, dimensions.height, min_fps_n, min_fps_d, max_fps_n,
+          max_fps_d);
 
-      for (NSNumber *pixel_format in pixel_formats) {
-        GstVideoFormat gst_format = get_gst_video_format (pixel_format);
+      for (NSNumber *pixel_format in output.availableVideoCVPixelFormatTypes) {
+        GstCaps *caps;
+        unsigned int f = [pixel_format integerValue];
+        GstVideoFormat gst_format = gst_video_format_from_cvpixelformat (f);
 
-        if (gst_format != GST_VIDEO_FORMAT_UNKNOWN) {
-          if (min_fps != max_fps)
-            gst_caps_append (result_caps, GST_AVF_FPS_RANGE_CAPS_NEW (gst_format, dimensions.width, dimensions.height, min_fps_n, min_fps_d, max_fps_n, max_fps_d));
-          else
-            gst_caps_append (result_caps, GST_AVF_CAPS_NEW (gst_format, dimensions.width, dimensions.height, max_fps_n, max_fps_d));
+        if (gst_format == GST_VIDEO_FORMAT_UNKNOWN) {
+          GST_WARNING ("Unknown pixel format %" GST_FOURCC_FORMAT " (0x%x)",
+              GST_CVPIXELFORMAT_FOURCC_ARGS (f), f);
+          continue;
         }
 
-        if (gst_format == gl_format) {
-          GstCaps *gl_caps;
-          if (min_fps != max_fps) {
-            gl_caps = GST_AVF_FPS_RANGE_CAPS_NEW (gl_format,
-                                                  dimensions.width, dimensions.height,
-                                                  min_fps_n, min_fps_d,
-                                                  max_fps_n, max_fps_d);
-          } else {
-            gl_caps = GST_AVF_CAPS_NEW (gl_format,
-                                        dimensions.width, dimensions.height,
-                                        max_fps_n, max_fps_d);
+
+        if (CMTIME_COMPARE_INLINE (range.minFrameDuration, ==, range.maxFrameDuration))
+          caps = GST_AVF_CAPS_NEW (gst_format, dimensions.width,
+              dimensions.height, max_fps_n, max_fps_d);
+        else
+          caps = GST_AVF_FPS_RANGE_CAPS_NEW (gst_format, dimensions.width,
+              dimensions.height, min_fps_n, min_fps_d, max_fps_n, max_fps_d);
+
+        is_gl_format = FALSE;
+        for (int i = 0; i < G_N_ELEMENTS (gl_formats); i++) {
+          if (gst_format == gl_formats[i]) {
+            is_gl_format = TRUE;
+            break;
           }
-          gst_caps_set_features (gl_caps, 0,
+        }
+
+        if (!is_gl_format) {
+          gst_caps_append (result_caps, caps);
+        } else {
+          gst_caps_append (result_caps, gst_caps_copy (caps));
+          /* Set GLMemory features on caps */
+          gst_caps_set_features (caps, 0,
                                  gst_caps_features_new (GST_CAPS_FEATURE_MEMORY_GL_MEMORY,
                                                         NULL));
-          gst_caps_set_simple (gl_caps,
+          gst_caps_set_simple (caps,
                                "texture-target", G_TYPE_STRING,
 #if !HAVE_IOS
                                GST_GL_TEXTURE_TARGET_RECTANGLE_STR,
@@ -1648,7 +1592,7 @@ gst_av_capture_device_get_caps (AVCaptureDevice *device, AVCaptureVideoDataOutpu
                                GST_GL_TEXTURE_TARGET_2D_STR,
 #endif
                                NULL);
-          gst_caps_append (result_gl_caps, gl_caps);
+          gst_caps_append (result_gl_caps, caps);
         }
       }
     }
@@ -1657,31 +1601,6 @@ gst_av_capture_device_get_caps (AVCaptureDevice *device, AVCaptureVideoDataOutpu
   result_gl_caps = gst_caps_simplify (gst_caps_merge (result_gl_caps, result_caps));
 
   return result_gl_caps;
-}
-
-static GstVideoFormat
-get_gst_video_format (NSNumber *pixel_format)
-{
-  GstVideoFormat gst_format = GST_VIDEO_FORMAT_UNKNOWN;
-
-  switch ([pixel_format integerValue]) {
-    case kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange: /* 420v */
-      gst_format = GST_VIDEO_FORMAT_NV12;
-      break;
-    case kCVPixelFormatType_422YpCbCr8: /* 2vuy */
-      gst_format = GST_VIDEO_FORMAT_UYVY;
-      break;
-    case kCVPixelFormatType_32BGRA: /* BGRA */
-      gst_format = GST_VIDEO_FORMAT_BGRA;
-      break;
-    case kCVPixelFormatType_422YpCbCr8_yuvs: /* yuvs */
-      gst_format = GST_VIDEO_FORMAT_YUY2;
-      break;
-    default:
-      break;
-  }
-
-  return gst_format;
 }
 
 static CMVideoDimensions

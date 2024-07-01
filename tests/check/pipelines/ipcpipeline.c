@@ -35,6 +35,7 @@
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <gst/check/gstcheck.h>
+#include <gst/video/navigation.h>
 #include <string.h>
 
 #ifndef HAVE_PIPE2
@@ -547,9 +548,9 @@ create_source (TestFeatures features, int fdina, int fdouta, int fdinv,
     int fdoutv, test_data * td)
 {
   GstElement *pipeline = NULL;
-  gboolean live = ! !(features & TEST_FEATURE_LIVE);
-  gboolean longdur = ! !(features & TEST_FEATURE_LONG_DURATION);
-  gboolean has_video = ! !(features & TEST_FEATURE_HAS_VIDEO);
+  gboolean live = !!(features & TEST_FEATURE_LIVE);
+  gboolean longdur = !!(features & TEST_FEATURE_LONG_DURATION);
+  gboolean has_video = !!(features & TEST_FEATURE_HAS_VIDEO);
 
   if (features & TEST_FEATURE_TEST_SOURCE) {
 
@@ -873,7 +874,7 @@ test_base (const char *name, TestFeatures features,
       if (pid) {
         die_on_child_death ();
       }
-      c_src = ! !pid;
+      c_src = !!pid;
       c_sink = !pid;
     } else {
       c_src = TRUE;
@@ -2988,32 +2989,29 @@ navigation_probe_source (GstPad * pad, GstPadProbeInfo * info,
 {
   test_data *td = user_data;
   navigation_master_data *d = td->md;
-  const GstStructure *s;
-  const gchar *string, *key;
+  GstEvent *e;
+  const gchar *key;
   double x, y;
 
   if (GST_IS_EVENT (info->data)) {
     if (GST_EVENT_TYPE (info->data) == GST_EVENT_NAVIGATION) {
-      s = gst_event_get_structure (info->data);
-      FAIL_UNLESS (s);
+      e = GST_EVENT (info->data);
 
-      /* mouse-move */
-      string = gst_structure_get_string (s, "event");
-      if (string && !strcmp (string, "mouse-move")) {
-        if (gst_structure_get_double (s, "pointer_x", &x) && x == 4.7) {
-          if (gst_structure_get_double (s, "pointer_y", &y) && y == 0.1) {
+      switch (gst_navigation_event_get_type (e)) {
+        case GST_NAVIGATION_EVENT_MOUSE_MOVE:
+          gst_navigation_event_parse_mouse_move_event (e, &x, &y);
+          if (x == 4.7 && y == 0.1)
             d->navigation_received[TEST_NAV_MOUSE_MOVE] = TRUE;
-          }
-        }
-      }
+          break;
 
-      /* key-press */
-      string = gst_structure_get_string (s, "event");
-      if (string && !strcmp (string, "key-press")) {
-        key = gst_structure_get_string (s, "key");
-        if (key && !strcmp (key, "Left")) {
-          d->navigation_received[TEST_NAV_KEY_PRESS] = TRUE;
-        }
+        case GST_NAVIGATION_EVENT_KEY_PRESS:
+          gst_navigation_event_parse_key_event (e, &key);
+          if (!strcmp (key, "Left"))
+            d->navigation_received[TEST_NAV_KEY_PRESS] = TRUE;
+          break;
+
+        default:
+          break;
       }
 
       /* drop at this point to imply successful handling; the upstream filesrc
@@ -3067,7 +3065,6 @@ send_navigation_event (const GValue * v, gpointer user_data)
   navigation_slave_data *d = td->sd;
   GstElement *sink;
   GstPad *pad, *peer;
-  GstStructure *s;
   GstEvent *e = NULL;
 
   sink = g_value_get_object (v);
@@ -3080,15 +3077,12 @@ send_navigation_event (const GValue * v, gpointer user_data)
 
   switch (d->step) {
     case TEST_NAV_MOUSE_MOVE:
-      s = gst_structure_new ("application/x-gst-navigation", "event",
-          G_TYPE_STRING, "mouse-move", "button", G_TYPE_INT, 0, "pointer_x",
-          G_TYPE_DOUBLE, 4.7, "pointer_y", G_TYPE_DOUBLE, 0.1, NULL);
-      e = gst_event_new_navigation (s);
+      e = gst_navigation_event_new_mouse_move (4.7, 0.1,
+          GST_NAVIGATION_MODIFIER_NONE);
       break;
     case TEST_NAV_KEY_PRESS:
-      s = gst_structure_new ("application/x-gst-navigation", "event",
-          G_TYPE_STRING, "key-press", "key", G_TYPE_STRING, "Left", NULL);
-      e = gst_event_new_navigation (s);
+      e = gst_navigation_event_new_key_press ("Left",
+          GST_NAVIGATION_MODIFIER_NONE);
       break;
   }
 
@@ -5026,7 +5020,7 @@ dynamic_pipeline_change_stress_source_blocked_switch_av (GstPad * pad,
 
   g_mutex_lock (&d->mutex);
   switch_av (td->p, gst_element_get_name (source),
-      ! !(td->features & TEST_FEATURE_LIVE), TRUE);
+      !!(td->features & TEST_FEATURE_LIVE), TRUE);
   g_mutex_unlock (&d->mutex);
 
   g_idle_add_full (G_PRIORITY_HIGH, remove_source, source, g_object_unref);
@@ -5099,7 +5093,7 @@ dynamic_pipeline_change_stress_source_blocked_change_audio_channel (GstPad *
 
   g_mutex_lock (&d->mutex);
   change_audio_channel (td->p, gst_element_get_name (source),
-      ipcpipelinesink_name, ! !(td->features & TEST_FEATURE_LIVE));
+      ipcpipelinesink_name, !!(td->features & TEST_FEATURE_LIVE));
   g_mutex_unlock (&d->mutex);
 
   g_idle_add_full (G_PRIORITY_HIGH, remove_source, source, g_object_unref);

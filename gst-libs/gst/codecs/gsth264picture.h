@@ -21,6 +21,7 @@
 #define __GST_H264_PICTURE_H__
 
 #include <gst/codecs/codecs-prelude.h>
+#include <gst/codecs/gstcodecpicture.h>
 #include <gst/codecparsers/gsth264parser.h>
 #include <gst/video/video.h>
 
@@ -114,12 +115,9 @@ typedef enum
 struct _GstH264Picture
 {
   /*< private >*/
-  GstMiniObject parent;
+  GstCodecPicture parent;
 
   GstH264SliceType type;
-
-  /* From GstVideoCodecFrame */
-  guint32 system_frame_number;
 
   guint8 pic_order_cnt_type;  /* SPS */
   gint32 top_field_order_cnt;
@@ -142,6 +140,7 @@ struct _GstH264Picture
   gint nal_ref_idc;
   gboolean idr;
   gint idr_pic_id;
+  gboolean field_pic_flag;
   GstH264PictureReference ref;
   /* Whether a reference picture. */
   gboolean ref_pic;
@@ -154,14 +153,14 @@ struct _GstH264Picture
 
   GstH264DecRefPicMarking dec_ref_pic_marking;
 
+  /* Set by decoder to trace the number of delayed output pictures */
+  guint32 reorder_frame_number;
+
   /* For interlaced decoding */
   gboolean second_field;
   GstH264Picture * other_field;
 
   GstVideoBufferFlags buffer_flags;
-
-  gpointer user_data;
-  GDestroyNotify notify;
 };
 
 /**
@@ -206,7 +205,7 @@ gst_h264_picture_replace (GstH264Picture ** old_picture,
 }
 
 static inline void
-gst_h264_picture_clear (GstH264Picture ** picture)
+gst_clear_h264_picture (GstH264Picture ** picture)
 {
   if (picture && *picture) {
     gst_h264_picture_unref (*picture);
@@ -214,13 +213,27 @@ gst_h264_picture_clear (GstH264Picture ** picture)
   }
 }
 
-GST_CODECS_API
-void gst_h264_picture_set_user_data (GstH264Picture * picture,
-                                     gpointer user_data,
-                                     GDestroyNotify notify);
+static inline void
+gst_h264_picture_set_user_data (GstH264Picture * picture, gpointer user_data,
+    GDestroyNotify notify)
+{
+  gst_codec_picture_set_user_data (GST_CODEC_PICTURE (picture),
+      user_data, notify);
+}
 
-GST_CODECS_API
-gpointer gst_h264_picture_get_user_data (GstH264Picture * picture);
+static inline gpointer
+gst_h264_picture_get_user_data (GstH264Picture * picture)
+{
+  return gst_codec_picture_get_user_data (GST_CODEC_PICTURE (picture));
+}
+
+static inline void
+gst_h264_picture_set_discont_state (GstH264Picture * picture,
+    GstVideoCodecState * discont_state)
+{
+  gst_codec_picture_set_discont_state (GST_CODEC_PICTURE (picture),
+      discont_state);
+}
 
 /*******************
  * GstH264Dpb *
@@ -244,6 +257,9 @@ void gst_h264_dpb_set_interlaced      (GstH264Dpb * dpb,
 GST_CODECS_API
 void gst_h264_dpb_set_max_num_reorder_frames (GstH264Dpb * dpb,
                                               guint32 max_num_reorder_frames);
+
+GST_CODECS_API
+guint32 gst_h264_dpb_get_max_num_reorder_frames (GstH264Dpb * dpb);
 
 GST_CODECS_API
 gboolean gst_h264_dpb_get_interlaced  (GstH264Dpb * dpb);
@@ -319,11 +335,6 @@ GST_CODECS_API
 gboolean         gst_h264_dpb_perform_memory_management_control_operation (GstH264Dpb * dpb,
                                                                            GstH264RefPicMarking *ref_pic_marking,
                                                                            GstH264Picture * picture);
-
-/* Internal methods */
-void  gst_h264_picture_set_reference (GstH264Picture * picture,
-                                      GstH264PictureReference reference,
-                                      gboolean other_field);
 
 G_DEFINE_AUTOPTR_CLEANUP_FUNC(GstH264Picture, gst_h264_picture_unref)
 

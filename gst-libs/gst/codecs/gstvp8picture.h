@@ -21,7 +21,9 @@
 #define __GST_VP8_PICTURE_H__
 
 #include <gst/codecs/codecs-prelude.h>
+#include <gst/codecs/gstcodecpicture.h>
 #include <gst/codecparsers/gstvp8parser.h>
+#include <gst/video/video.h>
 
 G_BEGIN_DECLS
 
@@ -34,20 +36,14 @@ typedef struct _GstVp8Picture GstVp8Picture;
 
 struct _GstVp8Picture
 {
-  GstMiniObject parent;
-
-  GstClockTime pts;
-  /* From GstVideoCodecFrame */
-  guint32 system_frame_number;
+  /*< private >*/
+  GstCodecPicture parent;
 
   GstVp8FrameHdr frame_hdr;
 
   /* raw data and size (does not have ownership) */
   const guint8 * data;
   gsize size;
-
-  gpointer user_data;
-  GDestroyNotify notify;
 };
 
 GST_CODECS_API
@@ -77,7 +73,7 @@ gst_vp8_picture_replace (GstVp8Picture ** old_picture,
 }
 
 static inline void
-gst_vp8_picture_clear (GstVp8Picture ** picture)
+gst_clear_vp8_picture (GstVp8Picture ** picture)
 {
   if (picture && *picture) {
     gst_vp8_picture_unref (*picture);
@@ -85,13 +81,27 @@ gst_vp8_picture_clear (GstVp8Picture ** picture)
   }
 }
 
-GST_CODECS_API
-void gst_vp8_picture_set_user_data (GstVp8Picture * picture,
-                                    gpointer user_data,
-                                    GDestroyNotify notify);
+static inline void
+gst_vp8_picture_set_user_data (GstVp8Picture * picture, gpointer user_data,
+    GDestroyNotify notify)
+{
+  gst_codec_picture_set_user_data (GST_CODEC_PICTURE (picture),
+      user_data, notify);
+}
 
-GST_CODECS_API
-gpointer gst_vp8_picture_get_user_data (GstVp8Picture * picture);
+static inline gpointer
+gst_vp8_picture_get_user_data (GstVp8Picture * picture)
+{
+  return gst_codec_picture_get_user_data (GST_CODEC_PICTURE (picture));
+}
+
+static inline void
+gst_vp8_picture_set_discont_state (GstVp8Picture * picture,
+    GstVideoCodecState * discont_state)
+{
+  gst_codec_picture_set_discont_state (GST_CODEC_PICTURE (picture),
+      discont_state);
+}
 
 G_END_DECLS
 

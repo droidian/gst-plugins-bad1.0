@@ -19,16 +19,11 @@
  * Boston, MA 02110-1301 USA.
  */
 
-#ifndef __GST_WAYLAND_VIDEO_SINK_H__
-#define __GST_WAYLAND_VIDEO_SINK_H__
+#pragma once
 
 #include <gst/gst.h>
 #include <gst/video/video.h>
-
-#include <wayland-client.h>
-
-#include "wldisplay.h"
-#include "wlwindow.h"
+#include <gst/wayland/wayland.h>
 
 G_BEGIN_DECLS
 
@@ -56,19 +51,24 @@ struct _GstWaylandSink
   GstWlDisplay *display;
   GstWlWindow *window;
   GstBufferPool *pool;
-  gboolean use_dmabuf;
 
   gboolean video_info_changed;
   GstVideoInfo video_info;
+  GstVideoInfoDmaDrm drm_info;
   gboolean fullscreen;
+  GstCaps *caps;
 
   gchar *display_name;
 
-  gboolean redraw_pending;
   GMutex render_lock;
   GstBuffer *last_buffer;
 
-  struct wl_callback *callback;
+  GstVideoOrientationMethod sink_rotate_method;
+  GstVideoOrientationMethod tag_rotate_method;
+  GstVideoOrientationMethod current_rotate_method;
+
+  gchar *drm_device;
+  gboolean skip_dumb_buffer_copy;
 };
 
 struct _GstWaylandSinkClass
@@ -81,5 +81,3 @@ GType gst_wayland_sink_get_type (void) G_GNUC_CONST;
 GST_ELEMENT_REGISTER_DECLARE (waylandsink);
 
 G_END_DECLS
-
-#endif /* __GST_WAYLAND_VIDEO_SINK_H__ */

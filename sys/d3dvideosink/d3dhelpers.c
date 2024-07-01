@@ -226,18 +226,18 @@ static const struct
   D3DFORMAT d3d_format;
 } gst_d3d_format_map[] = {
   {
-  GST_VIDEO_FORMAT_BGRx, D3DFMT_X8R8G8B8}, {
-  GST_VIDEO_FORMAT_RGBx, D3DFMT_X8B8G8R8}, {
-  GST_VIDEO_FORMAT_BGRA, D3DFMT_A8R8G8B8}, {
-  GST_VIDEO_FORMAT_RGBA, D3DFMT_A8B8G8R8}, {
-  GST_VIDEO_FORMAT_BGR, D3DFMT_R8G8B8}, {
-  GST_VIDEO_FORMAT_RGB16, D3DFMT_R5G6B5}, {
-  GST_VIDEO_FORMAT_RGB15, D3DFMT_X1R5G5B5}, {
-  GST_VIDEO_FORMAT_I420, D3DFMT_YV12}, {
-  GST_VIDEO_FORMAT_YV12, D3DFMT_YV12}, {
-  GST_VIDEO_FORMAT_NV12, D3DFMT_NV12}, {
-  GST_VIDEO_FORMAT_YUY2, D3DFMT_YUY2}, {
-  GST_VIDEO_FORMAT_UYVY, D3DFMT_UYVY}
+      GST_VIDEO_FORMAT_BGRx, D3DFMT_X8R8G8B8}, {
+      GST_VIDEO_FORMAT_RGBx, D3DFMT_X8B8G8R8}, {
+      GST_VIDEO_FORMAT_BGRA, D3DFMT_A8R8G8B8}, {
+      GST_VIDEO_FORMAT_RGBA, D3DFMT_A8B8G8R8}, {
+      GST_VIDEO_FORMAT_BGR, D3DFMT_R8G8B8}, {
+      GST_VIDEO_FORMAT_RGB16, D3DFMT_R5G6B5}, {
+      GST_VIDEO_FORMAT_RGB15, D3DFMT_X1R5G5B5}, {
+      GST_VIDEO_FORMAT_I420, D3DFMT_YV12}, {
+      GST_VIDEO_FORMAT_YV12, D3DFMT_YV12}, {
+      GST_VIDEO_FORMAT_NV12, D3DFMT_NV12}, {
+      GST_VIDEO_FORMAT_YUY2, D3DFMT_YUY2}, {
+      GST_VIDEO_FORMAT_UYVY, D3DFMT_UYVY}
 };
 
 static D3DFORMAT
@@ -2140,11 +2140,13 @@ d3d_wnd_proc (HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
           gchar *utfrep = g_utf16_to_utf8 (wcrep, 128, NULL, NULL, NULL);
           if (utfrep) {
             if (message == WM_KEYDOWN)
-              gst_navigation_send_key_event (GST_NAVIGATION (sink), "key-press",
-                  utfrep);
+              gst_navigation_send_event_simple (GST_NAVIGATION (sink),
+                  gst_navigation_event_new_key_press (utfrep,
+                      GST_NAVIGATION_MODIFIER_NONE));
             else if (message == WM_KEYUP)
-              gst_navigation_send_key_event (GST_NAVIGATION (sink),
-                  "key-release", utfrep);
+              gst_navigation_send_event_simple (GST_NAVIGATION (sink),
+                  gst_navigation_event_new_key_release (utfrep,
+                      GST_NAVIGATION_MODIFIER_NONE));
             g_free (utfrep);
           }
         }
@@ -2161,44 +2163,44 @@ d3d_wnd_proc (HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
       if (sink->enable_navigation_events
           && d3d_get_render_coordinates (sink, LOWORD (lParam), HIWORD (lParam),
               &x, &y)) {
-        gint button;
-        const gchar *action = NULL;
         switch (message) {
           case WM_MOUSEMOVE:
-            button = 0;
-            action = "mouse-move";
+            gst_navigation_send_event_simple (GST_NAVIGATION (sink),
+                gst_navigation_event_new_mouse_move (x, y,
+                    GST_NAVIGATION_MODIFIER_NONE));
             break;
           case WM_LBUTTONDOWN:
-            button = 1;
-            action = "mouse-button-press";
+            gst_navigation_send_event_simple (GST_NAVIGATION (sink),
+                gst_navigation_event_new_mouse_button_press (1, x, y,
+                    GST_NAVIGATION_MODIFIER_NONE));
             break;
           case WM_LBUTTONUP:
-            button = 1;
-            action = "mouse-button-release";
+            gst_navigation_send_event_simple (GST_NAVIGATION (sink),
+                gst_navigation_event_new_mouse_button_release (1, x, y,
+                    GST_NAVIGATION_MODIFIER_NONE));
             break;
           case WM_RBUTTONDOWN:
-            button = 2;
-            action = "mouse-button-press";
+            gst_navigation_send_event_simple (GST_NAVIGATION (sink),
+                gst_navigation_event_new_mouse_button_press (2, x, y,
+                    GST_NAVIGATION_MODIFIER_NONE));
             break;
           case WM_RBUTTONUP:
-            button = 2;
-            action = "mouse-button-release";
+            gst_navigation_send_event_simple (GST_NAVIGATION (sink),
+                gst_navigation_event_new_mouse_button_release (2, x, y,
+                    GST_NAVIGATION_MODIFIER_NONE));
             break;
           case WM_MBUTTONDOWN:
-            button = 3;
-            action = "mouse-button-press";
+            gst_navigation_send_event_simple (GST_NAVIGATION (sink),
+                gst_navigation_event_new_mouse_button_press (3, x, y,
+                    GST_NAVIGATION_MODIFIER_NONE));
             break;
           case WM_MBUTTONUP:
-            button = 3;
-            action = "mouse-button-release";
+            gst_navigation_send_event_simple (GST_NAVIGATION (sink),
+                gst_navigation_event_new_mouse_button_release (3, x, y,
+                    GST_NAVIGATION_MODIFIER_NONE));
             break;
           default:
             break;
-        }
-        if (action) {
-          /* GST_DEBUG_OBJECT(sink, "%s: %lfx%lf", action, x, y); */
-          gst_navigation_send_mouse_event (GST_NAVIGATION (sink), action,
-              button, x, y);
         }
       }
       break;

@@ -28,17 +28,16 @@
 #ifndef __GST_NVDEC_H__
 #define __GST_NVDEC_H__
 
-#ifdef HAVE_NVCODEC_GST_GL
+#ifdef HAVE_CUDA_GST_GL
 #include <gst/gl/gl.h>
 #include <gst/gl/gstglfuncs.h>
 #endif
 
+#include "nvcuvid.h"
 #include <gst/video/video.h>
 #include <gst/codecparsers/gsth264parser.h>
 #include <gst/codecparsers/gsth265parser.h>
-#include "gstcuvidloader.h"
-#include "gstcudaloader.h"
-#include "gstcudacontext.h"
+#include <gst/cuda/gstcuda.h>
 
 G_BEGIN_DECLS
 
@@ -71,7 +70,7 @@ struct _GstNvDec
 {
   GstVideoDecoder parent;
 
-#ifdef HAVE_NVCODEC_GST_GL
+#ifdef HAVE_CUDA_GST_GL
   GstGLDisplay *gl_display;
   GstGLContext *gl_context;
   GstGLContext *other_gl_context;
@@ -84,7 +83,7 @@ struct _GstNvDec
   CUvideoparser parser;
   CUvideodecoder decoder;
   GstCudaContext *cuda_ctx;
-  CUstream cuda_stream;
+  GstCudaStream *stream;
 
   GstVideoInfo out_info;
   GstClockTime min_latency;

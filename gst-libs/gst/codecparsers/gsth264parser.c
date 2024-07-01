@@ -795,7 +795,7 @@ gst_h264_slice_parse_pred_weight_table (GstH264SliceHdr * slice,
       p->chroma_weight_l0[i][1] = default_chroma_weight;
     }
     if (GST_H264_IS_B_SLICE (slice)) {
-      for (i = 0; i <= slice->num_ref_idx_l0_active_minus1; i++) {
+      for (i = 0; i <= slice->num_ref_idx_l1_active_minus1; i++) {
         p->chroma_weight_l1[i][0] = default_chroma_weight;
         p->chroma_weight_l1[i][1] = default_chroma_weight;
       }
@@ -986,7 +986,7 @@ gst_h264_parser_parse_pic_timing (GstH264NalParser * nalparser,
       hrd = &vui->vcl_hrd_parameters;
     }
 
-    tim->CpbDpbDelaysPresentFlag = ! !hrd;
+    tim->CpbDpbDelaysPresentFlag = !!hrd;
     tim->pic_struct_present_flag = vui->pic_struct_present_flag;
 
     if (tim->CpbDpbDelaysPresentFlag) {
@@ -1084,6 +1084,48 @@ error:
   {
     GST_WARNING ("error parsing \"Registered User Data\"");
     g_free (data);
+    return GST_H264_PARSER_ERROR;
+  }
+}
+
+static GstH264ParserResult
+gst_h264_parser_parse_user_data_unregistered (GstH264NalParser * nalparser,
+    GstH264UserDataUnregistered * urud, NalReader * nr, guint payload_size)
+{
+  guint8 *data = NULL;
+  gint i;
+
+  if (payload_size < 16) {
+    GST_WARNING ("Too small payload size %d", payload_size);
+    return GST_H264_PARSER_BROKEN_DATA;
+  }
+
+  for (int i = 0; i < 16; i++) {
+    READ_UINT8 (nr, urud->uuid[i], 8);
+  }
+  payload_size -= 16;
+
+  urud->size = payload_size;
+
+  data = g_malloc0 (payload_size);
+  for (i = 0; i < payload_size; ++i) {
+    READ_UINT8 (nr, data[i], 8);
+  }
+
+  if (payload_size < 1) {
+    GST_WARNING ("No more remaining payload data to store");
+    g_clear_pointer (&data, g_free);
+    return GST_H264_PARSER_BROKEN_DATA;
+  }
+
+  urud->data = data;
+  GST_MEMDUMP ("SEI user data unregistered", data, payload_size);
+  return GST_H264_PARSER_OK;
+
+error:
+  {
+    GST_WARNING ("error parsing \"User Data Unregistered\"");
+    g_clear_pointer (&data, g_free);
     return GST_H264_PARSER_ERROR;
   }
 }
@@ -1310,6 +1352,10 @@ gst_h264_parser_parse_sei_message (GstH264NalParser * nalparser,
       res = gst_h264_parser_parse_registered_user_data (nalparser,
           &sei->payload.registered_user_data, nr, payload_size >> 3);
       break;
+    case GST_H264_SEI_USER_DATA_UNREGISTERED:
+      res = gst_h264_parser_parse_user_data_unregistered (nalparser,
+          &sei->payload.user_data_unregistered, nr, payload_size >> 3);
+      break;
     case GST_H264_SEI_RECOVERY_POINT:
       res = gst_h264_parser_parse_recovery_point (nalparser,
           &sei->payload.recovery_point, nr);
@@ -1386,7 +1432,7 @@ gst_h264_nal_parser_new (void)
 {
   GstH264NalParser *nalparser;
 
-  nalparser = g_slice_new0 (GstH264NalParser);
+  nalparser = g_new0 (GstH264NalParser, 1);
 
   return nalparser;
 }
@@ -1406,7 +1452,7 @@ gst_h264_nal_parser_free (GstH264NalParser * nalparser)
     gst_h264_sps_clear (&nalparser->sps[i]);
   for (i = 0; i < GST_H264_MAX_PPS_COUNT; i++)
     gst_h264_pps_clear (&nalparser->pps[i]);
-  g_slice_free (GstH264NalParser, nalparser);
+  g_free (nalparser);
 
   nalparser = NULL;
 }
@@ -1461,9 +1507,9 @@ gst_h264_parser_identify_nalu_unchecked (GstH264NalParser * nalparser,
   nalu->size = size - nalu->offset;
 
   if (!gst_h264_parse_nalu_header (nalu)) {
-    GST_WARNING ("error parsing \"NAL unit header\"");
+    GST_DEBUG ("not enough data to parse \"NAL unit header\"");
     nalu->size = 0;
-    return GST_H264_PARSER_BROKEN_DATA;
+    return GST_H264_PARSER_NO_NAL;
   }
 
   nalu->valid = TRUE;
@@ -1603,6 +1649,179 @@ gst_h264_parser_identify_nalu_avc (GstH264NalParser * nalparser,
   nalu->valid = TRUE;
 
   return GST_H264_PARSER_OK;
+}
+
+/**
+ * gst_h264_parser_identify_and_split_nalu_avc:
+ * @nalparser: a #GstH264NalParser
+ * @data: The data to parse, containing an AVC coded NAL unit
+ * @offset: the offset in @data from which to parse the NAL unit
+ * @size: the size of @data
+ * @nal_length_size: the size in bytes of the AVC nal length prefix.
+ * @nalus: a caller allocated GArray of #GstH264NalUnit where to store parsed nal headers
+ * @consumed: (out): the size of consumed bytes
+ *
+ * Parses @data for packetized (e.g., avc/avc3) bitstream and
+ * sets @nalus. In addition to nal identifying process,
+ * this method scans start-code prefix to split malformed packet into
+ * actual nal chunks.
+ *
+ * Returns: a #GstH264ParserResult
+ *
+ * Since: 1.22.9
+ */
+GstH264ParserResult
+gst_h264_parser_identify_and_split_nalu_avc (GstH264NalParser * nalparser,
+    const guint8 * data, guint offset, gsize size, guint8 nal_length_size,
+    GArray * nalus, gsize * consumed)
+{
+  GstBitReader br;
+  guint nalu_size;
+  guint remaining;
+  guint off;
+  guint sc_size;
+
+  g_return_val_if_fail (data != NULL, GST_H264_PARSER_ERROR);
+  g_return_val_if_fail (nalus != NULL, GST_H264_PARSER_ERROR);
+  g_return_val_if_fail (nal_length_size > 0 && nal_length_size < 5,
+      GST_H264_PARSER_ERROR);
+
+  g_array_set_size (nalus, 0);
+
+  if (consumed)
+    *consumed = 0;
+
+  /* Would overflow guint below otherwise: the callers needs to ensure that
+   * this never happens */
+  if (offset > G_MAXUINT32 - nal_length_size) {
+    GST_WARNING ("offset + nal_length_size overflow");
+    return GST_H264_PARSER_BROKEN_DATA;
+  }
+
+  if (size < offset + nal_length_size) {
+    GST_DEBUG ("Can't parse, buffer has too small size %" G_GSIZE_FORMAT
+        ", offset %u", size, offset);
+    return GST_H264_PARSER_ERROR;
+  }
+
+  /* Read nal unit size and unwrap the size field */
+  gst_bit_reader_init (&br, data + offset, size - offset);
+  nalu_size = gst_bit_reader_get_bits_uint32_unchecked (&br,
+      nal_length_size * 8);
+
+  if (nalu_size < 1) {
+    GST_WARNING ("too small nal size %d", nalu_size);
+    return GST_H264_PARSER_BROKEN_DATA;
+  }
+
+  if (size < (gsize) nalu_size + nal_length_size) {
+    GST_WARNING ("larger nalu size %d than data size %" G_GSIZE_FORMAT,
+        nalu_size + nal_length_size, size);
+    return GST_H264_PARSER_BROKEN_DATA;
+  }
+
+  if (consumed)
+    *consumed = nalu_size + nal_length_size;
+
+  off = offset + nal_length_size;
+  remaining = nalu_size;
+  sc_size = nal_length_size;
+
+  /* Drop trailing start-code since it will not be scanned */
+  if (remaining >= 3) {
+    if (data[off + remaining - 1] == 0x01 && data[off + remaining - 2] == 0x00
+        && data[off + remaining - 3] == 0x00) {
+      remaining -= 3;
+
+      /* 4 bytes start-code */
+      if (remaining > 0 && data[off + remaining - 1] == 0x00)
+        remaining--;
+    }
+  }
+
+  /* Looping to split malformed nal units. nal-length field was dropped above
+   * so expected bitstream structure are:
+   *
+   * <complete nalu>
+   * | nalu |
+   * sc scan result will be -1 and handled in CONDITION-A
+   *
+   * <nalu with startcode prefix>
+   * | SC | nalu |
+   * Hit CONDITION-C first then terminated in CONDITION-A
+   *
+   * <first nal has no startcode but others have>
+   * | nalu | SC | nalu | ...
+   * CONDITION-B handles those cases
+   */
+  do {
+    GstH264NalUnit nalu;
+    gint sc_offset = -1;
+    guint skip_size = 0;
+
+    memset (&nalu, 0, sizeof (GstH264NalUnit));
+
+    /* startcode 3 bytes + minimum nal size 1 */
+    if (remaining >= 4)
+      sc_offset = scan_for_start_codes (data + off, remaining);
+
+    if (sc_offset < 0) {
+      if (remaining >= 1) {
+        /* CONDITION-A */
+        /* Last chunk */
+        nalu.size = remaining;
+        nalu.sc_offset = off - sc_size;
+        nalu.offset = off;
+        nalu.data = (guint8 *) data;
+        nalu.valid = TRUE;
+
+        gst_h264_parse_nalu_header (&nalu);
+        g_array_append_val (nalus, nalu);
+      }
+      break;
+    } else if ((sc_offset == 2 && data[off + sc_offset - 1] != 0)
+        || sc_offset > 2) {
+      /* CONDITION-B */
+      /* Found trailing startcode prefix */
+
+      nalu.size = sc_offset;
+      if (data[off + sc_offset - 1] == 0) {
+        /* 4 bytes start code */
+        nalu.size--;
+      }
+
+      nalu.sc_offset = off - sc_size;
+      nalu.offset = off;
+      nalu.data = (guint8 *) data;
+      nalu.valid = TRUE;
+
+      gst_h264_parse_nalu_header (&nalu);
+      g_array_append_val (nalus, nalu);
+    } else {
+      /* CONDITION-C */
+      /* startcode located at beginning of this chunk without actual nal data.
+       * skip this start code */
+    }
+
+    skip_size = sc_offset + 3;
+    if (skip_size >= remaining)
+      break;
+
+    /* no more nal-length bytes but 3bytes startcode */
+    sc_size = 3;
+    if (sc_offset > 0 && data[off + sc_offset - 1] == 0)
+      sc_size++;
+
+    remaining -= skip_size;
+    off += skip_size;
+  } while (remaining >= 1);
+
+  if (nalus->len > 0)
+    return GST_H264_PARSER_OK;
+
+  GST_WARNING ("No nal found");
+
+  return GST_H264_PARSER_BROKEN_DATA;
 }
 
 /**
@@ -2386,7 +2605,8 @@ gst_h264_parser_parse_slice_hdr (GstH264NalParser * nalparser,
     guint32 PicHeightInMapUnits = sps->pic_height_in_map_units_minus1 + 1;
     guint32 PicSizeInMapUnits = PicWidthInMbs * PicHeightInMapUnits;
     guint32 SliceGroupChangeRate = pps->slice_group_change_rate_minus1 + 1;
-    const guint n = ceil_log2 (PicSizeInMapUnits / SliceGroupChangeRate + 1);
+    const guint n =
+        gst_util_ceil_log2 (PicSizeInMapUnits / SliceGroupChangeRate + 1);
     READ_UINT16 (&nr, slice->slice_group_change_cycle, n);
   }
 
@@ -2467,6 +2687,13 @@ gst_h264_sei_clear (GstH264SEIMessage * sei)
 
       g_free ((guint8 *) rud->data);
       rud->data = NULL;
+      break;
+    }
+    case GST_H264_SEI_USER_DATA_UNREGISTERED:{
+      GstH264UserDataUnregistered *udu = &sei->payload.user_data_unregistered;
+
+      g_free ((guint8 *) udu->data);
+      udu->data = NULL;
       break;
     }
     case GST_H264_SEI_UNHANDLED_PAYLOAD:{
@@ -2793,6 +3020,19 @@ error:
 }
 
 static gboolean
+gst_h264_write_sei_user_data_unregistered (NalWriter * nw,
+    GstH264UserDataUnregistered * udu)
+{
+  WRITE_BYTES (nw, udu->uuid, 16);
+  WRITE_BYTES (nw, udu->data, udu->size);
+
+  return TRUE;
+
+error:
+  return FALSE;
+}
+
+static gboolean
 gst_h264_write_sei_frame_packing (NalWriter * nw,
     GstH264FramePacking * frame_packing)
 {
@@ -2974,6 +3214,12 @@ gst_h264_create_sei_memory_internal (guint8 nal_prefix_size,
         }
 
         payload_size_data += rud->size;
+        break;
+      }
+      case GST_H264_SEI_USER_DATA_UNREGISTERED:{
+        GstH264UserDataUnregistered *udu = &msg->payload.user_data_unregistered;
+
+        payload_size_data = 16 + udu->size;
         break;
       }
       case GST_H264_SEI_FRAME_PACKING:{
@@ -3159,6 +3405,15 @@ gst_h264_create_sei_memory_internal (guint8 nal_prefix_size,
         if (!gst_h264_write_sei_registered_user_data (&nw,
                 &msg->payload.registered_user_data)) {
           GST_WARNING ("Failed to write \"Registered user data\"");
+          goto error;
+        }
+        have_written_data = TRUE;
+        break;
+      case GST_H264_SEI_USER_DATA_UNREGISTERED:
+        GST_DEBUG ("Writing \"Unregistered user data\"");
+        if (!gst_h264_write_sei_user_data_unregistered (&nw,
+                &msg->payload.user_data_unregistered)) {
+          GST_WARNING ("Failed to write \"Unregistered user data\"");
           goto error;
         }
         have_written_data = TRUE;
@@ -3361,7 +3616,7 @@ out:
  * The validation for completeness of @au and @sei is caller's responsibility.
  * Both @au and @sei must be byte-stream formatted
  *
- * Returns: (nullable): a SEI inserted #GstBuffer or %NULL
+ * Returns: (transfer full) (nullable): a SEI inserted #GstBuffer or %NULL
  *   if cannot figure out proper position to insert a @sei
  *
  * Since: 1.18
@@ -3391,7 +3646,7 @@ gst_h264_parser_insert_sei (GstH264NalParser * nalparser, GstBuffer * au,
  * Nal prefix type of both @au and @sei must be packetized, and
  * also the size of nal length field must be identical to @nal_length_size
  *
- * Returns: (nullable): a SEI inserted #GstBuffer or %NULL
+ * Returns: (transfer full) (nullable): a SEI inserted #GstBuffer or %NULL
  *   if cannot figure out proper position to insert a @sei
  *
  * Since: 1.18
@@ -3409,4 +3664,308 @@ gst_h264_parser_insert_sei_avc (GstH264NalParser * nalparser,
    * scanned */
   return gst_h264_parser_insert_sei_internal (nalparser, nal_length_size, TRUE,
       au, sei);
+}
+
+static GstH264DecoderConfigRecord *
+gst_h264_decoder_config_record_new (void)
+{
+  GstH264DecoderConfigRecord *config;
+
+  config = g_new0 (GstH264DecoderConfigRecord, 1);
+  config->sps = g_array_new (FALSE, FALSE, sizeof (GstH264NalUnit));
+  config->pps = g_array_new (FALSE, FALSE, sizeof (GstH264NalUnit));
+  config->sps_ext = g_array_new (FALSE, FALSE, sizeof (GstH264NalUnit));
+
+  return config;
+}
+
+/**
+ * gst_h264_decoder_config_record_free:
+ * @config: (nullable): a #GstH264DecoderConfigRecord data
+ *
+ * Free @config data
+ *
+ * Since: 1.22
+ */
+void
+gst_h264_decoder_config_record_free (GstH264DecoderConfigRecord * config)
+{
+  if (!config)
+    return;
+
+  if (config->sps)
+    g_array_unref (config->sps);
+
+  if (config->pps)
+    g_array_unref (config->pps);
+
+  if (config->sps_ext)
+    g_array_unref (config->sps_ext);
+
+  g_free (config);
+}
+
+/**
+ * gst_h264_parser_parse_decoder_config_record:
+ * @nalparser: a #GstH264NalParser
+ * @data: the data to parse
+ * @size: the size of @data
+ * @config: (out): parsed #GstH264DecoderConfigRecord data
+ *
+ * Parses AVCDecoderConfigurationRecord data and fill into @config.
+ * The caller must free @config via gst_h264_decoder_config_record_free()
+ *
+ * This method does not parse SPS and PPS and therefore the caller needs to
+ * parse each NAL unit via appropriate parsing method.
+ *
+ * Returns: a #GstH264ParserResult
+ *
+ * Since: 1.22
+ */
+GstH264ParserResult
+gst_h264_parser_parse_decoder_config_record (GstH264NalParser * nalparser,
+    const guint8 * data, gsize size, GstH264DecoderConfigRecord ** config)
+{
+  GstH264DecoderConfigRecord *ret;
+  GstBitReader br;
+  GstH264ParserResult result = GST_H264_PARSER_OK;
+  guint8 num_sps, num_pps, i;
+  guint offset;
+
+  g_return_val_if_fail (nalparser != NULL, GST_H264_PARSER_ERROR);
+  g_return_val_if_fail (data != NULL, GST_H264_PARSER_ERROR);
+  g_return_val_if_fail (config != NULL, GST_H264_PARSER_ERROR);
+
+#define READ_CONFIG_UINT8(val, nbits) G_STMT_START { \
+  if (!gst_bit_reader_get_bits_uint8 (&br, &val, nbits)) { \
+    GST_WARNING ("Failed to read " G_STRINGIFY (val)); \
+    result = GST_H264_PARSER_ERROR; \
+    goto error; \
+  } \
+} G_STMT_END;
+
+#define SKIP_CONFIG_BITS(nbits) G_STMT_START { \
+  if (!gst_bit_reader_skip (&br, nbits)) { \
+    GST_WARNING ("Failed to skip %d bits", nbits); \
+    result = GST_H264_PARSER_ERROR; \
+    goto error; \
+  } \
+} G_STMT_END;
+
+  *config = NULL;
+
+  if (size < 7) {
+    GST_WARNING ("Too small size avcC");
+    return GST_H264_PARSER_ERROR;
+  }
+
+  gst_bit_reader_init (&br, data, size);
+
+  ret = gst_h264_decoder_config_record_new ();
+
+  READ_CONFIG_UINT8 (ret->configuration_version, 8);
+  /* Keep parsing, caller can decide whether this data needs to be discarded
+   * or not */
+  if (ret->configuration_version != 1) {
+    GST_WARNING ("Wrong configurationVersion %d", ret->configuration_version);
+    result = GST_H264_PARSER_ERROR;
+    goto error;
+  }
+
+  READ_CONFIG_UINT8 (ret->profile_indication, 8);
+  READ_CONFIG_UINT8 (ret->profile_compatibility, 8);
+  READ_CONFIG_UINT8 (ret->level_indication, 8);
+  /* reserved 6bits */
+  SKIP_CONFIG_BITS (6);
+  READ_CONFIG_UINT8 (ret->length_size_minus_one, 2);
+  if (ret->length_size_minus_one == 2) {
+    /* "length_size_minus_one + 1" should be 1, 2, or 4 */
+    GST_WARNING ("Wrong nal-length-size");
+    result = GST_H264_PARSER_ERROR;
+    goto error;
+  }
+
+  /* reserved 3bits */
+  SKIP_CONFIG_BITS (3);
+
+  READ_CONFIG_UINT8 (num_sps, 5);
+  offset = gst_bit_reader_get_pos (&br);
+
+  g_assert (offset % 8 == 0);
+  offset /= 8;
+  for (i = 0; i < num_sps; i++) {
+    GstH264NalUnit nalu;
+
+    result = gst_h264_parser_identify_nalu_avc (nalparser,
+        data, offset, size, 2, &nalu);
+    if (result != GST_H264_PARSER_OK)
+      goto error;
+
+    g_array_append_val (ret->sps, nalu);
+    offset = nalu.offset + nalu.size;
+  }
+
+  if (!gst_bit_reader_set_pos (&br, offset * 8)) {
+    result = GST_H264_PARSER_ERROR;
+    goto error;
+  }
+
+  READ_CONFIG_UINT8 (num_pps, 8);
+  offset = gst_bit_reader_get_pos (&br);
+
+  g_assert (offset % 8 == 0);
+  offset /= 8;
+  for (i = 0; i < num_pps; i++) {
+    GstH264NalUnit nalu;
+
+    result = gst_h264_parser_identify_nalu_avc (nalparser,
+        data, offset, size, 2, &nalu);
+    if (result != GST_H264_PARSER_OK)
+      goto error;
+
+    g_array_append_val (ret->pps, nalu);
+    offset = nalu.offset + nalu.size;
+  }
+
+  /* Parse chroma format and SPS ext data. We will silently ignore any
+   * error while parsing below data since it's not essential data for
+   * decoding */
+  if (ret->profile_indication == 100 || ret->profile_indication == 110 ||
+      ret->profile_indication == 122 || ret->profile_indication == 144) {
+    guint8 num_sps_ext;
+
+    if (!gst_bit_reader_set_pos (&br, offset * 8))
+      goto out;
+
+    if (!gst_bit_reader_skip (&br, 6))
+      goto out;
+
+    if (!gst_bit_reader_get_bits_uint8 (&br, &ret->chroma_format, 2))
+      goto out;
+
+    if (!gst_bit_reader_skip (&br, 5))
+      goto out;
+
+    if (!gst_bit_reader_get_bits_uint8 (&br, &ret->bit_depth_luma_minus8, 3))
+      goto out;
+
+    if (!gst_bit_reader_skip (&br, 5))
+      goto out;
+
+    if (!gst_bit_reader_get_bits_uint8 (&br, &ret->bit_depth_chroma_minus8, 3))
+      goto out;
+
+    if (!gst_bit_reader_get_bits_uint8 (&br, &num_sps_ext, 8))
+      goto out;
+
+    offset = gst_bit_reader_get_pos (&br);
+
+    g_assert (offset % 8 == 0);
+    offset /= 8;
+    for (i = 0; i < num_sps_ext; i++) {
+      GstH264NalUnit nalu;
+
+      result = gst_h264_parser_identify_nalu_avc (nalparser,
+          data, offset, size, 2, &nalu);
+      if (result != GST_H264_PARSER_OK)
+        goto out;
+
+      g_array_append_val (ret->sps_ext, nalu);
+      offset = nalu.offset + nalu.size;
+    }
+
+    ret->chroma_format_present = TRUE;
+  }
+
+out:
+  {
+    *config = ret;
+    return GST_H264_PARSER_OK;
+  }
+error:
+  {
+    gst_h264_decoder_config_record_free (ret);
+    return result;
+  }
+
+#undef READ_CONFIG_UINT8
+#undef SKIP_CONFIG_BITS
+}
+
+typedef struct
+{
+  const gchar *name;
+  GstH264Profile profile;
+} H264ProfileMapping;
+
+
+static const H264ProfileMapping h264_profiles[] = {
+  {"baseline", GST_H264_PROFILE_BASELINE},
+  {"main", GST_H264_PROFILE_MAIN},
+  {"high", GST_H264_PROFILE_HIGH},
+  {"high-10", GST_H264_PROFILE_HIGH10},
+  {"high-4:2:2", GST_H264_PROFILE_HIGH_422},
+  {"high-4:4:4", GST_H264_PROFILE_HIGH_444},
+  {"multiview-high", GST_H264_PROFILE_MULTIVIEW_HIGH},
+  {"stereo-high", GST_H264_PROFILE_STEREO_HIGH},
+  {"scalable-baseline", GST_H264_PROFILE_SCALABLE_BASELINE},
+  {"scalable-high", GST_H264_PROFILE_SCALABLE_HIGH},
+};
+
+/**
+ * gst_h264_profile_from_string:
+ * @string: the descriptive name for #GstH264Profile
+ *
+ * Returns a #GstH264Profile for the @string.
+ *
+ * Returns: the #GstH264Profile of @string or %GST_H265_PROFILE_INVALID on error
+ *
+ * Since: 1.24
+ */
+GstH264Profile
+gst_h264_profile_from_string (const gchar * string)
+{
+  guint i;
+
+  if (string == NULL)
+    return GST_H264_PROFILE_INVALID;
+
+  for (i = 0; i < G_N_ELEMENTS (h264_profiles); i++) {
+    if (g_strcmp0 (string, h264_profiles[i].name) == 0) {
+      return h264_profiles[i].profile;
+    }
+  }
+
+  return GST_H264_PROFILE_INVALID;
+}
+
+/**
+ * gst_h264_slice_type_to_string:
+ * @slice_type: a #GstH264SliceType
+ *
+ * Returns the descriptive name for the #GstH264SliceType.
+ *
+ * Returns: (nullable): the name for @slice_type or %NULL on error
+ *
+ * Since: 1.24
+ */
+const gchar *
+gst_h264_slice_type_to_string (GstH264SliceType slice_type)
+{
+  switch (slice_type) {
+    case GST_H264_P_SLICE:
+      return "P";
+    case GST_H264_B_SLICE:
+      return "B";
+    case GST_H264_I_SLICE:
+      return "I";
+    case GST_H264_SP_SLICE:
+      return "SP";
+    case GST_H264_SI_SLICE:
+      return "SI";
+    default:
+      GST_ERROR ("unknown %d slice type", slice_type);
+  }
+
+  return NULL;
 }

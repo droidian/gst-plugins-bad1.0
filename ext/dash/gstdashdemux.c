@@ -285,7 +285,7 @@
 #include <gst/base/gsttypefindhelper.h>
 #include <gst/tag/tag.h>
 #include <gst/net/gstnet.h>
-#include "gst/gst-i18n-plugin.h"
+#include <glib/gi18n-lib.h>
 #include "gstdashdemux.h"
 #include "gstdash_debug.h"
 
@@ -611,9 +611,9 @@ gst_dash_demux_class_init (GstDashDemuxClass * klass)
       "DASH Demuxer",
       "Codec/Demuxer/Adaptive",
       "Dynamic Adaptive Streaming over HTTP demuxer",
-      "David Corvoysier <david.corvoysier@orange.com>\n\
-                Hamid Zakari <hamid.zakari@gmail.com>\n\
-                Gianluca Gennari <gennarone@gmail.com>");
+      "David Corvoysier <david.corvoysier@orange.com>, "
+      "Hamid Zakari <hamid.zakari@gmail.com>, "
+      "Gianluca Gennari <gennarone@gmail.com>");
 
 
   gstadaptivedemux_class->get_duration = gst_dash_demux_get_duration;
@@ -796,6 +796,7 @@ gst_dash_demux_setup_all_streams (GstDashDemux * demux)
     GstPad *srcpad;
     gchar *lang = NULL;
     GstTagList *tags = NULL;
+    gchar *track_id = NULL;
 
     active_stream =
         gst_mpd_client_get_active_stream_by_index (demux->client, i);
@@ -812,6 +813,48 @@ gst_dash_demux_setup_all_streams (GstDashDemux * demux)
     srcpad = gst_dash_demux_create_pad (demux, active_stream);
     if (srcpad == NULL)
       continue;
+
+    if (active_stream->cur_adapt_set) {
+      /* FIXME: For CEA 608 and CEA 708 tracks we should check the Accessibility
+       * descriptor:
+       * https://dev.w3.org/html5/html-sourcing-inband-tracks/#mpegdash
+       * * An ISOBMFF CEA 608 caption service: the string "cc" concatenated with
+       * the value of the 'channel-number' field in the Accessibility descriptor
+       * in the ContentComponent or AdaptationSet.
+       * * An ISOBMFF CEA 708 caption service: the string "sn" concatenated with
+       * the value of the 'service-number' field in the Accessibility descriptor
+       * in the ContentComponent or AdaptationSet.
+       * * Otherwise:
+       */
+
+      /* Content of the id attribute in the ContentComponent or AdaptationSet
+       * element. */
+      if (active_stream->cur_adapt_set->id) {
+        track_id = g_strdup_printf ("%d", active_stream->cur_adapt_set->id);
+      } else {
+        GList *it;
+
+        for (it = active_stream->cur_adapt_set->ContentComponents; it;
+            it = it->next) {
+          GstMPDContentComponentNode *cc_node = it->data;
+          if (cc_node->id) {
+            track_id = g_strdup_printf ("%u", cc_node->id);
+            break;
+          }
+        }
+        /* Empty string if the id attribute is not present on either
+         * element. */
+        if (!track_id)
+          track_id = g_strdup ("");
+      }
+    }
+
+    if (track_id) {
+      tags =
+          gst_tag_list_new (GST_TAG_CONTAINER_SPECIFIC_TRACK_ID, track_id,
+          NULL);
+      g_free (track_id);
+    }
 
     caps = gst_dash_demux_get_input_caps (demux, active_stream);
     GST_LOG_OBJECT (demux, "Creating stream %d %" GST_PTR_FORMAT, i, caps);
@@ -835,15 +878,27 @@ gst_dash_demux_setup_all_streams (GstDashDemux * demux)
     }
 
     if (lang) {
+      if (!tags)
+        tags = gst_tag_list_new_empty ();
       if (gst_tag_check_language_code (lang))
-        tags = gst_tag_list_new (GST_TAG_LANGUAGE_CODE, lang, NULL);
+        gst_tag_list_add (tags, GST_TAG_MERGE_REPLACE, GST_TAG_LANGUAGE_CODE,
+            lang, NULL);
       else
-        tags = gst_tag_list_new (GST_TAG_LANGUAGE_NAME, lang, NULL);
+        gst_tag_list_add (tags, GST_TAG_MERGE_REPLACE, GST_TAG_LANGUAGE_NAME,
+            lang, NULL);
     }
 
     stream = (GstDashDemuxStream *)
         gst_adaptive_demux_stream_new (GST_ADAPTIVE_DEMUX_CAST (demux), srcpad);
     stream->active_stream = active_stream;
+
+    if (active_stream->cur_representation) {
+      stream->last_representation_id =
+          g_strdup (stream->active_stream->cur_representation->id);
+    } else {
+      stream->last_representation_id = NULL;
+    }
+
     s = gst_caps_get_structure (caps, 0);
     stream->allow_sidx =
         gst_mpd_client_has_isoff_ondemand_profile (demux->client);
@@ -1332,6 +1387,43 @@ gst_dash_demux_stream_update_fragment_info (GstAdaptiveDemuxStream * stream)
 
   if (gst_mpd_client_get_next_fragment_timestamp (dashdemux->client,
           dashstream->index, &ts)) {
+    /* For live streams, check whether the underlying representation changed
+     * (due to a manifest update with no matching representation) */
+    if (gst_mpd_client_is_live (dashdemux->client)
+        && !GST_ADAPTIVE_DEMUX_STREAM_NEED_HEADER (stream)) {
+      if (dashstream->active_stream
+          && dashstream->active_stream->cur_representation) {
+        /* id specifies an identifier for this Representation. The
+         * identifier shall be unique within a Period unless the
+         * Representation is functionally identically to another
+         * Representation in the same Period. */
+        if (g_strcmp0 (dashstream->active_stream->cur_representation->id,
+                dashstream->last_representation_id)) {
+          GstCaps *caps;
+          stream->need_header = TRUE;
+
+          GST_INFO_OBJECT (dashdemux,
+              "Representation changed from %s to %s - updating to bitrate %d",
+              GST_STR_NULL (dashstream->last_representation_id),
+              GST_STR_NULL (dashstream->active_stream->cur_representation->id),
+              dashstream->active_stream->cur_representation->bandwidth);
+
+          caps =
+              gst_dash_demux_get_input_caps (dashdemux,
+              dashstream->active_stream);
+          gst_adaptive_demux_stream_set_caps (stream, caps);
+
+          /* Update the stored last representation id */
+          g_free (dashstream->last_representation_id);
+          dashstream->last_representation_id =
+              g_strdup (dashstream->active_stream->cur_representation->id);
+        }
+      } else {
+        g_free (dashstream->last_representation_id);
+        dashstream->last_representation_id = NULL;
+      }
+    }
+
     if (GST_ADAPTIVE_DEMUX_STREAM_NEED_HEADER (stream)) {
       gst_adaptive_demux_stream_fragment_clear (&stream->fragment);
       gst_dash_demux_stream_update_headers_info (stream);
@@ -1751,7 +1843,7 @@ gst_dash_demux_stream_has_next_fragment (GstAdaptiveDemuxStream * stream)
 
 /* The goal here is to figure out, once we have pushed a keyframe downstream,
  * what the next ideal keyframe to download is.
- * 
+ *
  * This is done based on:
  * * the current internal position (i.e. actual_position)
  * * the reported downstream position (QoS feedback)
@@ -2236,6 +2328,10 @@ gst_dash_demux_stream_select_bitrate (GstAdaptiveDemuxStream * stream,
       gst_adaptive_demux_stream_set_caps (stream, caps);
       ret = TRUE;
 
+      /* Update the stored last representation id */
+      g_free (dashstream->last_representation_id);
+      dashstream->last_representation_id =
+          g_strdup (active_stream->cur_representation->id);
     } else {
       GST_WARNING_OBJECT (demux, "Can not switch representation, aborting...");
     }
@@ -2349,7 +2445,7 @@ gst_dash_demux_seek (GstAdaptiveDemux * demux, GstEvent * seek)
     return FALSE;
   }
 
-  trickmode_no_audio = ! !(flags & GST_SEEK_FLAG_TRICKMODE_NO_AUDIO);
+  trickmode_no_audio = !!(flags & GST_SEEK_FLAG_TRICKMODE_NO_AUDIO);
 
   streams = demux->streams;
   if (current_period != gst_mpd_client_get_period_index (dashdemux->client)) {
@@ -2468,7 +2564,8 @@ gst_dash_demux_update_manifest_data (GstAdaptiveDemux * demux,
       streams = demux->streams;
     }
 
-    /* update the streams to play from the next segment */
+    /* update the streams to preserve the current representation if there is one,
+     * and to play from the next segment */
     for (iter = streams, streams_iter = new_client->active_streams;
         iter && streams_iter;
         iter = g_list_next (iter), streams_iter = g_list_next (streams_iter)) {
@@ -2483,6 +2580,37 @@ gst_dash_demux_update_manifest_data (GstAdaptiveDemux * demux,
         gst_mpd_client_free (new_client);
         gst_buffer_unmap (buffer, &mapinfo);
         return GST_FLOW_EOS;
+      }
+
+      if (new_stream->cur_adapt_set
+          && demux_stream->last_representation_id != NULL) {
+
+        GList *rep_list = new_stream->cur_adapt_set->Representations;
+        GstMPDRepresentationNode *rep_node =
+            gst_mpd_client_get_representation_with_id (rep_list,
+            demux_stream->last_representation_id);
+        if (rep_node != NULL) {
+          if (gst_mpd_client_setup_representation (new_client, new_stream,
+                  rep_node)) {
+            GST_DEBUG_OBJECT (GST_ADAPTIVE_DEMUX_STREAM_PAD (demux_stream),
+                "Found and set up matching representation %s in new manifest",
+                demux_stream->last_representation_id);
+          } else {
+            GST_ERROR_OBJECT (GST_ADAPTIVE_DEMUX_STREAM_PAD (demux_stream),
+                "Failed to set up representation %s in new manifest",
+                demux_stream->last_representation_id);
+            gst_mpd_client_free (new_client);
+            gst_buffer_unmap (buffer, &mapinfo);
+            return GST_FLOW_EOS;
+          }
+        } else {
+          /* If we failed to find the current representation,
+           * then update_fragment_info() will reconfigure to the
+           * new settings after the current download finishes */
+          GST_WARNING_OBJECT (GST_ADAPTIVE_DEMUX_STREAM_PAD (demux_stream),
+              "Failed to find representation %s in new manifest",
+              demux_stream->last_representation_id);
+        }
       }
 
       if (gst_mpd_client_get_next_fragment_timestamp (dashdemux->client,
@@ -3560,6 +3688,7 @@ gst_dash_demux_stream_free (GstAdaptiveDemuxStream * stream)
     gst_isoff_moof_box_free (dash_stream->moof);
   if (dash_stream->moof_sync_samples)
     g_array_free (dash_stream->moof_sync_samples, TRUE);
+  g_free (dash_stream->last_representation_id);
 }
 
 static GstDashDemuxClockDrift *
@@ -3671,7 +3800,7 @@ struct Rfc5322TimeZone
 
 /*
  Parse an RFC5322 (section 3.3) date-time from the Date: field in the
- HTTP response. 
+ HTTP response.
  See https://tools.ietf.org/html/rfc5322#section-3.3
 */
 static GstDateTime *

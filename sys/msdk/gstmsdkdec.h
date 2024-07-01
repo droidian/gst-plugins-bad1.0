@@ -38,6 +38,7 @@
 #include "gstmsdkcontext.h"
 #include "msdk-enums.h"
 #include "gstmsdkdecproputil.h"
+#include "gstmsdkcaps.h"
 
 G_BEGIN_DECLS
 
@@ -55,25 +56,33 @@ G_BEGIN_DECLS
   (G_TYPE_CHECK_CLASS_TYPE((klass),GST_TYPE_MSDKDEC))
 
 #define MAX_BS_EXTRA_PARAMS             8
+#define MAX_VIDEO_EXTRA_PARAMS          8
 
 typedef struct _GstMsdkDec GstMsdkDec;
 typedef struct _GstMsdkDecClass GstMsdkDecClass;
 typedef struct _MsdkDecTask MsdkDecTask;
+typedef struct _MsdkDecCData MsdkDecCData;
 
 struct _GstMsdkDec
 {
   GstVideoDecoder element;
 
-  /* input description */
+  /* input/output description */
   GstVideoCodecState *input_state;
+  GstVideoCodecState *output_state;
   /* aligned msdk pool info */
   GstBufferPool *pool;
+  GstBufferPool *alloc_pool;
+  GstBufferPool *other_pool;
   /* downstream pool info based on allocation query */
   GstVideoInfo non_msdk_pool_info;
   mfxFrameAllocResponse alloc_resp;
-  gboolean use_video_memory;
   gboolean use_dmabuf;
+  gboolean do_copy;
   gboolean initialized;
+  gboolean sfc;
+  gboolean ds_has_known_allocator;
+  guint64 modifier;
 
   /* for packetization */
   GstAdapter *adapter;
@@ -105,6 +114,9 @@ struct _GstMsdkDec
   mfxExtBuffer *bs_extra_params[MAX_BS_EXTRA_PARAMS];
   guint num_bs_extra_params;
 
+  mfxExtBuffer *video_extra_params[MAX_VIDEO_EXTRA_PARAMS];
+  guint num_video_extra_params;
+
 #if (MFX_VERSION >= 1025)
   mfxExtDecodeErrorReport error_report;
 #endif
@@ -125,10 +137,19 @@ struct _GstMsdkDecClass
   gboolean (*postinit_decoder) (GstMsdkDec * decoder);
 };
 
+struct _MsdkDecCData
+{
+  GstCaps *sink_caps;
+  GstCaps *src_caps;
+};
+
 GType gst_msdkdec_get_type (void);
 
 void
 gst_msdkdec_add_bs_extra_param (GstMsdkDec * thiz, mfxExtBuffer * param);
+
+void
+gst_msdkdec_add_video_extra_param (GstMsdkDec * thiz, mfxExtBuffer * param);
 
 G_END_DECLS
 

@@ -51,17 +51,15 @@
 
 #include "gstvadeinterlace.h"
 
+#include <gst/va/gstva.h>
 #include <gst/video/video.h>
-
 #include <va/va_drmcommon.h>
 
-#include "gstvaallocator.h"
 #include "gstvabasetransform.h"
 #include "gstvacaps.h"
 #include "gstvadisplay_priv.h"
 #include "gstvafilter.h"
-#include "gstvapool.h"
-#include "gstvautils.h"
+#include "gstvapluginutils.h"
 
 GST_DEBUG_CATEGORY_STATIC (gst_va_deinterlace_debug);
 #define GST_CAT_DEFAULT gst_va_deinterlace_debug
@@ -428,6 +426,7 @@ gst_va_deinterlace_transform (GstBaseTransform * trans, GstBuffer * inbuf,
 
   if (!gst_va_filter_process (btrans->filter, &src, &dst)) {
     gst_buffer_set_flags (outbuf, GST_BUFFER_FLAG_CORRUPTED);
+    res = GST_BASE_TRANSFORM_FLOW_DROPPED;
   }
 
   return res;
@@ -648,14 +647,12 @@ gst_va_deinterlace_query (GstBaseTransform * trans, GstPadDirection direction,
 {
   GstVaDeinterlace *self = GST_VA_DEINTERLACE (trans);
 
-  if (direction == GST_PAD_SRC && GST_QUERY_TYPE (query) == GST_QUERY_LATENCY) {
+  if (direction == GST_PAD_SRC && GST_QUERY_TYPE (query) == GST_QUERY_LATENCY
+      && !gst_base_transform_is_passthrough (trans)) {
     GstPad *peer;
     GstClockTime latency, min, max;
     gboolean res = FALSE;
     gboolean live;
-
-    if (gst_base_transform_is_passthrough (trans))
-      return FALSE;
 
     peer = gst_pad_get_peer (GST_BASE_TRANSFORM_SINK_PAD (trans));
     if (!peer)
@@ -722,7 +719,7 @@ gst_va_deinterlace_class_init (gpointer g_class, gpointer class_data)
       "Filter/Effect/Video/Deinterlace",
       "VA-API based deinterlacer", "Víctor Jáquez <vjaquez@igalia.com>");
 
-  display = gst_va_display_drm_new_from_path (btrans_class->render_device_path);
+  display = gst_va_display_platform_new (btrans_class->render_device_path);
   filter = gst_va_filter_new (display);
 
   if (gst_va_filter_open (filter)) {
@@ -832,24 +829,9 @@ gst_va_deinterlace_register (GstPlugin * plugin, GstVaDevice * device,
 
   type_info.class_data = cdata;
 
-  type_name = g_strdup ("GstVaDeinterlace");
-  feature_name = g_strdup ("vadeinterlace");
-
-  /* The first postprocessor to be registered should use a constant
-   * name, like vadeinterlace, for any additional postprocessors, we
-   * create unique names, using inserting the render device name. */
-  if (g_type_from_name (type_name)) {
-    gchar *basename = g_path_get_basename (device->render_device_path);
-    g_free (type_name);
-    g_free (feature_name);
-    type_name = g_strdup_printf ("GstVa%sDeinterlace", basename);
-    feature_name = g_strdup_printf ("va%sdeinterlace", basename);
-    cdata->description = basename;
-
-    /* lower rank for non-first device */
-    if (rank > 0)
-      rank--;
-  }
+  gst_va_create_feature_name (device, "GstVaDeinterlace", "GstVa%sDeinterlace",
+      &type_name, "vadeinterlace", "va%sdeinterlace", &feature_name,
+      &cdata->description, &rank);
 
   g_once (&debug_once, _register_debug_category, NULL);
 

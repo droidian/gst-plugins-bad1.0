@@ -73,6 +73,8 @@ struct _GstMpeg2DecoderClass
    * @decoder: a #GstMpeg2Decoder
    * @seq: a #GstMpegVideoSequenceHdr
    * @seq_ext: a #GstMpegVideoSequenceExt
+   * @max_dpb_size: the size of dpb including preferred output delay
+   *   by subclass reported via get_preferred_output_delay method.
    *
    * Notifies subclass of SPS update
    *
@@ -82,7 +84,8 @@ struct _GstMpeg2DecoderClass
                                      const GstMpegVideoSequenceHdr * seq,
                                      const GstMpegVideoSequenceExt * seq_ext,
                                      const GstMpegVideoSequenceDisplayExt * seq_display_ext,
-                                     const GstMpegVideoSequenceScalableExt * seq_scalable_ext);
+                                     const GstMpegVideoSequenceScalableExt * seq_scalable_ext,
+                                     gint max_dpb_size);
 
   /**
    * GstMpeg2DecoderClass::new_picture:
@@ -92,7 +95,7 @@ struct _GstMpeg2DecoderClass
    *
    * Optional. Called whenever new #GstMpeg2Picture is created.
    * Subclass can set implementation specific user data
-   * on the #GstMpeg2Picture via gst_mpeg2_picture_set_user_data()
+   * on the #GstMpeg2Picture via gst_mpeg2_picture_set_user_data
    *
    * Since: 1.20
    */
@@ -108,12 +111,12 @@ struct _GstMpeg2DecoderClass
    *
    * Called when a new field picture is created for interlaced field picture.
    * Subclass can attach implementation specific user data on @second_field via
-   * gst_mpeg2_picture_set_user_data()
+   * gst_mpeg2_picture_set_user_data
    *
    * Since: 1.20
    */
   GstFlowReturn (*new_field_picture)  (GstMpeg2Decoder * decoder,
-                                       const GstMpeg2Picture * first_field,
+                                       GstMpeg2Picture * first_field,
                                        GstMpeg2Picture * second_field);
 
   /**

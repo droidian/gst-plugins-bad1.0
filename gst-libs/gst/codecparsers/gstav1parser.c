@@ -67,10 +67,6 @@
  * should call gst_av1_parser_reference_frame_update() to update the parser's inside
  * state(such as reference information, global segmentation information, etc).
  *
- * Note: If the frame is actived by show_existing_frame in #GST_AV1_OBU_FRAME_HEADER,
- * the function of gst_av1_parser_reference_frame_loading() should be called before
- * really showing that frame.
- *
  * @since: 1.18.00
  */
 
@@ -548,7 +544,7 @@ gst_av1_parse_reset_state (GstAV1Parser * parser, gboolean free_sps)
     parser->state.sequence_changed = FALSE;
 
     if (parser->seq_header) {
-      g_slice_free (GstAV1SequenceHeaderOBU, parser->seq_header);
+      g_free (parser->seq_header);
       parser->seq_header = NULL;
     }
   }
@@ -701,7 +697,7 @@ gst_av1_parser_identify_one_obu (GstAV1Parser * parser, const guint8 * data,
   }
 
   if (!size) {
-    return ret = GST_AV1_PARSER_NO_MORE_DATA;
+    ret = GST_AV1_PARSER_NO_MORE_DATA;
     goto error;
   }
 
@@ -803,8 +799,7 @@ gst_av1_parser_identify_one_obu (GstAV1Parser * parser, const guint8 * data,
 
     if (obu_length == 0) {
       /* An empty obu? let continue to the next */
-      ret = GST_AV1_PARSER_DROP;
-      goto error;
+      return GST_AV1_PARSER_DROP;
     }
   }
 
@@ -885,8 +880,7 @@ gst_av1_parser_identify_one_obu (GstAV1Parser * parser, const guint8 * data,
         (parser->state.operating_point_idc >> (obu->header.obu_spatial_id +
             8)) & 1;
     if (!inTemporalLayer || !inSpatialLayer) {
-      ret = GST_AV1_PARSER_DROP;
-      goto error;
+      return GST_AV1_PARSER_DROP;
     }
   }
 
@@ -1239,7 +1233,7 @@ gst_av1_parser_parse_sequence_header_obu (GstAV1Parser * parser,
       seq_header->operating_points[i].idc = AV1_READ_BITS (br, 12);
       seq_header->operating_points[i].seq_level_idx = AV1_READ_BITS (br, 5);
       if (!av1_seq_level_idx_is_valid
-          (seq_header->operating_points[0].seq_level_idx)) {
+          (seq_header->operating_points[i].seq_level_idx)) {
         GST_INFO ("The seq_level_idx is unsupported");
         retval = GST_AV1_PARSER_BITSTREAM_ERROR;
         goto error;
@@ -1446,16 +1440,14 @@ gst_av1_parser_parse_sequence_header_obu (GstAV1Parser * parser,
             sizeof (GstAV1SequenceHeaderOBU)))
       goto success;
 
-    g_slice_free (GstAV1SequenceHeaderOBU, parser->seq_header);
+    g_free (parser->seq_header);
   }
 
-  parser->seq_header = g_slice_dup (GstAV1SequenceHeaderOBU, seq_header);
+  parser->seq_header = g_memdup2 (seq_header, sizeof (GstAV1SequenceHeaderOBU));
   gst_av1_parse_reset_state (parser, FALSE);
 
   /* choose_operating_point() set the operating_point */
-  if (parser->state.operating_point < 0 ||
-      parser->state.operating_point >
-      seq_header->operating_points_cnt_minus_1) {
+  if (parser->state.operating_point > seq_header->operating_points_cnt_minus_1) {
     GST_WARNING ("Invalid operating_point %d set by user, just use 0",
         parser->state.operating_point);
     parser->state.operating_point_idc = seq_header->operating_points[0].idc;
@@ -1789,7 +1781,8 @@ gst_av1_parser_parse_metadata_obu (GstAV1Parser * parser, GstAV1OBU * obu,
           &bit_reader, &(metadata->timecode));
       break;
     default:
-      return GST_AV1_PARSER_BITSTREAM_ERROR;
+      GST_WARNING ("Unknown metadata type %u", metadata->metadata_type);
+      return GST_AV1_PARSER_OK;
   }
 
   if (retval != GST_AV1_PARSER_OK)
@@ -2136,20 +2129,37 @@ gst_av1_parse_segmentation_params (GstAV1Parser * parser, GstBitReader * br,
         }
       }
     } else {
-      /* Copy it from prime_ref */
-      g_assert (frame_header->primary_ref_frame != GST_AV1_PRIMARY_REF_NONE);
-      g_assert (parser->state.ref_info.
-          entry[frame_header->ref_frame_idx[frame_header->primary_ref_frame]].
-          ref_valid);
-      memcpy (seg_params,
-          &parser->state.ref_info.
-          entry[frame_header->ref_frame_idx[frame_header->
-                  primary_ref_frame]].ref_segmentation_params,
-          sizeof (GstAV1SegmenationParams));
+      gint8 ref_idx;
+      GstAV1SegmenationParams *ref_seg_params;
 
-      seg_params->segmentation_update_map = 0;
-      seg_params->segmentation_temporal_update = 0;
-      seg_params->segmentation_update_data = 0;
+      /* Copy it from prime_ref */
+      if (frame_header->primary_ref_frame >= GST_AV1_PRIMARY_REF_NONE) {
+        GST_WARNING ("Invalid primary_ref_frame %d",
+            frame_header->primary_ref_frame);
+        return GST_AV1_PARSER_BITSTREAM_ERROR;
+      }
+
+      ref_idx = frame_header->ref_frame_idx[frame_header->primary_ref_frame];
+      if (ref_idx >= GST_AV1_NUM_REF_FRAMES || ref_idx < 0) {
+        GST_WARNING ("Invalid ref_frame_idx %d", ref_idx);
+        return GST_AV1_PARSER_BITSTREAM_ERROR;
+      }
+
+      if (!parser->state.ref_info.entry[ref_idx].ref_valid) {
+        GST_WARNING ("Reference frame at index %d is unavailable", ref_idx);
+        return GST_AV1_PARSER_BITSTREAM_ERROR;
+      }
+
+      ref_seg_params =
+          &parser->state.ref_info.entry[ref_idx].ref_segmentation_params;
+
+      for (i = 0; i < GST_AV1_MAX_SEGMENTS; i++) {
+        for (j = 0; j < GST_AV1_SEG_LVL_MAX; j++) {
+          seg_params->feature_enabled[i][j] =
+              ref_seg_params->feature_enabled[i][j];
+          seg_params->feature_data[i][j] = ref_seg_params->feature_data[i][j];
+        }
+      }
     }
   } else {
     seg_params->segmentation_update_map = 0;
@@ -2250,7 +2260,9 @@ gst_av1_parse_tile_info (GstAV1Parser * parser, GstBitReader * br,
     tile_width_sb = (sb_cols + (1 << parser->state.tile_cols_log2) -
         1) >> parser->state.tile_cols_log2;
     i = 0;
-    for (start_sb = 0; start_sb < sb_cols; start_sb += tile_width_sb) {
+    /* Fill mi_col_starts[] and make sure to not exceed array range */
+    for (start_sb = 0; start_sb < sb_cols && i < GST_AV1_MAX_TILE_COLS;
+        start_sb += tile_width_sb) {
       parser->state.mi_col_starts[i] = start_sb << sb_shift;
       i += 1;
     }
@@ -2279,7 +2291,9 @@ gst_av1_parse_tile_info (GstAV1Parser * parser, GstBitReader * br,
     tile_height_sb = (sb_rows + (1 << parser->state.tile_rows_log2) -
         1) >> parser->state.tile_rows_log2;
     i = 0;
-    for (start_sb = 0; start_sb < sb_rows; start_sb += tile_height_sb) {
+    /* Fill mi_row_starts[] and make sure to not exceed array range */
+    for (start_sb = 0; start_sb < sb_rows && i < GST_AV1_MAX_TILE_ROWS;
+        start_sb += tile_height_sb) {
       parser->state.mi_row_starts[i] = start_sb << sb_shift;
       i += 1;
     }
@@ -2294,7 +2308,8 @@ gst_av1_parse_tile_info (GstAV1Parser * parser, GstBitReader * br,
   } else {
     widest_tile_sb = 0;
     start_sb = 0;
-    for (i = 0; start_sb < sb_cols; i++) {
+    /* Fill mi_col_starts[] and make sure to not exceed array range */
+    for (i = 0; start_sb < sb_cols && i < GST_AV1_MAX_TILE_COLS; i++) {
       parser->state.mi_col_starts[i] = start_sb << sb_shift;
       max_width = MIN (sb_cols - start_sb, max_tile_width_sb);
       tile_info->width_in_sbs_minus_1[i] =
@@ -2319,7 +2334,8 @@ gst_av1_parse_tile_info (GstAV1Parser * parser, GstBitReader * br,
     max_tile_height_sb = MAX (max_tile_area_sb / widest_tile_sb, 1);
 
     start_sb = 0;
-    for (i = 0; start_sb < sb_rows; i++) {
+    /* Fill mi_row_starts[] and make sure to not exceed array range */
+    for (i = 0; start_sb < sb_rows && i < GST_AV1_MAX_TILE_ROWS; i++) {
       parser->state.mi_row_starts[i] = start_sb << sb_shift;
       max_height = MIN (sb_rows - start_sb, max_tile_height_sb);
       tile_info->height_in_sbs_minus_1[i] =
@@ -3400,6 +3416,7 @@ gst_av1_set_frame_refs (GstAV1Parser * parser,
         frame_header->order_hint);
 
   last_order_hint = shifted_order_hints[frame_header->last_frame_idx];
+  earliest_order_hint = shifted_order_hints[frame_header->gold_frame_idx];
 
   /* === Backward Reference Frames === */
   /* The ALTREF_FRAME reference is set to be a backward
@@ -3422,7 +3439,6 @@ gst_av1_set_frame_refs (GstAV1Parser * parser,
   /* The BWDREF_FRAME reference is set to be a backward reference
      to the closest frame. */
   ref = -1;
-  earliest_order_hint = last_order_hint;
   for (i = 0; i < GST_AV1_NUM_REF_FRAMES; i++) {
     hint = shifted_order_hints[i];
     if (!used_frame[i] && hint >= cur_frame_hint
@@ -3440,7 +3456,6 @@ gst_av1_set_frame_refs (GstAV1Parser * parser,
   /* The ALTREF2_FRAME reference is set to the next closest
      backward reference. */
   ref = -1;
-  earliest_order_hint = last_order_hint;
   for (i = 0; i < GST_AV1_NUM_REF_FRAMES; i++) {
     hint = shifted_order_hints[i];
     if (!used_frame[i] && hint >= cur_frame_hint
@@ -3459,7 +3474,6 @@ gst_av1_set_frame_refs (GstAV1Parser * parser,
 
   /* The remaining references are set to be forward references
      in anti-chronological order. */
-  last_order_hint = 0;
   for (i = 0; i < GST_AV1_REFS_PER_FRAME - 2; i++) {
     GstAV1ReferenceFrame ref_frame = ref_frame_list[i];
     if (frame_header->ref_frame_idx[ref_frame - GST_AV1_REF_LAST_FRAME] < 0) {
@@ -3483,7 +3497,6 @@ gst_av1_set_frame_refs (GstAV1Parser * parser,
   /* Finally, any remaining references are set to the reference frame
      with smallest output order. */
   ref = -1;
-  earliest_order_hint = cur_frame_hint * 2;
   for (i = 0; i < GST_AV1_NUM_REF_FRAMES; i++) {
     hint = shifted_order_hints[i];
     if (ref < 0 || hint < earliest_order_hint) {
@@ -3494,6 +3507,64 @@ gst_av1_set_frame_refs (GstAV1Parser * parser,
   for (i = 0; i < GST_AV1_REFS_PER_FRAME; i++)
     if (frame_header->ref_frame_idx[i] < 0)
       frame_header->ref_frame_idx[i] = ref;
+}
+
+/* 7.21 */
+static void
+gst_av1_parser_reference_frame_loading (GstAV1Parser * parser,
+    GstAV1FrameHeaderOBU * frame_header)
+{
+  GstAV1ReferenceFrameInfo *ref_info = &(parser->state.ref_info);
+  gint idx = frame_header->frame_to_show_map_idx;
+  GstAV1TileInfo *ref_tile_info = &ref_info->entry[idx].ref_tile_info;
+  const gint all_frames = (1 << GST_AV1_NUM_REF_FRAMES) - 1;
+
+  /* copy the relevant frame information as these will be needed by
+   * all subclasses. */
+  frame_header->frame_type = ref_info->entry[idx].ref_frame_type;
+  frame_header->upscaled_width = ref_info->entry[idx].ref_upscaled_width;
+  frame_header->frame_width = ref_info->entry[idx].ref_frame_width;
+  frame_header->frame_height = ref_info->entry[idx].ref_frame_height;
+  frame_header->render_width = ref_info->entry[idx].ref_render_width;
+  frame_header->render_height = ref_info->entry[idx].ref_render_height;
+
+  if (parser->seq_header->film_grain_params_present)
+    frame_header->film_grain_params =
+        ref_info->entry[idx].ref_film_grain_params;
+
+  /* the remaining is only relevant to ensure proper state update and only
+   * keyframe updates the state. */
+  if (frame_header->frame_type != GST_AV1_KEY_FRAME)
+    return;
+
+  frame_header->refresh_frame_flags = all_frames;
+  frame_header->current_frame_id = ref_info->entry[idx].ref_frame_id;
+  frame_header->order_hint = ref_info->entry[idx].ref_order_hint;
+  frame_header->segmentation_params =
+      ref_info->entry[idx].ref_segmentation_params;
+  frame_header->global_motion_params =
+      ref_info->entry[idx].ref_global_motion_params;
+  frame_header->loop_filter_params = ref_info->entry[idx].ref_lf_params;
+  frame_header->tile_info = *ref_tile_info;
+
+  parser->state.current_frame_id = ref_info->entry[idx].ref_frame_id;
+  parser->state.upscaled_width = ref_info->entry[idx].ref_upscaled_width;
+  parser->state.frame_width = ref_info->entry[idx].ref_frame_width;
+  parser->state.frame_height = ref_info->entry[idx].ref_frame_height;
+  parser->state.render_width = ref_info->entry[idx].ref_render_width;
+  parser->state.render_height = ref_info->entry[idx].ref_render_height;
+  parser->state.mi_cols = ref_info->entry[idx].ref_mi_cols;
+  parser->state.mi_rows = ref_info->entry[idx].ref_mi_rows;
+
+  memcpy (parser->state.mi_col_starts, ref_tile_info->mi_col_starts,
+      sizeof (guint32) * (GST_AV1_MAX_TILE_COLS + 1));
+  memcpy (parser->state.mi_row_starts, ref_tile_info->mi_row_starts,
+      sizeof (guint32) * (GST_AV1_MAX_TILE_ROWS + 1));
+  parser->state.tile_cols_log2 = ref_tile_info->tile_cols_log2;
+  parser->state.tile_cols = ref_tile_info->tile_cols;
+  parser->state.tile_rows_log2 = ref_tile_info->tile_rows_log2;
+  parser->state.tile_rows = ref_tile_info->tile_rows;
+  parser->state.tile_size_bytes = ref_tile_info->tile_size_bytes;
 }
 
 /* 5.9.2 */
@@ -3581,16 +3652,7 @@ gst_av1_parse_uncompressed_frame_header (GstAV1Parser * parser, GstAV1OBU * obu,
         }
       }
 
-      frame_header->frame_type =
-          ref_info->entry[frame_header->frame_to_show_map_idx].ref_frame_type;
-      if (frame_header->frame_type == GST_AV1_KEY_FRAME) {
-        frame_header->refresh_frame_flags = all_frames;
-      }
-
-      /* just use the frame_to_show's grain_params
-       * if (seq_header->film_grain_params_present)
-       *     load_grain_params () */
-
+      gst_av1_parser_reference_frame_loading (parser, frame_header);
       goto success;
     }
 
@@ -4174,74 +4236,6 @@ error:
   return retval;
 }
 
-/* 7.21 */
-/**
- * gst_av1_parser_reference_frame_loading:
- * @parser: the #GstAV1Parser
- * @frame_header: a #GstAV1FrameHeaderOBU to load
- *
- * Load the context of @frame_header to parser's state. This function is
- * used when we want to show already parsed frames before.
- *
- * Returns: The #GstAV1ParserResult.
- *
- * Since: 1.18
- */
-GstAV1ParserResult
-gst_av1_parser_reference_frame_loading (GstAV1Parser * parser,
-    GstAV1FrameHeaderOBU * frame_header)
-{
-  GstAV1ReferenceFrameInfo *ref_info;
-  GstAV1TileInfo *ref_tile_info;
-
-  g_return_val_if_fail (parser != NULL, GST_AV1_PARSER_INVALID_OPERATION);
-  g_return_val_if_fail (frame_header != NULL, GST_AV1_PARSER_INVALID_OPERATION);
-
-  if (!parser->seq_header) {
-    GST_WARNING ("Missing OBU Reference: seq_header");
-    return GST_AV1_PARSER_MISSING_OBU_REFERENCE;
-  }
-
-  ref_info = &(parser->state.ref_info);
-
-  if (frame_header->frame_to_show_map_idx > GST_AV1_NUM_REF_FRAMES - 1)
-    return GST_AV1_PARSER_BITSTREAM_ERROR;
-
-  g_assert (ref_info->entry[frame_header->frame_to_show_map_idx].ref_valid);
-
-  parser->state.current_frame_id =
-      ref_info->entry[frame_header->frame_to_show_map_idx].ref_frame_id;
-  parser->state.upscaled_width =
-      ref_info->entry[frame_header->frame_to_show_map_idx].ref_upscaled_width;
-  parser->state.frame_width =
-      ref_info->entry[frame_header->frame_to_show_map_idx].ref_frame_width;
-  parser->state.frame_height =
-      ref_info->entry[frame_header->frame_to_show_map_idx].ref_frame_height;
-  parser->state.render_width =
-      ref_info->entry[frame_header->frame_to_show_map_idx].ref_render_width;
-  parser->state.render_height =
-      ref_info->entry[frame_header->frame_to_show_map_idx].ref_render_height;
-  parser->state.mi_cols =
-      ref_info->entry[frame_header->frame_to_show_map_idx].ref_mi_cols;
-  parser->state.mi_rows =
-      ref_info->entry[frame_header->frame_to_show_map_idx].ref_mi_rows;
-
-  ref_tile_info =
-      &ref_info->entry[frame_header->frame_to_show_map_idx].ref_tile_info;
-
-  memcpy (parser->state.mi_col_starts, ref_tile_info->mi_col_starts,
-      sizeof (guint32) * (GST_AV1_MAX_TILE_COLS + 1));
-  memcpy (parser->state.mi_row_starts, ref_tile_info->mi_row_starts,
-      sizeof (guint32) * (GST_AV1_MAX_TILE_ROWS + 1));
-  parser->state.tile_cols_log2 = ref_tile_info->tile_cols_log2;
-  parser->state.tile_cols = ref_tile_info->tile_cols;
-  parser->state.tile_rows_log2 = ref_tile_info->tile_rows_log2;
-  parser->state.tile_rows = ref_tile_info->tile_rows;
-  parser->state.tile_size_bytes = ref_tile_info->tile_size_bytes;
-
-  return GST_AV1_PARSER_OK;
-}
-
 /**
  * gst_av1_parser_reference_frame_update:
  * @parser: the #GstAV1Parser
@@ -4350,6 +4344,13 @@ gst_av1_parser_parse_tile_list_obu (GstAV1Parser * parser,
   tile_list->output_frame_width_in_tiles_minus_1 = AV1_READ_BITS (br, 8);
   tile_list->output_frame_height_in_tiles_minus_1 = AV1_READ_BITS (br, 8);
   tile_list->tile_count_minus_1 = AV1_READ_BITS (br, 16);
+  if (tile_list->tile_count_minus_1 + 1 > GST_AV1_MAX_TILE_COUNT) {
+    GST_WARNING ("Invalid tile_count_minus_1 %d",
+        tile_list->tile_count_minus_1);
+    retval = GST_AV1_PARSER_BITSTREAM_ERROR;
+    goto error;
+  }
+
   for (tile = 0; tile <= tile_list->tile_count_minus_1; tile++) {
     if (AV1_REMAINING_BITS (br) < 8 + 8 + 8 + 16) {
       retval = GST_AV1_PARSER_NO_MORE_DATA;
@@ -4691,7 +4692,7 @@ gst_av1_parser_set_operating_point (GstAV1Parser * parser,
 GstAV1Parser *
 gst_av1_parser_new (void)
 {
-  return g_slice_new0 (GstAV1Parser);
+  return g_new0 (GstAV1Parser, 1);
 }
 
 /**
@@ -4710,6 +4711,6 @@ gst_av1_parser_free (GstAV1Parser * parser)
   g_return_if_fail (parser != NULL);
 
   if (parser->seq_header)
-    g_slice_free (GstAV1SequenceHeaderOBU, parser->seq_header);
-  g_slice_free (GstAV1Parser, parser);
+    g_free (parser->seq_header);
+  g_free (parser);
 }

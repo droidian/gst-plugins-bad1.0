@@ -62,6 +62,11 @@
 GST_DEBUG_CATEGORY_STATIC (gst_fluid_dec_debug);
 #define GST_CAT_DEFAULT gst_fluid_dec_debug
 
+#if !GST_HAVE_FLUIDSYNTH_VERSION(2, 2, 0)
+#define fluid_synth_chorus_on(synth,fx_group,on) fluid_synth_set_chorus_on(synth,on)
+#define fluid_synth_reverb_on(synth,fx_group,on) fluid_synth_set_reverb_on(synth,on)
+#endif
+
 enum
 {
   /* FILL ME */
@@ -200,8 +205,8 @@ gst_fluid_dec_init (GstFluidDec * filter)
   filter->synth = new_fluid_synth (filter->settings);
   filter->sf = -1;
 
-  fluid_synth_set_chorus_on (filter->synth, filter->synth_chorus);
-  fluid_synth_set_reverb_on (filter->synth, filter->synth_reverb);
+  fluid_synth_chorus_on (filter->synth, -1, filter->synth_chorus);
+  fluid_synth_reverb_on (filter->synth, -1, filter->synth_reverb);
   fluid_synth_set_gain (filter->synth, filter->synth_gain);
   fluid_synth_set_polyphony (filter->synth, filter->synth_polyphony);
 }
@@ -634,11 +639,11 @@ gst_fluid_dec_set_property (GObject * object, guint prop_id,
       break;
     case PROP_SYNTH_CHORUS:
       fluiddec->synth_chorus = g_value_get_boolean (value);
-      fluid_synth_set_chorus_on (fluiddec->synth, fluiddec->synth_chorus);
+      fluid_synth_chorus_on (fluiddec->synth, -1, fluiddec->synth_chorus);
       break;
     case PROP_SYNTH_REVERB:
       fluiddec->synth_reverb = g_value_get_boolean (value);
-      fluid_synth_set_reverb_on (fluiddec->synth, fluiddec->synth_reverb);
+      fluid_synth_reverb_on (fluiddec->synth, -1, fluiddec->synth_reverb);
       break;
     case PROP_SYNTH_GAIN:
       fluiddec->synth_gain = g_value_get_double (value);
@@ -736,16 +741,6 @@ fluiddec_element_init (GstPlugin * plugin)
   fluid_set_log_function (FLUID_DBG, NULL, NULL);
 #endif
 
-#if GST_HAVE_FLUIDSYNTH_VERSION(1, 1, 9)
-  {
-    /* Disable all audio drivers so new_fluid_settings() does not probe them.
-     * This can crash if FluidSynth is already in use. */
-    const char *empty[] = { NULL };
-    if (fluid_audio_driver_register (empty) != FLUID_OK) {
-      GST_WARNING ("Failed to clear audio drivers");
-    }
-  }
-#endif
   return gst_element_register (plugin, "fluiddec",
       GST_RANK_SECONDARY, GST_TYPE_FLUID_DEC);
 }

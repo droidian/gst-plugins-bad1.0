@@ -69,7 +69,7 @@ struct _GstVp8Decoder
  * @new_picture:       Optional.
  *                     Called whenever new #GstVp8Picture is created.
  *                     Subclass can set implementation specific user data
- *                     on the #GstVp8Picture via gst_vp8_picture_set_user_data()
+ *                     on the #GstVp8Picture via gst_vp8_picture_set_user_data
  * @start_picture:     Optional.
  *                     Called per one #GstVp8Picture to notify subclass to prepare
  *                     decoding process for the #GstVp8Picture
@@ -89,7 +89,8 @@ struct _GstVp8DecoderClass
   GstVideoDecoderClass parent_class;
 
   GstFlowReturn   (*new_sequence)      (GstVp8Decoder * decoder,
-                                        const GstVp8FrameHdr * frame_hdr);
+                                        const GstVp8FrameHdr * frame_hdr,
+                                        gint max_dpb_size);
 
   /**
    * GstVp8DecoderClass:new_picture:

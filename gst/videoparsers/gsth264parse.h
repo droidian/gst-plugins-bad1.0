@@ -117,6 +117,7 @@ struct _GstH264Parse
   guint8 sei_pic_struct;
   guint8 sei_pic_struct_pres_flag;
   guint field_pic_flag;
+  gboolean ignore_vui_fps;
 
   /* cached timestamps */
   /* (trying to) track upstream dts and interpolate */
@@ -157,6 +158,7 @@ struct _GstH264Parse
   gboolean first_in_bundle;
 
   GstVideoParseUserData user_data;
+  GstVideoParseUserDataUnregistered user_data_unregistered;
 
   GstVideoMasteringDisplayInfo mastering_display_info;
   guint mastering_display_info_state;

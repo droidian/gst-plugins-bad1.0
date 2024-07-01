@@ -25,9 +25,7 @@
 #include <gst/gst.h>
 #include <gst/video/video.h>
 #include <gst/d3d11/gstd3d11.h>
-#include "gstd3d11converter.h"
 #include "gstd3d11overlaycompositor.h"
-#include "gstd3d11videoprocessor.h"
 #include "gstd3d11pluginutils.h"
 
 G_BEGIN_DECLS
@@ -68,14 +66,9 @@ typedef struct
   guint texture_misc_flags;
   guint64 acquire_key;
   guint64 release_key;
+  gboolean use_keyed_mutex;
 
-  ID3D11Texture2D *texture;
-  IDXGIKeyedMutex *keyed_mutex;
-  ID3D11VideoProcessorOutputView *pov;
-  ID3D11RenderTargetView *rtv;
-
-  ID3D11VideoProcessorOutputView *fallback_pov;
-  ID3D11RenderTargetView *fallback_rtv;
+  GstBuffer *render_target;
 } GstD3D11WindowSharedHandleData;
 
 struct _GstD3D11Window
@@ -93,21 +86,19 @@ struct _GstD3D11Window
   GstD3D11WindowFullscreenToggleMode fullscreen_toggle_mode;
   gboolean requested_fullscreen;
   gboolean fullscreen;
-  gboolean render_stats;
+  gboolean emit_present;
 
   GstVideoInfo info;
   GstVideoInfo render_info;
-  GstD3D11VideoProcessor *processor;
   GstD3D11Converter *converter;
   GstD3D11OverlayCompositor *compositor;
-
-  gboolean processor_in_use;
 
   /* calculated rect with aspect ratio and window area */
   RECT render_rect;
 
   /* input resolution */
   RECT input_rect;
+  RECT prev_input_rect;
 
   /* requested rect via gst_d3d11_window_render */
   GstVideoRectangle rect;
@@ -116,13 +107,22 @@ struct _GstD3D11Window
   guint surface_height;
 
   IDXGISwapChain *swap_chain;
-  ID3D11RenderTargetView *rtv;
-  ID3D11VideoProcessorOutputView *pov;
+  GstBuffer *backbuffer;
   DXGI_FORMAT dxgi_format;
+  GstBuffer *msaa_buffer;
 
   GstBuffer *cached_buffer;
   gboolean first_present;
-  gboolean allow_tearing;
+
+  GstVideoOrientationMethod method;
+  gfloat fov;
+  gboolean ortho;
+  gfloat rotation_x;
+  gfloat rotation_y;
+  gfloat rotation_z;
+  gfloat scale_x;
+  gfloat scale_y;
+  GstD3D11MSAAMode msaa;
 };
 
 struct _GstD3D11WindowClass
@@ -153,11 +153,12 @@ struct _GstD3D11WindowClass
                                            guint width,
                                            guint height);
 
-  gboolean      (*prepare)                (GstD3D11Window * window,
+  GstFlowReturn (*prepare)                (GstD3D11Window * window,
                                            guint display_width,
                                            guint display_height,
                                            GstCaps * caps,
-                                           gboolean * video_processor_available,
+                                           GstStructure * config,
+                                           DXGI_FORMAT display_format,
                                            GError ** error);
 
   void          (*unprepare)              (GstD3D11Window * window);
@@ -185,11 +186,26 @@ void          gst_d3d11_window_set_render_rectangle (GstD3D11Window * window,
 void          gst_d3d11_window_set_title            (GstD3D11Window * window,
                                                      const gchar *title);
 
-gboolean      gst_d3d11_window_prepare              (GstD3D11Window * window,
+void          gst_d3d11_window_set_orientation      (GstD3D11Window * window,
+                                                     gboolean immediate,
+                                                     GstVideoOrientationMethod method,
+                                                     gfloat fov,
+                                                     gboolean ortho,
+                                                     gfloat rotation_x,
+                                                     gfloat rotation_y,
+                                                     gfloat rotation_z,
+                                                     gfloat scale_x,
+                                                     gfloat scale_y);
+
+void          gst_d3d11_window_set_msaa_mode        (GstD3D11Window * window,
+                                                     GstD3D11MSAAMode mode);
+
+GstFlowReturn gst_d3d11_window_prepare              (GstD3D11Window * window,
                                                      guint display_width,
                                                      guint display_height,
                                                      GstCaps * caps,
-                                                     gboolean * video_processor_available,
+                                                     GstStructure * config,
+                                                     DXGI_FORMAT display_format,
                                                      GError ** error);
 
 GstFlowReturn gst_d3d11_window_render               (GstD3D11Window * window,

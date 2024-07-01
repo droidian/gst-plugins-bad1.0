@@ -12,6 +12,7 @@ codecs_sources = files(
   'gstav1decoder.c',
   'gstav1picture.c',
   'gstvp9statefulparser.c',
+  'gstcodecpicture.c',
 )
 
 codecs_headers = files(
@@ -28,6 +29,7 @@ codecs_headers = files(
   'gstav1decoder.h',
   'gstav1picture.h',
   'gstvp9statefulparser.h',
+  'gstcodecpicture.h',
 )
 
 cp_args = [
@@ -72,10 +74,11 @@ if build_gir
   library_def += {'gir': [gir]}
   if not static_build
     codecs_gir = gnome.generate_gir(gstcodecs, kwargs: gir)
+    library_def += {'gir_targets':  library_def.get('gir_targets', []) + [codecs_gir]}
     gen_sources += codecs_gir
   endif
 endif
-libraries += [[pkg_name, library_def]]
+gst_libraries += [[pkg_name, library_def]]
 
 gstcodecs_dep = declare_dependency(link_with : gstcodecs,
   include_directories : [libsinc],

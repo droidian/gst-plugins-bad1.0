@@ -28,16 +28,14 @@
 
 #include "gstopenalelements.h"
 
-#include <gst/gst-i18n-plugin.h>
+#include <glib/gi18n-lib.h>
 
 
 static gboolean
 plugin_init (GstPlugin * plugin)
 {
-  gboolean ret = FALSE;
-
-  ret |= GST_ELEMENT_REGISTER (openalsink, plugin);
-  ret |= GST_ELEMENT_REGISTER (openalsrc, plugin);
+  GST_ELEMENT_REGISTER (openalsink, plugin);
+  GST_ELEMENT_REGISTER (openalsrc, plugin);
 
   return TRUE;
 }
