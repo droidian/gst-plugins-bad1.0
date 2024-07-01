@@ -1,3 +1,138 @@
+=== release 1.24.5 ===
+
+2024-06-20 12:54:15 +0100  Tim-Philipp Müller <tim@centricular.com>
+
+	* NEWS:
+	* RELEASE:
+	* gst-plugins-bad.doap:
+	* meson.build:
+	  Release 1.24.5
+
+2024-06-18 09:10:16 +0200  Edward Hervey <edward@centricular.com>
+
+	* gst/mpegtsdemux/mpegtspacketizer.c:
+	  tsdemux: Fix maximum PCR/DTS values
+	  * PTS/DTS are stored as 33 bit
+	  * PCR is 33bit multiplied by 300
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/7058>
+
+2024-06-18 05:53:19 +0800  He Junyan <junyan.he@intel.com>
+
+	* gst-libs/gst/codecparsers/gstav1parser.c:
+	  av1parse: Do not return error when expectedFrameId mismatch
+	  According to the SPEC:
+	  The frame id numbers (represented in display_frame_id, current_frame_id,
+	  and RefFrameId[ i ]) are not needed by the decoding process, but allow
+	  decoders to spot when frames have been missed and take an appropriate action.
+	  So we should just print out warning and should not return error in parser when
+	  mismatching. The decoder itself is already robust to handle the reference missing.
+	  Fixes #3622
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/7052>
+
+2024-06-12 18:28:54 +0200  Piotr Brzeziński <piotr@centricular.com>
+
+	* sys/applemedia/vtdec.c:
+	  vtdec: Use GST_VIDEO_DECODER_ERROR instead of aborting when frame has an ERROR flag
+	  This was already being used in handle_frame() for errors that happen when queueing a frame for decoding,
+	  let's do the same when a frame is flagged with an error in the output callback.
+	  From quick testing, this makes seeking more reliable (previously, it would sometimes cause a decoding error
+	  and shut the whole decoder down due to GST_FLOW_ERROR).
+	  Also manually sets the max error count to actually stop processing if too many errors occur.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/7044>
+
+2024-03-26 15:24:31 +0100  Piotr Brzeziński <piotr@centricular.com>
+
+	* sys/applemedia/vtdec.c:
+	  vtdec: Handle some errors without stopping the decoder
+	  ReferenceMissingErr is not critical and the simplest solution is to just ignore it. The frame has
+	  the FrameDropped flag set when it occurs, so we can just drop it as usual.
+	  BadDataErr is also not immediately critical, but in its case let's set the ERROR flag,
+	  so the output loop can use GST_VIDEO_DECODER_ERROR to count and error out if it happens too many times.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/7044>
+
+2024-06-17 11:15:22 +0300  Sebastian Dröge <sebastian@centricular.com>
+
+	* ext/aom/gstav1dec.c:
+	  av1dec: Don't treat decoding errors as fatal and print more error details
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/7041>
+
+2024-06-13 09:11:30 -0500  Zach van Rijn <me@zv.io>
+
+	* gst/pcapparse/gstpcapparse.c:
+	  pcapparse: Avoid unaligned memory access
+	  Fixes: https://gitlab.freedesktop.org/gstreamer/gstreamer/-/issues/3602
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/7037>
+
+2024-05-31 13:07:51 +0200  Mathieu Duponchelle <mathieu@centricular.com>
+
+	* gst/codectimestamper/gstcodectimestamper.c:
+	  codectimestamper: never set DTS to NONE
+	  If we want to avoid the DTS going backward, then we can set DTS to
+	  last_dts as a last resort.
+	  Log a warning in this case
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/7033>
+
+2024-06-07 23:09:54 -0700  Khem Raj <raj.khem@gmail.com>
+
+	* sys/uvcgadget/configfs.c:
+	  uvcgadget: Use g_path_get_basename instead of libc basename
+	  Musl does not implement GNU basename and have fixed a bug where the
+	  prototype was leaked into string.h [1], which resullts in compile errors
+	  with GCC-14 and Clang-17+
+	  | sys/uvcgadget/configfs.c:262:21: error: call to undeclared function 'basename'
+	  ISO C99 and later do not support implicit function declarations [-Wimplicit-function-declaration]
+	  |   262 |     const char *v = basename (globbuf.gl_pathv[i]);
+	  |       |                     ^
+	  Use glib function instead makes it portable across musl and glibc on
+	  linux
+	  [1] https://git.musl-libc.org/cgit/musl/commit/?id=725e17ed6dff4d0cd22487bb64470881e86a92e7a
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/7028>
+
+2024-06-10 13:11:19 +0300  Sebastian Dröge <sebastian@centricular.com>
+
+	* ext/aom/gstav1enc.c:
+	  av1enc: Handle force-keyunit events properly by requesting keyframes
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/7022>
+
+2024-06-10 23:25:46 +0900  Seungha Yang <seungha@centricular.com>
+
+	* sys/d3d12/gstd3d12videosink.cpp:
+	  d3d12videosink: Disconnect window signal handler on dispose as intended
+	  Fixing typo
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/7014>
+
+2024-06-02 10:26:19 +0300  Sebastian Dröge <sebastian@centricular.com>
+
+	* ext/dtls/gstdtlssrtpenc.c:
+	  dtlssrtpenc: Don't crash if no pad name is provided when requesting a new pad
+	  It is mandatory to provide a valid pad name for dtlssrtpenc.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/6994>
+
+2024-05-30 01:30:58 +0900  Seungha Yang <seungha@centricular.com>
+
+	* sys/d3d12/gstd3d12bufferpool.cpp:
+	* sys/d3d12/gstd3d12memory.cpp:
+	  d3d12memory: Fix staging buffer alignment
+	  Not all GPUs can support arbitrary offset of
+	  D3D12_PLACED_SUBRESOURCE_FOOTPRINT when copying GPU memory between
+	  texture and buffer. Instead of calculating size/offset per plane,
+	  calculate the entire size and offsets at once.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/6973>
+
+2024-05-29 18:54:18 +0900  Seungha Yang <seungha@centricular.com>
+
+	* sys/d3d12/gstd3d12h264enc.cpp:
+	  d3d12encoder: Do not print error log for not-supported feature
+	  gst_d3d12_result() will print message with ERROR level if failed.
+	  Use FAILED/SUCCEEDED macros instead, since not-supported feature
+	  is not a critical error
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/6963>
+
+2024-05-29 13:51:27 +0300  Tim-Philipp Müller <tim@centricular.com>
+
+	* meson.build:
+	  Back to development after 1.24.4
+
 === release 1.24.4 ===
 
 2024-05-29 13:44:50 +0300  Tim-Philipp Müller <tim@centricular.com>
