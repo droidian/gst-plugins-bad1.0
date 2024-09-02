@@ -1,15 +1,14 @@
 #!/usr/bin/make -f
 
 include /usr/share/dpkg/default.mk
+include /usr/share/dpkg/pkg-info.mk
 
 export DEB_BUILD_MAINT_OPTIONS = hardening=+all
 export DEB_LDFLAGS_MAINT_APPEND = -Wl,-O1 -Wl,-z,defs
 export HOME=$(CURDIR)/fake-home
 
-# debian package version
-version=$(shell dpkg-parsechangelog | grep ^Version: | cut -d ' ' -f 2)
 # upstream version
-gst_version=$(shell echo $(version) | cut -d '-' -f 1)
+gst_version=$(shell echo $(DEB_VERSION) | cut -d '-' -f 1)
 
 built_binaries := $(shell dh_listpackages)
 
