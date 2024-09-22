@@ -1,3 +1,13 @@
+gst-plugins-bad1.0 (1.24.8-1) unstable; urgency=medium
+
+  [ Jeremy Bícha ]
+  * Remove unused Build-Depends: libiptcdata0-dev
+
+  [ Marc Leeman ]
+  * New upstream version 1.24.8
+
+ -- Marc Leeman <marc.leeman@gmail.com>  Thu, 19 Sep 2024 14:23:17 +0200
+
 gst-plugins-bad1.0 (1.24.7-1) unstable; urgency=medium
 
   * d/rules: debian-rules-parses-dpkg-parsechangelog

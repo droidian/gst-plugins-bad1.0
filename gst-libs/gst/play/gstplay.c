@@ -314,6 +314,7 @@ gst_play_init (GstPlay * self)
   self->context = g_main_context_new ();
   self->loop = g_main_loop_new (self->context, FALSE);
   self->api_bus = gst_bus_new ();
+  gst_object_set_name (GST_OBJECT (self->api_bus), "api_bus");
 
   /* *INDENT-OFF* */
   self->config = gst_structure_new_id (QUARK_CONFIG,
@@ -1422,8 +1423,12 @@ state_changed_cb (G_GNUC_UNUSED GstBus * bus, GstMessage * msg,
       }
 
       if (self->seek_position != GST_CLOCK_TIME_NONE) {
-        GST_DEBUG_OBJECT (self, "Seeking now that we reached PAUSED state");
-        gst_play_seek_internal_locked (self);
+        if (!self->media_info->seekable) {
+          GST_DEBUG_OBJECT (self, "Media is not seekable");
+        } else {
+          GST_DEBUG_OBJECT (self, "Seeking now that we reached PAUSED state");
+          gst_play_seek_internal_locked (self);
+        }
         g_mutex_unlock (&self->lock);
       } else if (!self->seek_pending) {
         g_mutex_unlock (&self->lock);
@@ -2627,6 +2632,7 @@ gst_play_main (gpointer data)
   }
 
   self->bus = bus = gst_element_get_bus (self->playbin);
+  gst_object_set_name (GST_OBJECT (self->bus), "playbin_bus");
   gst_bus_add_signal_watch (bus);
 
   g_signal_connect (G_OBJECT (bus), "message::error", G_CALLBACK (error_cb),

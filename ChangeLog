@@ -1,3 +1,171 @@
+=== release 1.24.8 ===
+
+2024-09-19 12:01:21 +0200  Tim-Philipp Müller <tim@centricular.com>
+
+	* NEWS:
+	* RELEASE:
+	* gst-plugins-bad.doap:
+	* meson.build:
+	  Release 1.24.8
+
+2024-09-17 14:48:03 +0200  Benjamin Gaignard <benjamin.gaignard@collabora.com>
+
+	* sys/v4l2codecs/gstv4l2codech265dec.c:
+	  v4l2codecs: h265: Minimize memory allocation
+	  Be smarter when allocating sink and source memory pools to reduce the
+	  memory footprint. Use gst_v4l2_decoder_get_render_delay() to know the
+	  need number of buffers for downstream element.
+	  Handle errors in case of memory allocation failures.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/7546>
+
+2024-09-17 18:31:30 +0300  Sebastian Dröge <sebastian@centricular.com>
+
+	* gst/mpegtsmux/gstbasetsmux.c:
+	  mpegtsmux: Fix refcounting issue when selecting the best pad
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/7539>
+
+2024-09-11 08:40:42 +0300  Sebastian Dröge <sebastian@centricular.com>
+
+	* gst/mpegtsmux/gstbasetsmux.c:
+	  mpegtsmux: Wait for data on all pads before deciding on a best pad unless timing out
+	  This makes sure that if upstream has different latencies that we're still
+	  outputting buffers with increasining timestamps across the different streams
+	  unless buffers are arriving after the latency deadline.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/7516>
+
+2024-09-05 22:07:24 +0300  Sebastian Dröge <sebastian@centricular.com>
+
+	* gst-libs/gst/adaptivedemux/gstadaptivedemux.c:
+	  video: Don't overshoot QoS earliest time by a factor of 2
+	  By setting the earliest time to timestamp + 2 * diff there would be a difference
+	  of 1 * diff between the current clock time and the earliest time the element
+	  would let through in the future. If e.g. a frame is arriving 30s late at the
+	  sink, then not just all frames up to that point would be dropped but also 30s of
+	  frames after the current clock time.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/7518>
+
+2024-08-30 14:59:14 -0400  Nicolas Dufresne <nicolas.dufresne@collabora.com>
+
+	* gst-libs/gst/wayland/gstwldisplay.c:
+	* gst-libs/gst/wayland/gstwlshmallocator.c:
+	* gst-libs/gst/wayland/gstwlshmallocator.h:
+	  wayland: Set a debug category for the shm allocator
+	  None was set, which meant the debug was associated with default.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/7494>
+
+2024-09-09 16:27:43 -0400  Nicolas Dufresne <nicolas.dufresne@collabora.com>
+
+	* ext/wayland/gstwaylandsink.c:
+	* gst-libs/gst/wayland/gstwlcontext.c:
+	* gst-libs/gst/wayland/gstwlcontext.h:
+	  wayland: Fix ABI break in WL context type name
+	  While transforming the internals of waylandsink into a library, the
+	  context type name was accidentally changed, causing an ABI break. Change
+	  it back to its original (as used by the libgstgl), and add support for
+	  the misnamed version as a backward compatibility measure.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/7494>
+
+2023-07-18 17:34:54 +0200  Michael Tretter <m.tretter@pengutronix.de>
+
+	* sys/uvcgadget/gstuvcsink.c:
+	  uvcsink: set cur_caps to upstream selected caps
+	  If the UVC gadget announces multiple formats in the descriptors the uvcsink
+	  doesn't select the actual format but let's the UVC hosts select the format.
+	  If the GStreamer pipeline is started before a UVC host selected the format,
+	  upstream decides on a format until the UVC host has decided. In this case, the
+	  current format needs to be set based on the caps from the caps event to be able
+	  to detect if the format selection by the UVC host requires a format change on
+	  the GStreamer pipeline.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/7484>
+
+2024-09-05 15:04:33 +0200  Michael Tretter <m.tretter@pengutronix.de>
+
+	* sys/uvcgadget/gstuvcsink.c:
+	  uvcsink: skip comparison with prev_caps if they are not set
+	  The uvcsink may be put into the READY state to start listening for UVC requests.
+	  Therefore, the UVC host may set a streaming format before the GStreamer pipeline
+	  is started and the uvcsink received a caps event. In this case, prev_caps will
+	  be NULL.
+	  If the EVENT_CAPS has not been received, skip the check if the format needs to
+	  be changed, since the sink will be started with the format selected by the UVC
+	  host, anyway.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/7484>
+
+2024-09-03 17:00:09 +0200  Piotr Brzeziński <piotr@centricular.com>
+
+	* sys/applemedia/vtenc.c:
+	* sys/applemedia/vtenc.h:
+	  vtenc: Restart encoding session when certain errors are detected
+	  Sometimes under certain loads, VT can error out with kVTVideoEncoderMalfunctionErr or kVTVideoEncoderNotAvailableNowErr.
+	  These have been reported to happen more often than usual if CopyProperty/SetProperty() is used close to the encode call.
+	  Both can be worked around by restarting the encoding session.
+	  These errors can be returned either directly from VTCompressionSessionEncodeFrame() or later in the encoding callback.
+	  This patch handles both scenarios the same way - a session restart is be attempted on the next encode_frame() call.
+	  If the error is returned immediately by the encode call, it's possible that some correct frames will still be given to
+	  the output callback, but for simplicity (+ because I wasn't able to verify this scenario) let's just discard those.
+	  In addition, this commit also simplifies the beach/drop logic in enqueue_buffer.
+	  Related bug reports in other projects:
+	  http://www.openradar.me/45889262
+	  https://github.com/aws/amazon-chime-sdk-ios/issues/170#issuecomment-741908622
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/7449>
+
+2024-09-06 10:51:01 +0200  Edward Hervey <edward@centricular.com>
+
+	* gst-libs/gst/play/gstplay.c:
+	  gstplay: Name the different bus
+	  Makes it clearer when reading logs which one is which
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/7471>
+
+2024-09-02 18:25:56 +0900  Hou Qi <qi.hou@nxp.com>
+
+	* gst-libs/gst/play/gstplay.c:
+	  gstplay: check whether stream is seekable before seeking when state change
+	  If state is changing from playing to paused, and rate is reset to 1
+	  which causes seek position is valid, current code will do seek for
+	  streams that are not seekable. So need to check whether stream is
+	  seekable before seeking.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/7448>
+
+2024-08-29 12:01:30 +0100  Philippe Normand <philn@igalia.com>
+
+	* ext/webrtc/gstwebrtcbin.c:
+	* tests/check/elements/webrtcbin.c:
+	  webrtcbin: Prevent crash when attempting to set answer on invalid SDP
+	  If the pending remote description has an invalid BUNDLE group _parse_bundle()
+	  triggers early return from _create_answer_task(), before ret has been
+	  initialized, so it needs to be checked before attempting to call
+	  gst_sdp_message_copy().
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/7436>
+
+2024-08-21 13:23:36 +0100  Francis Quiers <fquiers@cisco.com>
+
+	* docs/plugins/gst_plugins_cache.json:
+	* ext/voamrwbenc/gstvoamrwbenc.c:
+	  voamrwbenc: fix list of bitrates
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/7418>
+
+2024-08-20 22:09:13 +1000  Jan Schmidt <jan@centricular.com>
+
+	* gst-libs/gst/player/gstplayer.c:
+	  gstplayer: Check GstPlayerSignalDispatcher type
+	  Before trying to retrieve a GMainContext from a provided
+	  GstPlayerSignalDispatcher, check that it is actually
+	  GstPlayerGMainContextSignalDispatcher. If not, use the
+	  default GMainContext for dispatching signals via the adapter
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/7398>
+
+2024-08-21 09:19:39 +0200  Guillaume Desmottes <guillaume.desmottes@onestream.live>
+
+	* ext/wpe/gstwpesrcbin.cpp:
+	  wpe: fix gst-launch example
+	  wpesrc does not have num-buffers property but wpevideosrc does.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/7397>
+
+2024-08-21 12:33:28 +0100  Tim-Philipp Müller <tim@centricular.com>
+
+	* meson.build:
+	  Back to development after 1.24.7
+
 === release 1.24.7 ===
 
 2024-08-21 12:25:15 +0100  Tim-Philipp Müller <tim@centricular.com>
