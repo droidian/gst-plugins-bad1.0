@@ -1,3 +1,10 @@
+gst-plugins-bad1.0 (1.24.8-2) unstable; urgency=medium
+
+  * Team upload
+  * Stop buildling the intel-mediasdk support: no longer developed by Intel
+
+ -- Jeremy Bícha <jbicha@ubuntu.com>  Thu, 26 Sep 2024 08:52:08 -0400
+
 gst-plugins-bad1.0 (1.24.8-1) unstable; urgency=medium
 
   [ Jeremy Bícha ]
