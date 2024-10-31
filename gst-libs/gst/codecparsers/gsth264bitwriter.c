@@ -26,6 +26,26 @@
 #include <gst/codecparsers/nalutils.h>
 #include <gst/base/gstbitwriter.h>
 
+#ifndef GST_DISABLE_GST_DEBUG
+#define GST_CAT_DEFAULT gst_h264_debug_category_get()
+static GstDebugCategory *
+gst_h264_debug_category_get (void)
+{
+  static gsize cat_gonce = 0;
+
+  if (g_once_init_enter (&cat_gonce)) {
+    GstDebugCategory *cat = NULL;
+
+    GST_DEBUG_CATEGORY_INIT (cat, "bitwriter_h264", 0,
+        "h264 bitwriter library");
+
+    g_once_init_leave (&cat_gonce, (gsize) cat);
+  }
+
+  return (GstDebugCategory *) cat_gonce;
+}
+#endif /* GST_DISABLE_GST_DEBUG */
+
 /********************************  Utils ********************************/
 #define SIGNED(val)    (2 * ABS(val) - ((val) > 0))
 
@@ -1515,6 +1535,7 @@ gst_h264_bit_writer_aud (guint8 primary_pic_type, gboolean start_code,
   /* Add trailings. */
   WRITE_BITS (&bw, 1, 1);
   if (!gst_bit_writer_align_bytes (&bw, 0)) {
+    have_space = FALSE;
     goto error;
   }
 

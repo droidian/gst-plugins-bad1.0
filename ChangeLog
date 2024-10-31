@@ -1,3 +1,238 @@
+=== release 1.24.9 ===
+
+2024-10-30 20:33:30 +0000  Tim-Philipp Müller <tim@centricular.com>
+
+	* NEWS:
+	* RELEASE:
+	* gst-plugins-bad.doap:
+	* meson.build:
+	  Release 1.24.9
+
+2024-10-29 11:29:05 +0100  Edward Hervey <edward@centricular.com>
+
+	* ext/srt/gstsrtobject.c:
+	  srt: Don't attempt to reconnect on authentication failures
+	  This is a fatal issue which can't be recovered
+	  Fixes https://gitlab.freedesktop.org/gstreamer/gstreamer/-/issues/1550
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/7797>
+
+2024-10-14 11:26:20 +0200  Emil Ljungdahl <emillj@axis.com>
+
+	* ext/webrtc/gstwebrtcbin.c:
+	  webrtcbin: Clean up bin elements when datachannel is removed
+	  When a datachannel within a session is removed after proper close,
+	  reference to the error_ignore_bin elements of the datachannel
+	  appsrc/appsink were left in webrtcbin.
+	  This caused the bin-objects to be left and not freed until the whole
+	  webrtc session was terminated. Among other things that includes a thread
+	  from the appsrc.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/7791>
+
+2024-09-24 13:55:39 -0400  Nicolas Dufresne <nicolas.dufresne@collabora.com>
+
+	* docs/plugins/gst_plugins_cache.json:
+	* gst-libs/gst/wayland/gstwlvideoformat.c:
+	* gst-libs/gst/wayland/gstwlvideoformat.h:
+	  wayland: Add NV15 support
+	  This format, which maps to NV12_10LE40 in GStreamer is produced by Rockchip
+	  video decoders when decoding 4:2:0 10 bit content.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/7789>
+
+2024-10-22 23:41:13 +0900  Seungha Yang <seungha@centricular.com>
+
+	* gst-libs/gst/codecs/gstvp8decoder.c:
+	  vp8decoder: Fix resolution change handling
+	  Do not store resolution in set_format() so that resolution change
+	  can be detected on keyframe as intended.
+	  Fixes: https://gitlab.freedesktop.org/gstreamer/gstreamer/-/issues/3928
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/7787>
+
+2024-10-25 16:37:15 +0300  Sebastian Dröge <sebastian@centricular.com>
+
+	* gst/rtmp2/gstrtmp2sink.c:
+	  rtmp2sink: Initialize base_ts / last_ts with the actual first observed timestamp
+	  Initializing it with zero can falsely trigger the overflow / underflow detection
+	  code if the first observed timestamp is a big integer.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/7786>
+
+2024-09-30 15:51:04 +0300  Sebastian Dröge <sebastian@centricular.com>
+
+	* gst/mpegtsdemux/mpegtspacketizer.c:
+	  mpegtsdemux: Handle PTS/DTS wraparound with ignore-pcr=true
+	  The wraparound handling code assumes that the PCR gets updated regularly for
+	  being able to detect wraparounds. With ignore-pcr=true that was not the case and
+	  it stayed initialized at 1h forever.
+	  To avoid this problem, update the fake PCR whenever the PTS advanced by more
+	  than 5s, and also detect wraparounds in these fake PCRs.
+	  Problem can be reproduced with
+	  $ gst-launch-1.0 videotestsrc pattern=black ! video/x-raw,framerate=1/5 ! \
+	  x264enc speed-preset=ultrafast tune=zerolatency ! mpegtsmux ! \
+	  tsdemux ignore-pcr=true ! fakesink
+	  which restarts timestamps at 0 after around 26h30m.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/7763>
+
+2024-10-26 11:42:48 +0300  Sebastian Dröge <sebastian@centricular.com>
+
+	* gst-libs/gst/play/gstplay.c:
+	* gst-libs/gst/play/gstplay.h:
+	  play: Improve play message API inconsistencies
+	  * Check for the correct message type when parsing
+	  * Use correct field name for warning message details
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/7779>
+
+2024-05-28 04:14:15 +0530  Nirbheek Chauhan <nirbheek@centricular.com>
+
+	* gst-libs/gst/va/meson.build:
+	* meson.build:
+	* sys/msdk/gstmsdkallocator_libva.c:
+	* sys/msdk/gstmsdkcaps.c:
+	* sys/msdk/gstmsdkdec.c:
+	* sys/msdk/gstmsdkenc.c:
+	* sys/msdk/gstmsdkvpp.c:
+	* sys/msdk/gstmsdkvpputil.c:
+	* sys/msdk/meson.build:
+	  msdk: Fix libdrm dependency detection and usage
+	  drm_fourcc.h should be picked up via the pkgconfig include, not the
+	  system includedir directly.
+	  Also consolidate the libdrm usage in va and msdk.
+	  All this allows it to be picked up consistently (via the subproject,
+	  for example).
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/7760>
+
+2024-05-27 18:50:23 +0530  Nirbheek Chauhan <nirbheek@centricular.com>
+
+	* gst-libs/gst/va/meson.build:
+	  meson: Don't use fallback: kwarg for libva deps
+	  This will cause a fallback even when the `va` option is `auto`, not
+	  giving the user a chance to provide the dependency via the system, and
+	  likely building this feature unnecessarily.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/7760>
+
+2024-05-27 18:43:33 +0530  Nirbheek Chauhan <nirbheek@centricular.com>
+
+	* gst-libs/gst/va/gstvavideoformat.h:
+	  va: Fix libdrm include
+	  The libdrm/ prefix should not be used, it will be provided by the
+	  pkgconfig file. Also HAVE_LIBDRM is necessary.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/7760>
+
+2024-10-23 14:28:30 +0200  Peter Stensson <petest@axis.com>
+
+	* gst/codectimestamper/gstcodectimestamper.c:
+	* tests/check/elements/h264timestamper.c:
+	  codectimestamper: Fix gint wraparound in pts_compare_func
+	  The diff between compared timestamps might be outside the gint range
+	  resulting in wrong sorting results. This patch corrects that by
+	  comparing the timestamps and then returning -1, 0 or 1 depending on the
+	  result.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/7737>
+
+2024-10-24 14:40:23 +0200  Andoni Morales Alastruey <ylatuya@gmail.com>
+
+	* sys/applemedia/vtdec.c:
+	  vtdec: add support for level 6 6.1 and 6.2
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/7735>
+
+2024-10-11 11:58:37 -0400  Víctor Manuel Jáquez Leal <vjaquez@igalia.com>
+
+	* gst-libs/gst/codecparsers/gsth264bitwriter.c:
+	* gst-libs/gst/codecparsers/gsth265bitwriter.c:
+	  h26xbitwriter: false have_space if aligning fails on aud
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/7697>
+
+2024-10-15 16:44:27 +0800  He Junyan <junyan.he@intel.com>
+
+	* sys/va/gstvaav1enc.c:
+	  vaav1enc: Do not enable palette mode by default
+	  Palette mode should only be enabled only when we know that the content
+	  of the picture is simple. For example, only white letters on black
+	  screen in SCC mode. So, by default, we need to disable it.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/7696>
+
+2024-09-27 18:01:53 +0200  Benjamin Gaignard <benjamin.gaignard@collabora.com>
+
+	* sys/kms/gstkmssink.c:
+	  kmssink: Add IMX-DCSS auto-detection
+	  Add IMX DCSS display controller into list of
+	  auto-detected modules.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/7695>
+
+2024-10-09 12:32:34 -0400  Francisco Javier Velázquez-García <francisco.velazquez@appear.net>
+
+	* ext/srt/gstsrtsink.c:
+	  srtsink: Add guard for null error when SRT open fails
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/7687>
+
+2024-10-09 12:08:10 -0400  Francisco Javier Velázquez-García <francisco.velazquez@appear.net>
+
+	* ext/srt/gstsrtobject.c:
+	  srtsink: Register SRT listen callback before binding socket
+	  This change https://github.com/Haivision/srt/pull/2683 forces us to
+	  call `srt_listen_callback` before `srt_listen`.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/7687>
+
+2024-10-11 12:07:27 -0400  Víctor Manuel Jáquez Leal <vjaquez@igalia.com>
+
+	* gst-libs/gst/codecparsers/gstav1bitwriter.c:
+	* gst-libs/gst/codecparsers/gsth264bitwriter.c:
+	* gst-libs/gst/codecparsers/gsth265bitwriter.c:
+	  codecparsers: add debug categories to bitwriters
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/7667>
+
+2024-10-09 17:16:46 -0400  Víctor Manuel Jáquez Leal <vjaquez@igalia.com>
+
+	* tests/check/elements/vapostproc.c:
+	  tests: va: fix vapostproc test for DMABuf
+	  Now it picks the first format in the template srcpad list and do
+	  the convertion. Also the format size is reduced because not all
+	  drives support 4K as DMABuf (radeonsi).
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/7654>
+
+2024-10-14 15:31:54 +0200  Stéphane Cerveau <scerveau@igalia.com>
+
+	* gst/videofilters/gstscenechange.c:
+	  scenechange: fix memory leak
+	  A reference to the last buffer(oldbuf) was kept
+	  leading to a memory leak on stop.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/7666>
+
+2024-10-13 23:04:58 +0530  Nirbheek Chauhan <nirbheek@centricular.com>
+
+	* gst-libs/gst/dxva/meson.build:
+	  meson: Explicitly use cpp_std=c++11 for dxva
+	  dxva is built unconditionally on all platforms where introspection is
+	  enabled, so let's fix the build on macOS so that introspection can be
+	  enabled there: https://gitlab.freedesktop.org/nirbheek/cerbero/-/jobs/65009118
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/7661>
+
+2024-10-09 20:37:10 +0300  Jordan Petridis <jordan@centricular.com>
+
+	* tests/check/elements/lc3.c:
+	  tests/lc3: Allocate the same size for the buffer and the data
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/7640>
+
+2024-05-30 07:34:22 +0000  Weijian Pan <pwjworks@gmail.com>
+
+	* sys/applemedia/avfdeviceprovider.m:
+	  avfdeviceprovider: Fix caps leak
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/7577>
+
+2024-09-24 17:01:10 +0200  Hugues Fruchet <hugues.fruchet@foss.st.com>
+
+	* sys/kms/gstkmsallocator.c:
+	  kmsallocator: fix stride with planar formats
+	  This fixes a regression introduced by the merge request
+	  https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/3801
+	  The extrapolated stride was computed but not used, resulting in the same
+	  stride being applied to all planes.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/7571>
+
+2024-09-19 12:12:53 +0200  Tim-Philipp Müller <tim@centricular.com>
+
+	* meson.build:
+	  Back to development after 1.24.8
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/7549>
+
 === release 1.24.8 ===
 
 2024-09-19 12:01:21 +0200  Tim-Philipp Müller <tim@centricular.com>
