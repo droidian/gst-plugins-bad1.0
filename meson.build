@@ -1,5 +1,5 @@
 project('gst-plugins-bad', 'c', 'cpp',
-  version : '1.24.8',
+  version : '1.24.9',
   meson_version : '>= 1.1',
   default_options : [ 'warning_level=1',
                       'buildtype=debugoptimized' ])
@@ -397,6 +397,17 @@ x11_dep = dependency('x11', required : get_option('x11'))
 if x11_dep.found()
   cdata.set('HAVE_X11', 1)
 endif
+
+# Optional dep of msdk and va
+if host_system not in ['darwin', 'ios', 'android', 'windows']
+  libdrm_dep = dependency('libdrm', version : '>=2.4.50',
+    required : get_option('drm').enabled() or get_option('msdk').enabled(),
+  )
+  cdata.set('HAVE_LIBDRM', libdrm_dep.found())
+else
+  libdrm_dep = dependency('', required: false)
+endif
+
 
 #
 # Solaris and Illumos distros split a lot of networking-related code
