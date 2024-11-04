@@ -33,6 +33,8 @@ conf_flags += -Dauto_features=enabled -Ddoc=disabled -Dgpl=enabled
 # Not available in Debian yet
 conf_flags += -Dfaac=disabled -Dgs=disabled -Diqa=disabled -Disac=disabled -Dmagicleap=disabled
 conf_flags += -Dmicrodns=disabled -Donnx=disabled -Dopensles=disabled -Dsvthevcenc=disabled -Dtinyalsa=disabled
+# Unmaintained library
+conf_flags += -Dmsdk=disabled
 # Only available on Windows
 conf_flags += -Damfcodec=disabled -Ddirectshow=disabled -Dwasapi=disabled -Dwasapi2=disabled
 # In non-free currently
@@ -55,7 +57,7 @@ conf_flags += -Dldac=disabled
 endif
 
 ifneq ($(DEB_HOST_ARCH),amd64)
-conf_flags += -Dmsdk=disabled -Dqsv=disabled
+conf_flags += -Dqsv=disabled
 endif
 
 ifneq ($(DEB_HOST_ARCH_OS),linux)
@@ -111,7 +113,6 @@ ifeq ($(DEB_HOST_ARCH_OS),linux)
 	dh_install -pgstreamer1.0-plugins-bad debian/tmp/usr/lib/$(DEB_HOST_MULTIARCH)/gstreamer-1.0/libgstopenni2.so
 	dh_install -pgstreamer1.0-plugins-bad debian/tmp/usr/lib/$(DEB_HOST_MULTIARCH)/gstreamer-1.0/libgstsctp.so
 ifeq ($(DEB_HOST_ARCH),amd64)
-	dh_install -pgstreamer1.0-plugins-bad debian/tmp/usr/lib/$(DEB_HOST_MULTIARCH)/gstreamer-1.0/libgstmsdk.so
 	dh_install -pgstreamer1.0-plugins-bad debian/tmp/usr/lib/$(DEB_HOST_MULTIARCH)/gstreamer-1.0/libgstqsv.so
 endif
 endif
