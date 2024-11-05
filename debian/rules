@@ -42,8 +42,6 @@ conf_flags += -Dtflite-edgetpu=disabled
 conf_flags += -Dwpe2=disabled
 conf_flags += -Dmpeghdec=disabled
 conf_flags += -Dvmaf=disabled
-# Removed dependency on onnx because of bug #1126427
-conf_flags += -Donnx=disabled
 # Unmaintained library
 conf_flags += -Dmsdk=disabled
 # Only available on Windows
@@ -161,6 +159,10 @@ endif
 
 ifneq (,$(filter $(DEB_HOST_ARCH),amd64 arm64 armel armhf i386 mips64el ppc64el riscv64 s390x alpha hppa hurd-i386 m68k powerpc ppc64 sparc64))
 	dh_install -pgstreamer1.0-plugins-bad debian/tmp/usr/lib/$(DEB_HOST_MULTIARCH)/gstreamer-1.0/libgstzxing.so
+endif
+
+ifneq (,$(filter $(DEB_HOST_ARCH),amd64 arm64 armhf riscv64))
+	dh_install -pgstreamer1.0-plugins-bad debian/tmp/usr/lib/$(DEB_HOST_MULTIARCH)/gstreamer-1.0/libgstonnx.so
 endif
 
 ifeq ($(DEB_HOST_ARCH_ENDIAN),little)
