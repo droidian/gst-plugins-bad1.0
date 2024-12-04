@@ -583,7 +583,7 @@ push_internal (CCBuffer * buf, const guint8 * cea608_1,
       GST_WARNING_OBJECT (buf, "ccp data overflow, dropping all "
           "previous data, max %u, attempted to hold %u", max_cea708_bytes,
           cc_data_len + buf->cc_data->len);
-      g_array_set_size (buf->cea608_2, 0);
+      g_array_set_size (buf->cc_data, 0);
     }
     g_array_append_vals (buf->cc_data, cc_data, cc_data_len);
   }
@@ -856,16 +856,6 @@ cc_buffer_take_separated (CCBuffer * buf,
         }
       }
       *cc_data_len = write_ccp_size + ccp_padding;
-    } else if (buf->output_padding) {
-      guint i;
-      guint padding = 3 * fps_entry->max_ccp_count;
-      for (i = 0; i < padding; i += 3) {
-        cc_data[i + write_ccp_size] = 0xfa;
-        cc_data[i + 1 + write_ccp_size] = 0x00;
-        cc_data[i + 2 + write_ccp_size] = 0x00;
-      }
-      GST_TRACE_OBJECT (buf, "outputting only %u padding bytes", padding);
-      *cc_data_len = padding;
     } else {
       *cc_data_len = 0;
     }
@@ -1032,7 +1022,7 @@ cc_buffer_take_cea608_field2 (CCBuffer * buf,
     g_array_remove_range (buf->cea608_2, 0, write_cea608_2_size);
   }
   *cea608_2_len = write_cea608_2_size;
-  if (buf->output_padding && field1_padding > 0) {
+  if (buf->output_padding && field2_padding > 0) {
     memset (&cea608_2[write_cea608_2_size], 0x80, field2_padding);
     *cea608_2_len += field2_padding;
   }
