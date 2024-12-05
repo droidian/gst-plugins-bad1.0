@@ -1,3 +1,9 @@
+gst-plugins-bad1.0 (1.24.10-2) unstable; urgency=medium
+
+  * d/patches: meson: Drop max version bound from neon
+
+ -- Marc Leeman <marc.leeman@gmail.com>  Thu, 05 Dec 2024 11:38:16 +0100
+
 gst-plugins-bad1.0 (1.24.10-1) unstable; urgency=medium
 
   [ Dylan Aïssi ]
