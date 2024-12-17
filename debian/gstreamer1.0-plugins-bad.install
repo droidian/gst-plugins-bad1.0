@@ -27,7 +27,6 @@ usr/lib/*/gstreamer-1.0/libgstcurl.so
 usr/lib/*/gstreamer-1.0/libgstdash.so
 usr/lib/*/gstreamer-1.0/libgstde265.so
 usr/lib/*/gstreamer-1.0/libgstdebugutilsbad.so
-usr/lib/*/gstreamer-1.0/libgstdirectfb.so
 usr/lib/*/gstreamer-1.0/libgstdtls.so
 usr/lib/*/gstreamer-1.0/libgstdtsdec.so
 usr/lib/*/gstreamer-1.0/libgstdvbsubenc.so

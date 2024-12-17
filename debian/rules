@@ -39,6 +39,8 @@ conf_flags += -Dmsdk=disabled
 conf_flags += -Damfcodec=disabled -Ddirectshow=disabled -Dwasapi=disabled -Dwasapi2=disabled
 # In non-free currently
 conf_flags += -Dfdkaac=disabled
+# DirectFB is orphaned since 2018 (see #1083040)
+conf_flags += -Ddirectfb=disabled
 
 ifeq (,$(filter $(DEB_HOST_ARCH),amd64 arm64 armel armhf i386 mips64el ppc64el riscv64 s390x alpha hppa hurd-i386 m68k powerpc ppc64 sparc64))
 conf_flags += -Dzxing=disabled
