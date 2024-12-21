@@ -1,3 +1,165 @@
+=== release 1.24.10 ===
+
+2024-12-03 23:29:07 +0000  Tim-Philipp Müller <tim@centricular.com>
+
+	* NEWS:
+	* RELEASE:
+	* gst-plugins-bad.doap:
+	* meson.build:
+	  Release 1.24.10
+
+2024-10-09 13:47:41 -0400  Stéphane Cerveau <scerveau@igalia.com>
+
+	* gst-libs/gst/codecparsers/gsth265bitwriter.c:
+	* gst-libs/gst/codecparsers/gsth265parser.c:
+	  h265parser/bitwriter: add some comments for ceil_log2 use
+	  Validate that the length of field must be calculate with
+	  ceil_logs2 and not bit storage.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/7905>
+
+2024-10-09 13:46:17 -0400  Stéphane Cerveau <scerveau@igalia.com>
+
+	* gst-libs/gst/codecparsers/gsth264parser.c:
+	  h264parse: use of ceil_log2 instead of bit_storage
+	  According to the specification:
+	  The length of the slice_group_id[ i ] syntax element is Ceil( Log2(
+	  num_slice_groups_minus1 + 1 ) ) bits
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/7905>
+
+2024-12-02 19:34:14 +0800  Pablo Sun <pablo.sun@mediatek.com>
+
+	* sys/kms/gstkmssink.c:
+	  kmssink: Add mediatek auto-detection
+	  Add MediaTek display controller into list of
+	  auto-detected modules.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/8027>
+
+2024-12-01 11:45:34 +0200  Sebastian Dröge <sebastian@centricular.com>
+
+	* gst/mxf/mxftypes.c:
+	  mxfmux: Fix off-by-one in the month when generating a timestamp for now
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/8018>
+
+2024-11-26 21:34:25 +0800  Xi Ruoyao <xry111@xry111.site>
+
+	* ext/x265/gstx265enc.c:
+	  x265: Allow building with x265-4.1
+	  In x265-4.1 masteringDisplayColorVolume is changed from a pointer to a
+	  character array embedded in struct x265_param.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/7983>
+
+2024-11-26 16:52:05 +0530  Nirbheek Chauhan <nirbheek@centricular.com>
+
+	* tests/check/meson.build:
+	  meson: Don't unconditionally invoke the libsoup subproject
+	  fallback: kwarg will invoke the specified subproject even if required:
+	  false, which is not what we want here.
+	  Reported at https://gitlab.freedesktop.org/gstreamer/gstreamer/-/issues/4045#note_2674340
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/7982>
+
+2024-11-26 09:23:51 +0100  Albert Sjolund <alberts@axis.com>
+
+	* ext/webrtc/gstwebrtcbin.c:
+	  webrtc: don't crash on invalid bundle id
+	  If the bundle id forwarded to connect_rtpfunnel is not valid,
+	  the assertion fails and crashes the program. This is now instead
+	  an error.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/7966>
+
+2024-11-19 17:21:16 +0100  Jan Alexander Steffens (heftig) <jan.steffens@ltnglobal.com>
+
+	* ext/closedcaption/ccutils.c:
+	  ccutils: Fix a typo in cc_buffer_take_cea608_field2
+	  There are no users of cc_buffer_take_cea608_field2, so this never was a
+	  problem.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/7973>
+
+2024-11-19 16:42:11 +0100  Jan Alexander Steffens (heftig) <jan.steffens@ltnglobal.com>
+
+	* ext/closedcaption/ccutils.c:
+	  ccutils: Fix a typo in max_buffer_time handling
+	  All users set max_buffer_time to GST_CLOCK_TIME_NONE, effectively
+	  infinite, so this never was a problem.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/7973>
+
+2024-11-19 13:47:55 +0100  Jan Alexander Steffens (heftig) <jan.steffens@ltnglobal.com>
+
+	* ext/closedcaption/ccutils.c:
+	  ccutils: Remove broken branch
+	  This branch was added in dd00dab5e9e8650f3f00660c2e611f81f1e8cd5b but is
+	  never actually taken, as it requires `cc_data` to be null but
+	  `cc_data_len` to be non-null. It would then dereference the null
+	  `cc_data`.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/7973>
+
+2021-07-01 13:09:04 +0200  Jan Alexander Steffens (heftig) <jan.steffens@ltnglobal.com>
+
+	* gst/mpegtsmux/gstbasetsmux.c:
+	  mpegtsmux: Mux timestampless buffers immediately
+	  Instead of leaving them queued indefinitely, or until we're timing out
+	  and it's the only buffer queued.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/7901>
+
+2024-11-12 11:01:03 +0200  Sebastian Dröge <sebastian@centricular.com>
+
+	* gst/mpegtsmux/gstbasetsmux.c:
+	  mpegtsmux: Don't time out in live mode if no timestamped next buffer is available
+	  The muxer can only advance the time if it has a timestamped buffer that can be
+	  output, otherwise it will just busy-wait and use up a lot of CPU.
+	  Fixes https://gitlab.freedesktop.org/gstreamer/gstreamer/-/issues/3912
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/7901>
+
+2024-11-05 14:34:03 +0100  Théo Maillart <tmaillart@freebox.fr>
+
+	* gst/videoparsers/gstmpegvideoparse.c:
+	  mpegvideoparse: do not set delta unit flag on unknown frame type
+	  When encoding an image to mpeg2 video, with something like:
+	  gst-launch-1.0 encodebin name=e profile=mpegpsmux:video/mpeg,mpegversion=2,systemstream=false ! \
+	  filesink location=sample.mpg filesrc num-buffers=1 blocksize=$(stat -c%s sample.png) \
+	  location=sample/dts.png ! pngdec ! e.
+	  The only frame's type is set to an invalid value 0
+	  The consequence is that mpegvideoparse sets the delta unit flag on the buffer because
+	  it is not an I frame, then decodebin3 drops this only frame because the delta
+	  unit flag is set and the decoder receives eos before it was able to receive any
+	  encoded data
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/7876>
+
+2024-09-17 11:47:47 +0300  Sebastian Dröge <sebastian@centricular.com>
+
+	* ext/closedcaption/gstccconverter.c:
+	* tests/check/elements/ccconverter.c:
+	  ccconverter: Don't override in_fps_entry when trying to take output
+	  This allows to handle CDP streams where the framerate is not provided by the
+	  caps and generally gives preference to the framerate inside the CDP packets over
+	  the one in the caps.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/7862>
+
+2024-11-05 14:23:05 +0200  Sebastian Dröge <sebastian@centricular.com>
+
+	* gst/timecode/gsttimecodestamper.c:
+	  timecodestamper: Don't fail the latency query in LTC mode if we have no framerate
+	  Only in LTC mode we introduce additional latency that is depending on only on a
+	  property and not on the framerate, so waiting for the framerate is not necessary.
+	  In all other modes no latency is introduced at all and the latency query can
+	  simply be proxied.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/7846>
+
+2024-11-03 17:37:03 +0000  Tim-Philipp Müller <tim@centricular.com>
+
+	* po/de.po:
+	* po/es.po:
+	* po/hr.po:
+	* po/ro.po:
+	* po/sl.po:
+	* po/sv.po:
+	  gst-plugins-bad: update translations
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/7820>
+
+2024-10-30 20:40:12 +0000  Tim-Philipp Müller <tim@centricular.com>
+
+	* meson.build:
+	  Back to development after 1.24.9
+
 === release 1.24.9 ===
 
 2024-10-30 20:33:30 +0000  Tim-Philipp Müller <tim@centricular.com>

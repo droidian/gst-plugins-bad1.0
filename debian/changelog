@@ -1,3 +1,19 @@
+gst-plugins-bad1.0 (1.24.10-2) unstable; urgency=medium
+
+  * d/patches: meson: Drop max version bound from neon
+
+ -- Marc Leeman <marc.leeman@gmail.com>  Thu, 05 Dec 2024 11:38:16 +0100
+
+gst-plugins-bad1.0 (1.24.10-1) unstable; urgency=medium
+
+  [ Dylan Aïssi ]
+  * Build the ONNX neural network plugin
+
+  [ Marc Leeman ]
+  * New upstream version 1.24.10
+
+ -- Marc Leeman <marc.leeman@gmail.com>  Wed, 04 Dec 2024 10:28:52 +0100
+
 gst-plugins-bad1.0 (1.24.9-1) unstable; urgency=medium
 
   * New upstream version 1.24.9
