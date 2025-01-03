@@ -1,3 +1,9 @@
+gst-plugins-bad1.0 (1.24.10-3) unstable; urgency=medium
+
+  * d: disable directfb support (Closes: #1083040)
+
+ -- Marc Leeman <marc.leeman@gmail.com>  Fri, 03 Jan 2025 15:41:11 +0100
+
 gst-plugins-bad1.0 (1.24.10-2) unstable; urgency=medium
 
   * d/patches: meson: Drop max version bound from neon
