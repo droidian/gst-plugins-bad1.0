@@ -1,3 +1,172 @@
+=== release 1.24.11 ===
+
+2025-01-06 19:48:08 +0000  Tim-Philipp Müller <tim@centricular.com>
+
+	* NEWS:
+	* RELEASE:
+	* gst-plugins-bad.doap:
+	* meson.build:
+	  Release 1.24.11
+
+2024-12-06 15:15:45 +0100  Armin Begovic <armin.begovic@hotmail.com>
+
+	* docs/plugins/gst_plugins_cache.json:
+	* sys/decklink/gstdecklink.cpp:
+	  decklink: Add missing video modes to gst_decklink_mode_get_type()
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/8122>
+
+2024-12-06 15:15:34 +0100  Armin Begovic <armin.begovic@hotmail.com>
+
+	* sys/decklink/gstdecklink.cpp:
+	  decklink: Fix copy-paste errors regarding 8K modes
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/8122>
+
+2024-08-08 14:36:19 +0200  Benjamin Gräf <benjamin.graef@zuehlke.com>
+
+	* docs/plugins/gst_plugins_cache.json:
+	* sys/decklink/gstdecklink.cpp:
+	* sys/decklink/gstdecklink.h:
+	  decklink: Add support for all modes of Quad HDMI recorder
+	  By extending the GstDecklinkModeEnum with the additional modes supported by the Quad HDMI recorder,
+	  we avoid using mode = 0 in case any of these resolutions is returned by the card.
+	  Fixes #3713
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/8122>
+
+2024-12-30 22:53:02 +0100  Samuel Thibault <samuel.thibault@ens-lyon.org>
+
+	* meson.build:
+	  meson: Also disable drm on GNU/Hurd
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/8228>
+
+2024-12-23 15:17:57 +0100  Tim-Philipp Müller <tim@centricular.com>
+
+	* ext/srtp/gstsrtpdec.c:
+	  srtpdec: fix build when libsrtp1 is being used
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/8207>
+
+2024-12-22 15:00:07 +0100  Philippe Normand <philn@igalia.com>
+
+	* ext/srtp/gstsrtpdec.c:
+	  srtpdec: Fix a use-after-free buffer issue
+	  The gst_srtp_dec_decode_buffer() function modifies the input buffer after making
+	  it writable, so the pointer might change as well, depending on the refcount of
+	  the buffer.
+	  This issue was detected using a netsim element upstream of the decoder in a
+	  WebRTC pipeline.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/8201>
+
+2024-12-16 11:39:10 +0200  Sebastian Dröge <sebastian@centricular.com>
+
+	* gst/videoparsers/gstvp9parse.c:
+	  vp9parse: Add video codec tag to the tag list
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/8186>
+
+2024-12-16 11:38:52 +0200  Sebastian Dröge <sebastian@centricular.com>
+
+	* gst/videoparsers/gstav1parse.c:
+	  av1parse: Add video codec tag to the tag list
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/8186>
+
+2024-12-18 13:35:53 -0500  Nicolas Dufresne <nicolas.dufresne@collabora.com>
+
+	* gst-libs/gst/va/gstvadisplay.c:
+	  va: display: Optimize out some property indirection
+	  Because it was visible during some profiling, I thought it cost nothing
+	  to optimize out the uneeded property get roundtrip.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/8181>
+
+2024-11-18 07:54:55 +0100  Emil Ljungdahl <emillj@axis.com>
+
+	* ext/webrtc/gstwebrtcbin.c:
+	  webrtcbin: Tear down src and sink bins before removing them from webrtc
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/8165>
+
+2024-11-15 15:00:00 +0100  Emil Ljungdahl <emillj@axis.com>
+
+	* ext/webrtc/gstwebrtcbin.c:
+	  webrtcbin: Fix potential deadlock on bin elements cleanup
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/8165>
+
+2024-12-10 16:15:09 +0000  Philippe Normand <philn@igalia.com>
+
+	* ext/webrtc/gstwebrtcstats.c:
+	  webrtc: Simplify fmtp handling in codec stats
+	  Parsing the whole caps as SDP media only to retrieve the fmtp field afterwards
+	  seems a bit superfluous. By looking up the a-fmtp attribute directly the number
+	  of allocations in this function gets down a bit.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/8130>
+
+2024-12-07 00:23:33 -0500  Daniel Morin <daniel.morin@collabora.com>
+
+	* ext/onnx/gstonnxclient.cpp:
+	  onnx: disable onnxruntime telemetry
+	  Disable the telemetry feautre on onnxruntime.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/8106>
+
+2024-12-05 13:39:38 +0100  Francisco Javier Velázquez-García <francisco.velazquez@appear.net>
+
+	* ext/zxing/gstzxing.cpp:
+	  zxing: Update decode hints usage for compatibility with ZXing >= 2.2
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/8085>
+
+2024-12-03 13:14:33 +0200  Sebastian Dröge <sebastian@centricular.com>
+
+	* gst-libs/gst/codecparsers/gsth264parser.c:
+	  h264parse: Free SEI if parsing succeeds but alignment afterwards fails
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/8077>
+
+2024-12-03 13:10:04 +0200  Sebastian Dröge <sebastian@centricular.com>
+
+	* gst-libs/gst/codecparsers/gsth265parser.c:
+	  h265parse: Free SEI if parsing succeeds but alignment afterwards fails
+	  Fixes https://gitlab.freedesktop.org/gstreamer/gstreamer/-/issues/4076
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/8077>
+
+2024-11-29 14:41:12 +0100  Jan Alexander Steffens (heftig) <heftig@archlinux.org>
+
+	* ext/neon/meson.build:
+	  meson: Drop max version bound from neon
+	  Neon 0.34.0 broke the build again, but the API+ABI has been stable since
+	  0.27 and the library is so-versioned.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/8072>
+
+2024-12-03 14:44:30 +0100  Guillaume Desmottes <guillaume.desmottes@onestream.live>
+
+	* gst-libs/gst/codecparsers/gsth265parser.c:
+	* gst/videoparsers/gsth265parse.c:
+	  h265parse: parse unregistered SEI without user data
+	  Same change as in h264parse.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/8071>
+
+2024-11-20 14:16:23 +0100  Guillaume Desmottes <guillaume.desmottes@onestream.live>
+
+	* gst-libs/gst/codecparsers/gsth264parser.c:
+	* gst/videoparsers/gsth264parse.c:
+	* tests/check/elements/h264parse.c:
+	  h264parse: parse unregistered SEI without user data
+	  We get loads of warnings when parsing videos from users:
+	  gsth264parser.c:1115:gst_h264_parser_parse_user_data_unregistered: No more remaining payload data to store
+	  gsth264parse.c:646:gst_h264_parse_process_sei:<h264parse0> failed to parse one or more SEI message
+	  Those are raised because of unregistered SEI without user data.
+	  The spec does not explicitly state that unregistered SEI needs to have
+	  data and I suppose the UUID by itself can carry valuable information.
+	  FFmpeg also parses and exposes such SEI so there is no reason for us no
+	  too as well.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/8071>
+
+2024-11-15 16:44:10 +0200  Sebastian Dröge <sebastian@centricular.com>
+
+	* gst/mpegtsdemux/mpegtsbase.c:
+	  tsdemux: Lower a GST_FIXME to a GST_DEBUG
+	  This is not really a refcounting issue and can happen if a new program is in the
+	  process of being activated that contains streams with the same PIDs.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/8066>
+
+2024-12-03 23:39:54 +0000  Tim-Philipp Müller <tim@centricular.com>
+
+	* meson.build:
+	  Back to development after 1.24.10
+
 === release 1.24.10 ===
 
 2024-12-03 23:29:07 +0000  Tim-Philipp Müller <tim@centricular.com>
