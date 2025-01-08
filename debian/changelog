@@ -1,3 +1,10 @@
+gst-plugins-bad1.0 (1.24.11-1) unstable; urgency=medium
+
+  * d/rules: disable compiling gl for hurd archs
+  * New upstream version 1.24.11
+
+ -- Marc Leeman <marc.leeman@gmail.com>  Wed, 08 Jan 2025 10:24:23 +0100
+
 gst-plugins-bad1.0 (1.24.10-3) unstable; urgency=medium
 
   * d: disable directfb support (Closes: #1083040)
