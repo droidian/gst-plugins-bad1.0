@@ -1,5 +1,5 @@
 project('gst-plugins-bad', 'c', 'cpp',
-  version : '1.24.10',
+  version : '1.24.11',
   meson_version : '>= 1.1',
   default_options : [ 'warning_level=1',
                       'buildtype=debugoptimized' ])
@@ -399,7 +399,7 @@ if x11_dep.found()
 endif
 
 # Optional dep of msdk and va
-if host_system not in ['darwin', 'ios', 'android', 'windows']
+if host_system not in ['darwin', 'ios', 'android', 'windows', 'gnu']
   libdrm_dep = dependency('libdrm', version : '>=2.4.50',
     required : get_option('drm').enabled() or get_option('msdk').enabled(),
   )

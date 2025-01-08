@@ -127,6 +127,23 @@ gst_decklink_mode_get_type (void)
     {GST_DECKLINK_MODE_8Kp5994, "8k dci 59.94p", "8kdcip5994"},
     {GST_DECKLINK_MODE_8Kp60, "8k dci 60p", "8kdcip60"},
 
+    {GST_DECKLINK_MODE_640x480p60, "640x480 60p", "640x480p60"},
+    {GST_DECKLINK_MODE_800x600p60, "800x600 60p", "800x600p60"},
+    {GST_DECKLINK_MODE_1440x900p50, "1440x900 50p", "1440x900p50"},
+    {GST_DECKLINK_MODE_1440x900p60, "1440x900 60p", "1440x900p60"},
+    {GST_DECKLINK_MODE_1440x1080p50, "1440x1080 50p", "1440x1080p50"},
+    {GST_DECKLINK_MODE_1440x1080p60, "1440x1080 60p", "1440x1080p60"},
+    {GST_DECKLINK_MODE_1600x1200p50, "1600x1200 50p", "1600x1200p50"},
+    {GST_DECKLINK_MODE_1600x1200p60, "1600x1200 60p", "1600x1200p60"},
+    {GST_DECKLINK_MODE_1920x1200p50, "1920x1200 50p", "1920x1200p50"},
+    {GST_DECKLINK_MODE_1920x1200p60, "1920x1200 60p", "1920x1200p60"},
+    {GST_DECKLINK_MODE_1920x1440p50, "1920x1440 50p", "1920x1440p50"},
+    {GST_DECKLINK_MODE_1920x1440p60, "1920x1440 60p", "1920x1440p60"},
+    {GST_DECKLINK_MODE_2560x1440p50, "2560x1440 50p", "2560x1440p50"},
+    {GST_DECKLINK_MODE_2560x1440p60, "2560x1440 60p", "2560x1440p60"},
+    {GST_DECKLINK_MODE_2560x1600p50, "2560x1600 50p", "2560x1600p50"},
+    {GST_DECKLINK_MODE_2560x1600p60, "2560x1600 60p", "2560x1600p60"},
+
     {0, NULL, NULL}
   };
 
@@ -246,7 +263,7 @@ gst_decklink_mapping_format_get_type (void)
   static gsize id = 0;
   static const GEnumValue mappingformats[] = {
     {GST_DECKLINK_MAPPING_FORMAT_DEFAULT, "Default, don't change mapping format",
-      "default"},
+        "default"},
     {GST_DECKLINK_MAPPING_FORMAT_LEVEL_A, "Level A", "level-a"},
     {GST_DECKLINK_MAPPING_FORMAT_LEVEL_B, "Level B", "level-b"},
     {0, NULL, NULL}
@@ -441,6 +458,23 @@ static const GstDecklinkMode modes[] = {
   {bmdMode8kDCI50, 8192, 4320, 50, 1, false, UHD},
   {bmdMode8kDCI5994, 8192, 4320, 60000, 1001, false, UHD},
   {bmdMode8kDCI60, 8192, 4320, 60, 1, false, UHD},
+
+  {bmdMode640x480p60, 640, 480, 60, 1, false, HD},
+  {bmdMode800x600p60, 800, 600, 60, 1, false, HD},
+  {bmdMode1440x900p50, 1440, 900, 50, 1, false, HD},
+  {bmdMode1440x900p60, 1440, 900, 60, 1, false, HD},
+  {bmdMode1440x1080p50, 1440, 1080, 50, 1, false, HD},
+  {bmdMode1440x1080p60, 1440, 1080, 60, 1, false, HD},
+  {bmdMode1600x1200p50, 1600, 1200, 50, 1, false, HD},
+  {bmdMode1600x1200p60, 1600, 1200, 60, 1, false, HD},
+  {bmdMode1920x1200p50, 1920, 1200, 50, 1, false, HD},
+  {bmdMode1920x1200p60, 1920, 1200, 60, 1, false, HD},
+  {bmdMode1920x1440p50, 1920, 1440, 50, 1, false, HD},
+  {bmdMode1920x1440p60, 1920, 1440, 60, 1, false, HD},
+  {bmdMode2560x1440p50, 2560, 1440, 50, 1, false, HD},
+  {bmdMode2560x1440p60, 2560, 1440, 60, 1, false, HD},
+  {bmdMode2560x1600p50, 2560, 1600, 50, 1, false, HD},
+  {bmdMode2560x1600p60, 2560, 1600, 60, 1, false, HD},
 };
 
 static const struct
@@ -449,19 +483,19 @@ static const struct
   gint bpp;
   GstVideoFormat vformat;
 } formats[] = {
-  /* *INDENT-OFF* */
+    /* *INDENT-OFF* */
   {bmdFormat8BitYUV, 2, GST_VIDEO_FORMAT_UYVY},  /* auto */
-  {bmdFormat8BitYUV, 2, GST_VIDEO_FORMAT_UYVY},
-  {bmdFormat10BitYUV, 4, GST_VIDEO_FORMAT_v210},
-  {bmdFormat8BitARGB, 4, GST_VIDEO_FORMAT_ARGB},
-  {bmdFormat8BitBGRA, 4, GST_VIDEO_FORMAT_BGRA},
-  {bmdFormat10BitRGB, 4, GST_VIDEO_FORMAT_r210},
-/* Not yet supported
-  {bmdFormat12BitRGB, FIXME, FIXME},
-  {bmdFormat12BitRGBLE, FIXME, FIXME},
-  {bmdFormat10BitRGBXLE, FIXME, FIXME},
-  {bmdFormat10BitRGBX, FIXME, FIXME} */
-  /* *INDENT-ON* */
+    {bmdFormat8BitYUV, 2, GST_VIDEO_FORMAT_UYVY},
+    {bmdFormat10BitYUV, 4, GST_VIDEO_FORMAT_v210},
+    {bmdFormat8BitARGB, 4, GST_VIDEO_FORMAT_ARGB},
+    {bmdFormat8BitBGRA, 4, GST_VIDEO_FORMAT_BGRA},
+    {bmdFormat10BitRGB, 4, GST_VIDEO_FORMAT_r210},
+    /* Not yet supported
+      {bmdFormat12BitRGB, FIXME, FIXME},
+      {bmdFormat12BitRGBLE, FIXME, FIXME},
+      {bmdFormat10BitRGBXLE, FIXME, FIXME},
+      {bmdFormat10BitRGBX, FIXME, FIXME} */
+    /* *INDENT-ON* */
 };
 
 enum ProfileSetOperationResult
@@ -490,15 +524,15 @@ static const struct
   BMDTimecodeFormat format;
   GstDecklinkTimecodeFormat gstformat;
 } tcformats[] = {
-  /* *INDENT-OFF* */
-  {bmdTimecodeRP188VITC1, GST_DECKLINK_TIMECODE_FORMAT_RP188VITC1},
-  {bmdTimecodeRP188VITC2, GST_DECKLINK_TIMECODE_FORMAT_RP188VITC2},
-  {bmdTimecodeRP188LTC, GST_DECKLINK_TIMECODE_FORMAT_RP188LTC},
-  {bmdTimecodeRP188Any, GST_DECKLINK_TIMECODE_FORMAT_RP188ANY},
-  {bmdTimecodeVITC, GST_DECKLINK_TIMECODE_FORMAT_VITC},
-  {bmdTimecodeVITCField2, GST_DECKLINK_TIMECODE_FORMAT_VITCFIELD2},
-  {bmdTimecodeSerial, GST_DECKLINK_TIMECODE_FORMAT_SERIAL}
-  /* *INDENT-ON* */
+    /* *INDENT-OFF* */
+    {bmdTimecodeRP188VITC1, GST_DECKLINK_TIMECODE_FORMAT_RP188VITC1},
+    {bmdTimecodeRP188VITC2, GST_DECKLINK_TIMECODE_FORMAT_RP188VITC2},
+    {bmdTimecodeRP188LTC, GST_DECKLINK_TIMECODE_FORMAT_RP188LTC},
+    {bmdTimecodeRP188Any, GST_DECKLINK_TIMECODE_FORMAT_RP188ANY},
+    {bmdTimecodeVITC, GST_DECKLINK_TIMECODE_FORMAT_VITC},
+    {bmdTimecodeVITCField2, GST_DECKLINK_TIMECODE_FORMAT_VITCFIELD2},
+    {bmdTimecodeSerial, GST_DECKLINK_TIMECODE_FORMAT_SERIAL}
+    /* *INDENT-ON* */
 };
 
 static const struct
@@ -506,17 +540,17 @@ static const struct
   BMDKeyerMode keymode;
   GstDecklinkKeyerMode gstkeymode;
 } kmodes[] = {
-  /* *INDENT-OFF* */
-  {bmdKeyerModeOff, GST_DECKLINK_KEYER_MODE_OFF},
-  {bmdKeyerModeInternal, GST_DECKLINK_KEYER_MODE_INTERNAL},
-  {bmdKeyerModeExternal, GST_DECKLINK_KEYER_MODE_EXTERNAL}
-  /* *INDENT-ON* */
+    /* *INDENT-OFF* */
+    {bmdKeyerModeOff, GST_DECKLINK_KEYER_MODE_OFF},
+    {bmdKeyerModeInternal, GST_DECKLINK_KEYER_MODE_INTERNAL},
+    {bmdKeyerModeExternal, GST_DECKLINK_KEYER_MODE_EXTERNAL}
+    /* *INDENT-ON* */
 };
 
 const GstDecklinkMode *
 gst_decklink_get_mode (GstDecklinkModeEnum e)
 {
-  if (e < GST_DECKLINK_MODE_AUTO || e > GST_DECKLINK_MODE_8Kp60)
+  if (e < GST_DECKLINK_MODE_AUTO || e > GST_DECKLINK_MODE_2560x1600p60)
     return NULL;
   return &modes[e];
 }
@@ -689,28 +723,76 @@ gst_decklink_get_mode_enum_from_bmd (BMDDisplayMode mode)
       displayMode = GST_DECKLINK_MODE_4320p60;
       break;
     case bmdMode8kDCI2398:
-      displayMode = GST_DECKLINK_MODE_4Kp2398;
+      displayMode = GST_DECKLINK_MODE_8Kp2398;
       break;
     case bmdMode8kDCI24:
-      displayMode = GST_DECKLINK_MODE_4Kp24;
+      displayMode = GST_DECKLINK_MODE_8Kp24;
       break;
     case bmdMode8kDCI25:
-      displayMode = GST_DECKLINK_MODE_4Kp25;
+      displayMode = GST_DECKLINK_MODE_8Kp25;
       break;
     case bmdMode8kDCI2997:
-      displayMode = GST_DECKLINK_MODE_4Kp2997;
+      displayMode = GST_DECKLINK_MODE_8Kp2997;
       break;
     case bmdMode8kDCI30:
-      displayMode = GST_DECKLINK_MODE_4Kp30;
+      displayMode = GST_DECKLINK_MODE_8Kp30;
       break;
     case bmdMode8kDCI50:
-      displayMode = GST_DECKLINK_MODE_4Kp50;
+      displayMode = GST_DECKLINK_MODE_8Kp50;
       break;
     case bmdMode8kDCI5994:
-      displayMode = GST_DECKLINK_MODE_4Kp5994;
+      displayMode = GST_DECKLINK_MODE_8Kp5994;
       break;
     case bmdMode8kDCI60:
-      displayMode = GST_DECKLINK_MODE_4Kp60;
+      displayMode = GST_DECKLINK_MODE_8Kp60;
+      break;
+    case bmdMode640x480p60:
+      displayMode = GST_DECKLINK_MODE_640x480p60;
+      break;
+    case bmdMode800x600p60:
+      displayMode = GST_DECKLINK_MODE_800x600p60;
+      break;
+    case bmdMode1440x900p50:
+      displayMode = GST_DECKLINK_MODE_1440x900p50;
+      break;
+    case bmdMode1440x900p60:
+      displayMode = GST_DECKLINK_MODE_1440x900p60;
+      break;
+    case bmdMode1440x1080p50:
+      displayMode = GST_DECKLINK_MODE_1440x1080p50;
+      break;
+    case bmdMode1440x1080p60:
+      displayMode = GST_DECKLINK_MODE_1440x1080p60;
+      break;
+    case bmdMode1600x1200p50:
+      displayMode = GST_DECKLINK_MODE_1600x1200p50;
+      break;
+    case bmdMode1600x1200p60:
+      displayMode = GST_DECKLINK_MODE_1600x1200p60;
+      break;
+    case bmdMode1920x1200p50:
+      displayMode = GST_DECKLINK_MODE_1920x1200p50;
+      break;
+    case bmdMode1920x1200p60:
+      displayMode = GST_DECKLINK_MODE_1920x1200p60;
+      break;
+    case bmdMode1920x1440p50:
+      displayMode = GST_DECKLINK_MODE_1920x1440p50;
+      break;
+    case bmdMode1920x1440p60:
+      displayMode = GST_DECKLINK_MODE_1920x1440p60;
+      break;
+    case bmdMode2560x1440p50:
+      displayMode = GST_DECKLINK_MODE_2560x1440p50;
+      break;
+    case bmdMode2560x1440p60:
+      displayMode = GST_DECKLINK_MODE_2560x1440p60;
+      break;
+    case bmdMode2560x1600p50:
+      displayMode = GST_DECKLINK_MODE_2560x1600p50;
+      break;
+    case bmdMode2560x1600p60:
+      displayMode = GST_DECKLINK_MODE_2560x1600p60;
       break;
     default:
       displayMode = (GstDecklinkModeEnum) - 1;
@@ -991,7 +1073,7 @@ gst_decklink_find_mode_for_caps (GstCaps * caps)
 }
 
 #define GST_TYPE_DECKLINK_CLOCK \
-  (gst_decklink_clock_get_type())
+    (gst_decklink_clock_get_type())
 #define GST_DECKLINK_CLOCK(obj) \
   (G_TYPE_CHECK_INSTANCE_CAST((obj),GST_TYPE_DECKLINK_CLOCK,GstDecklinkClock))
 #define GST_DECKLINK_CLOCK_CLASS(klass) \
@@ -1229,39 +1311,39 @@ public:
     if (clock) {
       capture_time = gst_clock_get_time (clock);
       if (video_frame) {
-	// If we have the actual capture time for the frame, compensate the
-	// capture time accordingly.
-	//
-	// We do this by subtracting the belay between "now" in hardware
-	// reference clock and the time when the frame was finished being
-	// capture based on the same hardware reference clock.
-	//
-	// We then subtract that difference from the "now" on the gst clock.
-	//
-	// *Technically* we should be compensating that difference for the
-	// difference in clock rate between the "hardware reference clock" and
-	// the GStreamer clock. But since the values are quite small this has
-	// very little impact.
-	BMDTimeValue hardware_now;
+        // If we have the actual capture time for the frame, compensate the
+        // capture time accordingly.
+        //
+        // We do this by subtracting the belay between "now" in hardware
+        // reference clock and the time when the frame was finished being
+        // capture based on the same hardware reference clock.
+        //
+        // We then subtract that difference from the "now" on the gst clock.
+        //
+        // *Technically* we should be compensating that difference for the
+        // difference in clock rate between the "hardware reference clock" and
+        // the GStreamer clock. But since the values are quite small this has
+        // very little impact.
+        BMDTimeValue hardware_now;
 	res = m_input->input->GetHardwareReferenceClock (GST_SECOND, &hardware_now, NULL, NULL);
-	if (res == S_OK) {
-	  res =
-	    video_frame->GetHardwareReferenceTimestamp (GST_SECOND,
-							&hardware_time, &hardware_duration);
-	  if (res != S_OK) {
+        if (res == S_OK) {
+          res =
+              video_frame->GetHardwareReferenceTimestamp (GST_SECOND,
+              &hardware_time, &hardware_duration);
+          if (res != S_OK) {
 	    GST_ERROR ("Failed to get hardware time: 0x%08lx", (unsigned long) res);
-	    hardware_time = GST_CLOCK_TIME_NONE;
-	    hardware_duration = GST_CLOCK_TIME_NONE;
-	  } else {
-	    GstClockTime hardware_diff = hardware_now - hardware_time;
-	    GST_LOG ("Compensating capture time by %" GST_TIME_FORMAT,
-		     GST_TIME_ARGS (hardware_diff));
-	    if (capture_time > hardware_diff)
-	      capture_time -= hardware_diff;
-	    else
-	      capture_time = 0;
-	  }
-	}
+            hardware_time = GST_CLOCK_TIME_NONE;
+            hardware_duration = GST_CLOCK_TIME_NONE;
+          } else {
+            GstClockTime hardware_diff = hardware_now - hardware_time;
+            GST_LOG ("Compensating capture time by %" GST_TIME_FORMAT,
+                GST_TIME_ARGS (hardware_diff));
+            if (capture_time > hardware_diff)
+              capture_time -= hardware_diff;
+            else
+              capture_time = 0;
+          }
+        }
       }
       if (capture_time > base_time)
         capture_time -= base_time;
@@ -2213,7 +2295,7 @@ gst_decklink_configure_mapping_format (Device * device,
   // Make sure Level A is supported
   bool supports_level_a_output = false;
   res = device->output.attributes->GetFlag(BMDDeckLinkSupportsSMPTELevelAOutput,
-    &supports_level_a_output);
+      &supports_level_a_output);
   if (res != S_OK || !supports_level_a_output) {
     if (level_a_output) {
       GST_DEBUG ("Device does not support Level A mapping format");

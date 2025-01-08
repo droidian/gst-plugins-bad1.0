@@ -1267,12 +1267,6 @@ gst_h265_parser_parse_user_data_unregistered (GstH265Parser * parser,
     READ_UINT8 (nr, data[i], 8);
   }
 
-  if (payload_size < 1) {
-    GST_WARNING ("No more remaining payload data to store");
-    g_clear_pointer (&data, g_free);
-    return GST_H265_PARSER_BROKEN_DATA;
-  }
-
   urud->data = data;
   GST_MEMDUMP ("SEI user data unregistered", data, payload_size);
   return GST_H265_PARSER_OK;
@@ -3179,6 +3173,7 @@ gst_h265_parser_parse_sei_message (GstH265Parser * parser,
 
 error:
   GST_WARNING ("error parsing \"Sei message\"");
+  gst_h265_sei_free (sei);
   return GST_H265_PARSER_ERROR;
 }
 

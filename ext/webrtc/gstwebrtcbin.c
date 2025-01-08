@@ -2577,6 +2577,12 @@ _on_data_channel_ready_state (WebRTCDataChannel * channel,
     gboolean found_pending;
     gboolean found;
 
+    /* Change state on bins outside dc_lock to avoid deadlocks */
+    gst_element_set_locked_state (channel->src_bin, TRUE);
+    gst_element_set_state (channel->src_bin, GST_STATE_NULL);
+    gst_element_set_locked_state (channel->sink_bin, TRUE);
+    gst_element_set_state (channel->sink_bin, GST_STATE_NULL);
+
     DC_LOCK (webrtc);
     found_pending =
         g_ptr_array_remove (webrtc->priv->pending_data_channels, channel);
@@ -2586,12 +2592,7 @@ _on_data_channel_ready_state (WebRTCDataChannel * channel,
     if (found == FALSE) {
       GST_FIXME_OBJECT (webrtc, "Received close for unknown data channel");
     } else {
-      gst_element_set_locked_state (channel->src_bin, TRUE);
-      gst_element_set_state (channel->src_bin, GST_STATE_NULL);
       gst_bin_remove (GST_BIN (webrtc), channel->src_bin);
-
-      gst_element_set_locked_state (channel->sink_bin, TRUE);
-      gst_element_set_state (channel->sink_bin, GST_STATE_NULL);
       gst_bin_remove (GST_BIN (webrtc), channel->sink_bin);
 
       if (found_pending == FALSE) {
