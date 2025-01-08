@@ -73,7 +73,7 @@ conf_flags += -Dvulkan=disabled -Dwayland=disabled -Ddvb=disabled
 endif
 
 ifeq ($(DEB_HOST_ARCH_OS),hurd)
-conf_flags += -Dresindvd=disabled -Dnvcodec=disabled
+conf_flags += -Dresindvd=disabled -Dnvcodec=disabled -Dgl=disabled
 endif
 
 # bookworm backport flags
