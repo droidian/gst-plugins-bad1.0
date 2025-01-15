@@ -35,6 +35,7 @@ conf_flags += -Dfaac=disabled -Dgs=disabled -Diqa=disabled -Disac=disabled -Dmag
 conf_flags += -Dmicrodns=disabled -Dopensles=disabled -Dsvthevcenc=disabled -Dtinyalsa=disabled
 conf_flags += -Dcuda-nvmm=disabled
 conf_flags += -Dnvcomp=disabled
+conf_flags += -Dnvdswrapper=disabled
 conf_flags += -Dlcevcdecoder=disabled -Dlcevcencoder=disabled
 # Unmaintained library
 conf_flags += -Dmsdk=disabled
