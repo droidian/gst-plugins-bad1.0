@@ -1,3 +1,188 @@
+=== release 1.24.12 ===
+
+2025-01-29 20:12:29 +0000  Tim-Philipp Müller <tim@centricular.com>
+
+	* NEWS:
+	* RELEASE:
+	* gst-plugins-bad.doap:
+	* meson.build:
+	  Release 1.24.12
+
+2024-12-30 21:59:03 +0100  Samuel Thibault <samuel.thibault@ens-lyon.org>
+
+	* ext/gtk/meson.build:
+	* tests/examples/gtk/meson.build:
+	* tests/examples/waylandsink/meson.build:
+	  meson: Fix build with gtk3 but not wayland
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/8260>
+
+2025-01-20 18:19:18 +0100  Andoni Morales Alastruey <ylatuya@gmail.com>
+
+	* sys/applemedia/vtdec.c:
+	  vtdec: fix seeks hangs due to a race condition draining
+	  If the drain function of the decoder triggered by FLUSH_START
+	  is run while the output loop is running, once the output loop
+	  finished vtdec->downstream_ret will be GST_FLOW_FLUSHING instead
+	  of GST_FLOW_OK, which must not be treated as an error since
+	  the queue is cleaned correctly as well.
+	  Fix #4179
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/8361>
+
+2025-01-23 13:20:50 +0100  Guillaume Desmottes <guillaume.desmottes@onestream.live>
+
+	* ext/wpe/gstwpevideosrc.cpp:
+	  wpe: remove glFlush() when filling buffer
+	  According to https://gitlab.freedesktop.org/gstreamer/gstreamer/-/issues/4162#note_2739338
+	  it was introduced as workaround for tearing issues.
+	  I do not experience any tearing without flushing on both nvidia and AMD
+	  GPU, so I suppose it's no longer needed.
+	  Slightly improve CPU usage according to my tests.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/8355>
+
+2025-01-20 18:37:23 +0200  Sebastian Dröge <sebastian@centricular.com>
+
+	* gst/mpegtsdemux/mpegtspacketizer.c:
+	  tsdemux: Fix backwards PTS wraparound detection with ignore-pcr=true
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/8332>
+
+2025-01-10 14:15:21 +0200  Sebastian Dröge <sebastian@centricular.com>
+
+	* sys/decklink/gstdecklinkvideosink.cpp:
+	  decklinkvideosink: Fix handling of caps framerate in auto mode
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/8306>
+
+2025-01-09 00:42:48 +0100  Carlos Bentzen <cadubentzen@igalia.com>
+
+	* ext/webrtc/gstwebrtcbin.c:
+	* tests/check/elements/webrtcbin.c:
+	  webrtc: fix duplicate payload types with RTX and multiple video codecs
+	  Before this patch, there could be duplicate payload types in offers that
+	  have, within a media section, multiple codecs and RTX enabled:
+	  ```
+	  m=video 9 UDP/TLS/RTP/SAVPF 96 97 97 <-- HAS DUPLICATES
+	  a=sendrecv
+	  a=rtpmap:96 VP8/90000
+	  a=rtcp-fb:96 nack
+	  a=rtcp-fb:96 nack pli
+	  a=rtcp-fb:96 ccm fir
+	  a=rtcp-fb:96 transport-cc
+	  a=rtpmap:97 H264/90000
+	  a=rtcp-fb:97 nack
+	  a=rtcp-fb:97 nack pli
+	  a=rtcp-fb:97 ccm fir
+	  a=rtcp-fb:97 transport-cc
+	  a=rtpmap:97 rtx/90000  <--------- PT IS DUPLICATE
+	  a=fmtp:97 apt=96
+	  ```
+	  Fix this by populating the media_mapping array with all media formats
+	  rather than only the first one. The added test case reproduces the issue,
+	  which fails without this patch.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/8294>
+
+2025-01-09 11:39:11 +0100  Edward Hervey <edward@centricular.com>
+
+	* sys/wasapi/gstwasapisink.c:
+	  wasapi: Use signed value for can_frames
+	  The can retrieval function can return negative values (which will be properly handled)
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/8293>
+
+2025-01-09 10:08:23 +0100  Edward Hervey <edward@centricular.com>
+
+	* sys/amfcodec/gstamfav1enc.cpp:
+	* sys/amfcodec/gstamfh264enc.cpp:
+	* sys/amfcodec/gstamfh265enc.cpp:
+	  amfcodec: Add missing break statement
+	  Setting frame-sad would also set ltr
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/8293>
+
+2025-01-06 09:57:33 +0100  Edward Hervey <edward@centricular.com>
+
+	* gst-libs/gst/codecparsers/gsth265bitwriter.c:
+	  h265bitwriter: Don't use type too small
+	  The computed `coef_val` could exceed the maximum range of a gint8. Use a bigger
+	  one, the checks after will ensure it's properly cropped/padded
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/8293>
+
+2025-01-05 12:08:24 +0100  Edward Hervey <edward@centricular.com>
+
+	* gst-libs/gst/mpegts/gstmpegtssection.c:
+	  mpegts: Add missing break
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/8293>
+
+2025-01-05 11:46:21 +0100  Edward Hervey <edward@centricular.com>
+
+	* gst-libs/gst/mse/gstmsemediatype.c:
+	  msemediabuffer: Fix ASCII character detection
+	  Use glib function. The previous check was checking whether a signed int was
+	  lower than its limit (which ... is always TRUE).
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/8293>
+
+2025-01-05 11:43:49 +0100  Edward Hervey <edward@centricular.com>
+
+	* gst-libs/gst/mse/gstsourcebuffer.c:
+	  msesourcebuffer: Fix unsigned value handling
+	  Use the explicit valid clocktime handler instead
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/8293>
+
+2025-01-05 11:41:44 +0100  Edward Hervey <edward@centricular.com>
+
+	* gst/rist/gstristsink.c:
+	  ristsink: Add missing break
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/8293>
+
+2025-01-07 12:56:13 +0200  Sebastian Dröge <sebastian@centricular.com>
+
+	* sys/decklink/gstdecklinkaudiosink.cpp:
+	  decklinkaudiosink: Don't crash if started without corresponding video sink
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/8291>
+
+2025-01-09 16:13:44 -0500  Monty C <montyc1999@gmail.com>
+
+	* sys/d3d12/hlsl/VSMain_color.hlsl:
+	* sys/d3d12/hlsl/VSMain_coord.hlsl:
+	* sys/d3d12/hlsl/VSMain_pos.hlsl:
+	  d3d12: Fix shaders failing to compile with newer dxc versions
+	  Newer dxc versions enable HLSL 2021 by default, which disallows implicit casting of structs.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/8274>
+
+2025-01-09 17:23:41 +0000  Colin Kinloch <colin.kinloch@collabora.com>
+
+	* gst-libs/gst/wayland/gstwldisplay.c:
+	  wayland: Print table split when DMABuf format changes
+	  The `zwp_linux_dmabuf_v1` doesn't specify an order for modifier events
+	  to be sent.
+	  In my case the linear format was sent last resulting in the first item
+	  in each row being the previous format.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/8277>
+
+2024-12-25 15:04:03 +0100  Philippe Normand <philn@igalia.com>
+
+	* ext/wpe/gstwpethreadedview.cpp:
+	* ext/wpe/gstwpethreadedview.h:
+	* ext/wpe/gstwpevideosrc.cpp:
+	  wpevideosrc: Clear cached SHM buffers after caps re-negotiation
+	  Otherwise buffers not corresponding to the negotiated caps might be pushed
+	  downstream.
+	  Fixes #4094
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/8266>
+
+2024-12-27 13:28:18 +0100  Philippe Normand <philn@igalia.com>
+
+	* ext/wpe/gstwpevideosrc.cpp:
+	  wpevideosrc: Post progress messages on the bus
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/8265>
+
+2024-12-25 14:42:16 +0100  Philippe Normand <philn@igalia.com>
+
+	* ext/wpe/gstwpevideosrc.cpp:
+	  wpevideosrc: Handle latency queries
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/8265>
+
+2025-01-06 20:11:58 +0000  Tim-Philipp Müller <tim@centricular.com>
+
+	* meson.build:
+	  Back to development after 1.24.11
+
 === release 1.24.11 ===
 
 2025-01-06 19:48:08 +0000  Tim-Philipp Müller <tim@centricular.com>
