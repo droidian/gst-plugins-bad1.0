@@ -4,39 +4,42 @@ Date:   Mon Dec 30 21:59:03 2024 +0100
 
     meson: Fix build with gtk3 but not wayland
 
-diff --git a/ext/gtk/meson.build b/ext/gtk/meson.build
-index 0c94a71dfc..ad9888056d 100644
---- a/ext/gtk/meson.build
-+++ b/ext/gtk/meson.build
-@@ -7,9 +7,11 @@ gtkwayland_sources = [
+Index: gst-plugins-bad1.0/ext/gtk/meson.build
+===================================================================
+--- gst-plugins-bad1.0.orig/ext/gtk/meson.build
++++ gst-plugins-bad1.0/ext/gtk/meson.build
+@@ -11,9 +11,11 @@ gtkwayland_sources = [
  ]
-
+ 
  gtk_dep = dependency('gtk+-3.0', required : get_option('gtk3'))
 -gtk_wayland_dep = dependency('gtk+-wayland-3.0', required : get_option('gtk3'))
 +if use_wayland
 +  gtk_wayland_dep = dependency('gtk+-wayland-3.0', required : get_option('gtk3'))
 +endif
-
--if gtk_dep.found() and gtk_wayland_dep.found() and use_wayland
-+if use_wayland and gtk_dep.found() and gtk_wayland_dep.found() and use_wayland
+ 
+-if gtk_dep.found() and gtk_wayland_dep.found()
++if gtk_dep.found() and gtk_wayland_dep.found() and use_wayland
    gstgtkwayland = library('gstgtkwayland',
      gtkwayland_sources,
      c_args :  gst_plugins_bad_args + ['-DGST_USE_UNSTABLE_API'],
-diff --git a/tests/examples/gtk/meson.build b/tests/examples/gtk/meson.build
-index 1ed0dee5f1..97a29d5201 100644
---- a/tests/examples/gtk/meson.build
-+++ b/tests/examples/gtk/meson.build
-@@ -1,4 +1,4 @@
--if gtk_dep.found() and gtk_wayland_dep.found() and use_wayland
-+if use_wayland and gtk_dep.found() and gtk_wayland_dep.found()
+Index: gst-plugins-bad1.0/tests/examples/gtk/meson.build
+===================================================================
+--- gst-plugins-bad1.0.orig/tests/examples/gtk/meson.build
++++ gst-plugins-bad1.0/tests/examples/gtk/meson.build
+@@ -2,7 +2,7 @@ if not use_wayland
+   subdir_done()
+ endif
+ 
+-if gtk_dep.found() and gtk_wayland_dep.found()
++if gtk_dep.found() and gtk_wayland_dep.found() and use_wayland
    executable('gtkwaylandsink',
      'gtkwaylandsink.c',
      extra_files: ['window.ui'],
-diff --git a/tests/examples/meson.build b/tests/examples/meson.build
-index c9053339e7..50b0ad719e 100644
---- a/tests/examples/meson.build
-+++ b/tests/examples/meson.build
-@@ -19,7 +19,9 @@ subdir('qsv')
+Index: gst-plugins-bad1.0/tests/examples/meson.build
+===================================================================
+--- gst-plugins-bad1.0.orig/tests/examples/meson.build
++++ gst-plugins-bad1.0/tests/examples/meson.build
+@@ -18,7 +18,9 @@ subdir('qsv')
  subdir('qt6d3d11')
  subdir('uvch264')
  subdir('va')
@@ -46,4 +49,4 @@ index c9053339e7..50b0ad719e 100644
 +endif
  subdir('webrtc')
  subdir('wpe')
-
+ 
