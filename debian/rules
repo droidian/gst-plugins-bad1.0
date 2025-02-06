@@ -57,6 +57,11 @@ ifeq (,$(filter $(DEB_HOST_ARCH),amd64 arm64 armhf riscv64))
 conf_flags += -Donnx=disabled
 endif
 
+# gstcuda missing on arm
+ifeq (,$(filter $(DEB_HOST_ARCH),armel arm64 armhf))
+conf_flags += -Dnvcodec=disabled
+endif
+
 ifeq ($(filter gstreamer1.0-opencv,$(built_binaries)),)
 conf_flags += -Dopencv=disabled
 endif
@@ -139,11 +144,14 @@ endif
 
 ifneq ($(DEB_HOST_ARCH_OS),hurd)
 	dh_install -pgstreamer1.0-plugins-bad debian/tmp/usr/lib/$(DEB_HOST_MULTIARCH)/gstreamer-1.0/libgstresindvd.so
-	dh_install -pgstreamer1.0-plugins-bad debian/tmp/usr/lib/$(DEB_HOST_MULTIARCH)/gstreamer-1.0/libgstnvcodec.so
 	dh_install -pgstreamer1.0-plugins-bad debian/tmp/usr/lib/$(DEB_HOST_MULTIARCH)/gstreamer-1.0/libgstavtp.so
 	dh_install -pgstreamer1.0-plugins-bad debian/tmp/usr/lib/$(DEB_HOST_MULTIARCH)/gstreamer-1.0/libgstgtkwayland.so
 	dh_install -pgstreamer1.0-plugins-bad debian/tmp/usr/lib/$(DEB_HOST_MULTIARCH)/gstreamer-1.0/libgstuvcgadget.so
 	dh_install -pgstreamer1.0-plugins-bad debian/tmp/usr/lib/$(DEB_HOST_MULTIARCH)/gstreamer-1.0/libgstwebrtcdsp.so
+endif
+
+ifneq (,$(filter $(DEB_HOST_ARCH),armel arm64 armhf hurd))
+	dh_install -pgstreamer1.0-plugins-bad debian/tmp/usr/lib/$(DEB_HOST_MULTIARCH)/gstreamer-1.0/libgstnvcodec.so
 endif
 
 ifneq (,$(filter $(DEB_HOST_ARCH),amd64 arm64 armel armhf i386 mips64el ppc64el riscv64 s390x alpha hppa hurd-i386 m68k powerpc ppc64 sparc64))
