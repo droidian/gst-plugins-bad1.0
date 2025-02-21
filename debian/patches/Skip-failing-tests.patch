@@ -24,15 +24,20 @@ Index: gst-plugins-bad1.0/tests/check/meson.build
    [['elements/ccconverter.c'], not closedcaption_dep.found(), [gstvideo_dep]],
    [['elements/cccombiner.c'], not closedcaption_dep.found(), ],
    [['elements/ccextractor.c'], not closedcaption_dep.found(), ],
-@@ -108,7 +108,7 @@ base_tests = [
+@@ -108,10 +108,10 @@ base_tests = [
    [['libs/jpegbitwriter.c'], false, [gstcodecparsers_dep]],
    [['libs/vkmemory.c'], not gstvulkan_dep.found(), [gstvulkan_dep]],
    [['libs/analyticsmeta.c'], false, [gstanalytics_dep]],
 -  [['elements/vkcolorconvert.c'], not gstvulkan_dep.found(), [gstvulkan_dep]],
+-  [['libs/vkwindow.c'], not gstvulkan_dep.found(), [gstvulkan_dep]],
 +  [['elements/vkcolorconvert.c'], true , [gstvulkan_dep]],
-   [['libs/vkwindow.c'], not gstvulkan_dep.found(), [gstvulkan_dep]],
++  [['libs/vkwindow.c'], true, [gstvulkan_dep]],
    [['libs/vkdevice.c'], not gstvulkan_dep.found(), [gstvulkan_dep]],
-   [['elements/vkdeviceprovider.c'], not gstvulkan_dep.found(), [gstvulkan_dep]],
+-  [['elements/vkdeviceprovider.c'], not gstvulkan_dep.found(), [gstvulkan_dep]],
++  [['elements/vkdeviceprovider.c'], true, [gstvulkan_dep]],
+   [['libs/vkcommandpool.c'], not gstvulkan_dep.found(), [gstvulkan_dep]],
+   [['libs/vkimage.c'], not gstvulkan_dep.found(), [gstvulkan_dep]],
+   [['libs/vkinstance.c'], not gstvulkan_dep.found(), [gstvulkan_dep]],
 @@ -140,7 +140,7 @@ if host_machine.system() != 'windows'
      [['elements/avtpaafdepay.c'], not avtp_dep.found(), [avtp_dep]],
      [['elements/avtpcrfbase.c'], not avtp_dep.found(), [avtp_dep]],
