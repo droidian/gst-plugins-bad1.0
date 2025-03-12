@@ -142,98 +142,6 @@ GST_DEBUG_CATEGORY_STATIC (gst_decklink_video_sink_debug);
 
 #define DEFAULT_PERSISTENT_ID (-1)
 
-class GStreamerVideoOutputCallback:public IDeckLinkVideoOutputCallback
-{
-public:
-  GStreamerVideoOutputCallback (GstDecklinkVideoSink * sink)
-  :IDeckLinkVideoOutputCallback (), m_refcount (1)
-  {
-    m_sink = GST_DECKLINK_VIDEO_SINK_CAST (gst_object_ref (sink));
-    g_mutex_init (&m_mutex);
-  }
-
-  virtual HRESULT WINAPI QueryInterface (REFIID, LPVOID *)
-  {
-    return E_NOINTERFACE;
-  }
-
-  virtual ULONG WINAPI AddRef (void)
-  {
-    ULONG ret;
-
-    g_mutex_lock (&m_mutex);
-    m_refcount++;
-    ret = m_refcount;
-    g_mutex_unlock (&m_mutex);
-
-    return ret;
-  }
-
-  virtual ULONG WINAPI Release (void)
-  {
-    ULONG ret;
-
-    g_mutex_lock (&m_mutex);
-    m_refcount--;
-    ret = m_refcount;
-    g_mutex_unlock (&m_mutex);
-
-    if (ret == 0) {
-      delete this;
-    }
-
-    return ret;
-  }
-
-  virtual HRESULT WINAPI ScheduledFrameCompleted (IDeckLinkVideoFrame *
-      completedFrame, BMDOutputFrameCompletionResult result)
-  {
-    switch (result) {
-      case bmdOutputFrameCompleted:
-        GST_LOG_OBJECT (m_sink, "Completed frame %p", completedFrame);
-        break;
-      case bmdOutputFrameDisplayedLate:
-        GST_INFO_OBJECT (m_sink, "Late Frame %p", completedFrame);
-        break;
-      case bmdOutputFrameDropped:
-        GST_INFO_OBJECT (m_sink, "Dropped Frame %p", completedFrame);
-        break;
-      case bmdOutputFrameFlushed:
-        GST_DEBUG_OBJECT (m_sink, "Flushed Frame %p", completedFrame);
-        break;
-      default:
-        GST_INFO_OBJECT (m_sink, "Unknown Frame %p: %d", completedFrame,
-            (gint) result);
-        break;
-    }
-
-    return S_OK;
-  }
-
-  virtual HRESULT WINAPI ScheduledPlaybackHasStopped (void)
-  {
-    GST_LOG_OBJECT (m_sink, "Scheduled playback stopped");
-
-    if (m_sink->output) {
-      g_mutex_lock (&m_sink->output->lock);
-      g_cond_signal (&m_sink->output->cond);
-      g_mutex_unlock (&m_sink->output->lock);
-    }
-
-    return S_OK;
-  }
-
-  virtual ~ GStreamerVideoOutputCallback () {
-    gst_object_unref (m_sink);
-    g_mutex_clear (&m_mutex);
-  }
-
-private:
-  GstDecklinkVideoSink * m_sink;
-  GMutex m_mutex;
-  gint m_refcount;
-};
-
 class GstDecklinkTimecode:public IDeckLinkTimecode
 {
 public:
@@ -308,7 +216,7 @@ public:
     return S_OK;
   }
 
-  virtual HRESULT STDMETHODCALLTYPE QueryInterface (REFIID, LPVOID *)
+  virtual HRESULT STDMETHODCALLTYPE QueryInterface (REFIID iid, LPVOID *)
   {
     return E_NOINTERFACE;
   }
@@ -345,19 +253,46 @@ private:
   }
 };
 
-class GstDecklinkVideoFrame:public IDeckLinkVideoFrame
+class GstDecklinkVideoFrame:public IDeckLinkVideoFrame, public IDeckLinkVideoFrameMetadataExtensions
 {
 public:
-  GstDecklinkVideoFrame (GstVideoFrame * frame):m_frame (0),
-      m_dframe (0), m_ancillary (0), m_timecode (0), m_refcount (1)
+  GstDecklinkVideoFrame (GstVideoFrame * frame):
+      running_time(0), running_time_duration(0), sync_buffer(0), m_frame(0),
+      have_light_level(FALSE), have_mastering_info(FALSE), m_dframe (0),
+      m_ancillary (0), m_timecode (0), m_refcount (1)
   {
     m_frame = g_new0 (GstVideoFrame, 1);
     *m_frame = *frame;
+    memset (&light_level, 0, sizeof (light_level));
+    memset (&mastering_info, 0, sizeof (mastering_info));
+    memset (&colorimetry, 0, sizeof (colorimetry));
   }
 
-  GstDecklinkVideoFrame (IDeckLinkMutableVideoFrame * dframe):m_frame (0),
-      m_dframe (dframe), m_ancillary (0), m_timecode (0), m_refcount (1)
+  GstDecklinkVideoFrame (IDeckLinkMutableVideoFrame * dframe):
+      running_time(0), running_time_duration(0), sync_buffer(0), m_frame(0),
+      have_light_level(FALSE), have_mastering_info(FALSE), m_dframe (dframe),
+      m_ancillary (0), m_timecode (0), m_refcount (1)
   {
+    memset (&light_level, 0, sizeof (light_level));
+    memset (&mastering_info, 0, sizeof (mastering_info));
+    memset (&colorimetry, 0, sizeof (colorimetry));
+  }
+
+  void SetColorimetry (GstVideoColorimetry *colorimetry)
+  {
+    this->colorimetry = *colorimetry;
+  }
+
+  void SetLightLevel (GstVideoContentLightLevel * ll)
+  {
+    light_level = *ll;
+    have_light_level = TRUE;
+  }
+
+  void SetMastringInfo (GstVideoMasteringDisplayInfo * mdi)
+  {
+    memcpy (&mastering_info, mdi, sizeof (*mdi));
+    have_mastering_info = TRUE;
   }
 
   virtual long STDMETHODCALLTYPE GetWidth (void)
@@ -395,7 +330,15 @@ public:
   }
   virtual BMDFrameFlags STDMETHODCALLTYPE GetFlags (void)
   {
-    return m_dframe ? m_dframe->GetFlags () : bmdFrameFlagDefault;
+    BMDFrameFlags flags = m_dframe ? m_dframe->GetFlags () : bmdFrameFlagDefault;
+
+    if (have_mastering_info || have_light_level ||
+        colorimetry.transfer == GST_VIDEO_TRANSFER_ARIB_STD_B67 ||
+        colorimetry.transfer == GST_VIDEO_TRANSFER_SMPTE2084) {
+      flags |= bmdFrameContainsHDRMetadata;
+    }
+
+    return flags;
   }
   virtual HRESULT STDMETHODCALLTYPE GetBytes (void **buffer)
   {
@@ -453,9 +396,171 @@ public:
     return S_OK;
   }
 
-  virtual HRESULT STDMETHODCALLTYPE QueryInterface (REFIID, LPVOID *)
+  virtual HRESULT STDMETHODCALLTYPE QueryInterface (REFIID iid, LPVOID * ret)
   {
+    GST_LOG ("frame queryinterface: %" REFIID_FORMAT, REFIID_ARGS (iid));
+    if (memcmp (&iid, &IID_IDeckLinkVideoFrameMetadataExtensions, sizeof (iid))
+        == 0) {
+      AddRef ();
+      *ret = (LPVOID *) static_cast<IDeckLinkVideoFrameMetadataExtensions *>(this);
+      return S_OK;
+    }
     return E_NOINTERFACE;
+  }
+
+  virtual HRESULT STDMETHODCALLTYPE GetInt (/* in */ BMDDeckLinkFrameMetadataID metadataID, /* out */ int64_t* value)
+  {
+    GST_LOG ("frame meta get int for 0x%x", metadataID);
+
+    switch (metadataID) {
+      case bmdDeckLinkFrameMetadataColorspace: {
+        switch (colorimetry.matrix) {
+          case GST_VIDEO_COLOR_MATRIX_BT601:
+            *value = bmdColorspaceRec601;
+            return S_OK;
+          case GST_VIDEO_COLOR_MATRIX_BT709:
+            *value = bmdColorspaceRec709;
+            return S_OK;
+          case GST_VIDEO_COLOR_MATRIX_BT2020:
+            *value = bmdColorspaceRec2020;
+            return S_OK;
+          default:
+            GST_DEBUG ("no mapping from video color matrix 0x%x to BMD", colorimetry.matrix);
+            return E_INVALIDARG;
+        }
+        break;
+      }
+      case bmdDeckLinkFrameMetadataHDRElectroOpticalTransferFunc:
+        switch (colorimetry.transfer) {
+          case GST_VIDEO_TRANSFER_BT601:
+          case GST_VIDEO_TRANSFER_BT709:
+          case GST_VIDEO_TRANSFER_BT2020_10:
+            if (have_mastering_info && have_light_level)
+              *value = 1;
+            else
+              *value = 0;
+            return S_OK;
+          case GST_VIDEO_TRANSFER_SMPTE2084:
+            *value = 2;
+            return S_OK;
+          case GST_VIDEO_TRANSFER_ARIB_STD_B67:
+            *value = 3;
+            return S_OK;
+          default:
+            return E_INVALIDARG;
+        }
+        break;
+      default:
+        return E_INVALIDARG;
+    }
+  }
+  virtual HRESULT STDMETHODCALLTYPE GetFloat (/* in */ BMDDeckLinkFrameMetadataID metadataID, /* out */ double* value)
+  {
+    GST_LOG ("frame meta get float for 0x%x", metadataID);\
+
+    switch (metadataID) {
+      case bmdDeckLinkFrameMetadataHDRDisplayPrimariesRedX:
+        if (have_mastering_info) {
+          *value = (double) mastering_info.display_primaries[0].x / 50000.0;
+        } else {
+          *value = 0.0;
+        }
+        return S_OK;
+      case bmdDeckLinkFrameMetadataHDRDisplayPrimariesRedY:
+        if (have_mastering_info) {
+          *value = (double) mastering_info.display_primaries[0].y / 50000.0;
+        } else {
+          *value = 0.0;
+        }
+        return S_OK;
+      case bmdDeckLinkFrameMetadataHDRDisplayPrimariesGreenX:
+        if (have_mastering_info) {
+          *value = (double) mastering_info.display_primaries[1].x / 50000.0;
+        } else {
+          *value = 0.0;
+        }
+        return S_OK;
+      case bmdDeckLinkFrameMetadataHDRDisplayPrimariesGreenY:
+        if (have_mastering_info) {
+          *value = (double) mastering_info.display_primaries[1].y / 50000.0;
+        } else {
+          *value = 0.0;
+        }
+        return S_OK;
+      case bmdDeckLinkFrameMetadataHDRDisplayPrimariesBlueX:
+        if (have_mastering_info) {
+          *value = (double) mastering_info.display_primaries[2].x / 50000.0;
+        } else {
+          *value = 0.0;
+        }
+        return S_OK;
+      case bmdDeckLinkFrameMetadataHDRDisplayPrimariesBlueY:
+        if (have_mastering_info) {
+          *value = (double) mastering_info.display_primaries[2].y / 50000.0;
+        } else {
+          *value = 0.0;
+        }
+        return S_OK;
+      case bmdDeckLinkFrameMetadataHDRWhitePointX:
+        if (have_mastering_info) {
+          *value = (double) mastering_info.white_point.x / 50000.0;
+        } else {
+          *value = 0.0;
+        }
+        return S_OK;
+      case bmdDeckLinkFrameMetadataHDRWhitePointY:
+        if (have_mastering_info) {
+          *value = (double) mastering_info.white_point.y / 50000.0;
+        } else {
+          *value = 0.0;
+        }
+        return S_OK;
+      case bmdDeckLinkFrameMetadataHDRMaxDisplayMasteringLuminance:
+        if (have_mastering_info) {
+          *value = (double) mastering_info.max_display_mastering_luminance * 65535.0 / 10000.0;
+        } else {
+          *value = 0.0;
+        }
+        return S_OK;
+      case bmdDeckLinkFrameMetadataHDRMinDisplayMasteringLuminance:
+        if (have_mastering_info) {
+          *value = (double) mastering_info.min_display_mastering_luminance * 6.55350 / 10000.0;
+        } else {
+          *value = 0.0;
+        }
+        return S_OK;
+      case bmdDeckLinkFrameMetadataHDRMaximumContentLightLevel:
+        if (have_light_level) {
+          *value = (double) light_level.max_content_light_level;
+        } else {
+          *value = 0.0;
+        }
+        return S_OK;
+      case bmdDeckLinkFrameMetadataHDRMaximumFrameAverageLightLevel:
+        if (have_light_level) {
+          *value = (double) light_level.max_frame_average_light_level;
+        } else {
+          *value = 0.0;
+        }
+        return S_OK;
+      default:
+        return E_INVALIDARG;
+    }
+  }
+  virtual HRESULT STDMETHODCALLTYPE GetFlag (/* in */ BMDDeckLinkFrameMetadataID metadataID, /* out */ bool* value)
+  {
+    GST_LOG ("frame meta get flag for 0x%x", metadataID);
+    return E_INVALIDARG;
+  }
+  virtual HRESULT STDMETHODCALLTYPE GetString (/* in */ BMDDeckLinkFrameMetadataID metadataID, /* out */ COMSTR_T* value)
+  {
+    GST_LOG ("frame meta get string for 0x%x", metadataID);
+    return E_INVALIDARG;
+  }
+  virtual HRESULT STDMETHODCALLTYPE GetBytes (/* in */ BMDDeckLinkFrameMetadataID metadataID, /* out */ void* buffer /* optional */, /* in, out */ uint32_t* bufferSize)
+  {
+    GST_LOG ("frame meta get bytes for 0x%x", metadataID);
+    return E_INVALIDARG;
   }
 
   virtual ULONG STDMETHODCALLTYPE AddRef (void)
@@ -479,12 +584,20 @@ public:
     return ret - 1;
   }
 
+  GstClockTime running_time;
+  GstClockTime running_time_duration;
+  GstBuffer *sync_buffer;
 private:
   GstVideoFrame * m_frame;
+  gboolean have_light_level;
+  gboolean have_mastering_info;
   IDeckLinkMutableVideoFrame *m_dframe;
   IDeckLinkVideoFrameAncillary *m_ancillary;
   GstDecklinkTimecode *m_timecode;
   int m_refcount;
+  GstVideoContentLightLevel light_level;
+  GstVideoMasteringDisplayInfo mastering_info;
+  GstVideoColorimetry colorimetry;
 
   virtual ~ GstDecklinkVideoFrame () {
     if (m_frame) {
@@ -500,7 +613,108 @@ private:
     if (m_timecode) {
       m_timecode->Release ();
     }
+    gst_clear_buffer (&sync_buffer);
   }
+};
+
+class GStreamerVideoOutputCallback:public IDeckLinkVideoOutputCallback
+{
+public:
+  GStreamerVideoOutputCallback (GstDecklinkVideoSink * sink)
+  :IDeckLinkVideoOutputCallback (), m_refcount (1)
+  {
+    m_sink = GST_DECKLINK_VIDEO_SINK_CAST (gst_object_ref (sink));
+    g_mutex_init (&m_mutex);
+  }
+
+  virtual HRESULT WINAPI QueryInterface (REFIID, LPVOID *)
+  {
+    return E_NOINTERFACE;
+  }
+
+  virtual ULONG WINAPI AddRef (void)
+  {
+    ULONG ret;
+
+    g_mutex_lock (&m_mutex);
+    m_refcount++;
+    ret = m_refcount;
+    g_mutex_unlock (&m_mutex);
+
+    return ret;
+  }
+
+  virtual ULONG WINAPI Release (void)
+  {
+    ULONG ret;
+
+    g_mutex_lock (&m_mutex);
+    m_refcount--;
+    ret = m_refcount;
+    g_mutex_unlock (&m_mutex);
+
+    if (ret == 0) {
+      delete this;
+    }
+
+    return ret;
+  }
+
+  virtual HRESULT WINAPI ScheduledFrameCompleted (IDeckLinkVideoFrame *
+      completedFrame, BMDOutputFrameCompletionResult result)
+  {
+    GstDecklinkVideoFrame *frame = (GstDecklinkVideoFrame *) completedFrame;
+    switch (result) {
+      case bmdOutputFrameCompleted:
+        GST_LOG_OBJECT (m_sink, "Completed frame %p running time %"
+            GST_TIME_FORMAT, completedFrame, GST_TIME_ARGS (frame->running_time));
+        break;
+      case bmdOutputFrameDisplayedLate:
+        GST_INFO_OBJECT (m_sink, "Late Frame %p running time %" GST_TIME_FORMAT,
+            completedFrame, GST_TIME_ARGS (frame->running_time));
+        break;
+      case bmdOutputFrameDropped:
+        GST_INFO_OBJECT (m_sink, "Dropped Frame %p running time %"
+            GST_TIME_FORMAT, completedFrame,
+            GST_TIME_ARGS (frame->running_time));
+        break;
+      case bmdOutputFrameFlushed:
+        GST_INFO_OBJECT (m_sink, "Flushed Frame %p running time %"
+            GST_TIME_FORMAT, completedFrame,
+            GST_TIME_ARGS (frame->running_time));
+        break;
+      default:
+        GST_INFO_OBJECT (m_sink, "Unknown Frame %p: %d, running time %"
+            GST_TIME_FORMAT, completedFrame, (gint) result,
+            GST_TIME_ARGS (frame->running_time));
+        break;
+    }
+
+    return S_OK;
+  }
+
+  virtual HRESULT WINAPI ScheduledPlaybackHasStopped (void)
+  {
+    GST_LOG_OBJECT (m_sink, "Scheduled playback stopped");
+
+    if (m_sink->output) {
+      g_mutex_lock (&m_sink->output->lock);
+      g_cond_signal (&m_sink->output->cond);
+      g_mutex_unlock (&m_sink->output->lock);
+    }
+
+    return S_OK;
+  }
+
+  virtual ~ GStreamerVideoOutputCallback () {
+    gst_object_unref (m_sink);
+    g_mutex_clear (&m_mutex);
+  }
+
+private:
+  GstDecklinkVideoSink * m_sink;
+  GMutex m_mutex;
+  gint m_refcount;
 };
 
 /**
@@ -543,8 +757,6 @@ static GstCaps *gst_decklink_video_sink_get_caps (GstBaseSink * bsink,
     GstCaps * filter);
 static gboolean gst_decklink_video_sink_set_caps (GstBaseSink * bsink,
     GstCaps * caps);
-static GstFlowReturn gst_decklink_video_sink_prepare (GstBaseSink * bsink,
-    GstBuffer * buffer);
 static GstFlowReturn gst_decklink_video_sink_render (GstBaseSink * bsink,
     GstBuffer * buffer);
 static gboolean gst_decklink_video_sink_open (GstBaseSink * bsink);
@@ -554,6 +766,8 @@ static gboolean gst_decklink_video_sink_propose_allocation (GstBaseSink * bsink,
     GstQuery * query);
 static gboolean gst_decklink_video_sink_event (GstBaseSink * bsink,
     GstEvent * event);
+static void gst_decklink_video_sink_get_times (GstBaseSink * bsink,
+    GstBuffer * buffer, GstClockTime * start, GstClockTime * end);
 
 static void
 gst_decklink_video_sink_start_scheduled_playback (GstElement * element);
@@ -596,7 +810,6 @@ gst_decklink_video_sink_class_init (GstDecklinkVideoSinkClass * klass)
       GST_DEBUG_FUNCPTR (gst_decklink_video_sink_get_caps);
   basesink_class->set_caps =
       GST_DEBUG_FUNCPTR (gst_decklink_video_sink_set_caps);
-  basesink_class->prepare = GST_DEBUG_FUNCPTR (gst_decklink_video_sink_prepare);
   basesink_class->render = GST_DEBUG_FUNCPTR (gst_decklink_video_sink_render);
   // FIXME: These are misnamed in basesink!
   basesink_class->start = GST_DEBUG_FUNCPTR (gst_decklink_video_sink_open);
@@ -604,6 +817,8 @@ gst_decklink_video_sink_class_init (GstDecklinkVideoSinkClass * klass)
   basesink_class->propose_allocation =
       GST_DEBUG_FUNCPTR (gst_decklink_video_sink_propose_allocation);
   basesink_class->event = GST_DEBUG_FUNCPTR (gst_decklink_video_sink_event);
+  basesink_class->get_times =
+      GST_DEBUG_FUNCPTR (gst_decklink_video_sink_get_times);
 
   g_object_class_install_property (gobject_class, PROP_MODE,
       g_param_spec_enum ("mode", "Playback Mode",
@@ -752,6 +967,7 @@ gst_decklink_video_sink_init (GstDecklinkVideoSink * self)
   self->caption_line = 0;
   self->afd_bar_line = 0;
   self->mapping_format = GST_DECKLINK_MAPPING_FORMAT_DEFAULT;
+  self->pending_frames = g_queue_new();
 
   gst_base_sink_set_max_lateness (GST_BASE_SINK_CAST (self), 20 * GST_MSECOND);
   gst_base_sink_set_qos_enabled (GST_BASE_SINK_CAST (self), TRUE);
@@ -875,10 +1091,20 @@ gst_decklink_video_sink_get_property (GObject * object, guint property_id,
   }
 }
 
+static void
+unref_frame (GstDecklinkVideoFrame * frame)
+{
+  if (frame)
+    frame->Release();
+}
+
 void
 gst_decklink_video_sink_finalize (GObject * object)
 {
-  //GstDecklinkVideoSink *self = GST_DECKLINK_VIDEO_SINK_CAST (object);
+  GstDecklinkVideoSink *self = GST_DECKLINK_VIDEO_SINK_CAST (object);
+
+  g_queue_clear_full (self->pending_frames, (GDestroyNotify) unref_frame);
+  self->pending_frames = NULL;
 
   G_OBJECT_CLASS (parent_class)->finalize (object);
 }
@@ -897,7 +1123,6 @@ gst_decklink_video_sink_set_caps (GstBaseSink * bsink, GstCaps * caps)
   if (!gst_video_info_from_caps (&info, caps))
     return FALSE;
 
-
   g_mutex_lock (&self->output->lock);
   if (self->output->video_enabled) {
     if (self->info.finfo->format == info.finfo->format &&
@@ -906,6 +1131,11 @@ gst_decklink_video_sink_set_caps (GstBaseSink * bsink, GstCaps * caps)
       // for mode selection below in auto mode
       GST_DEBUG_OBJECT (self, "Nothing relevant has changed");
       self->info = info;
+      self->have_light_level =
+          gst_video_content_light_level_from_caps (&self->light_level, caps);
+      self->have_mastering_info =
+          gst_video_mastering_display_info_from_caps (&self->mastering_info,
+          caps);
       g_mutex_unlock (&self->output->lock);
       return TRUE;
     } else {
@@ -996,6 +1226,10 @@ gst_decklink_video_sink_set_caps (GstBaseSink * bsink, GstCaps * caps)
   }
 
   self->info = info;
+  self->have_light_level =
+      gst_video_content_light_level_from_caps (&self->light_level, caps);
+  self->have_mastering_info =
+      gst_video_mastering_display_info_from_caps (&self->mastering_info, caps);
   g_mutex_lock (&self->output->lock);
   self->output->mode = mode;
   self->output->video_enabled = TRUE;
@@ -1012,6 +1246,50 @@ gst_decklink_video_sink_set_caps (GstBaseSink * bsink, GstCaps * caps)
   return TRUE;
 }
 
+static BMDDisplayModeFlags
+display_mode_flags (GstDecklinkVideoSink * self, GstDecklinkModeEnum e)
+{
+  const GstDecklinkMode *gst_mode = gst_decklink_get_mode (e);
+  BMDDisplayModeFlags display_flags = gst_mode->mode_flags;
+
+  if (self->output && self->output->output) {
+    IDeckLinkDisplayMode *display_mode = nullptr;
+    bool supports_colorspace = false;
+
+    self->output->attributes->GetFlag (BMDDeckLinkSupportsColorspaceMetadata,
+        &supports_colorspace);
+
+    if (!supports_colorspace) {
+      self->output->output->GetDisplayMode (gst_mode->mode, &display_mode);
+      if (display_mode) {
+        display_flags &= display_mode->GetFlags ();
+        display_mode->Release();
+      }
+    }
+  }
+
+  return display_flags;
+}
+
+static BMDDynamicRange
+device_dynamic_range (GstDecklinkVideoSink * self)
+{
+  BMDDynamicRange range =
+      (BMDDynamicRange) (bmdDynamicRangeSDR | bmdDynamicRangeHDRStaticPQ |
+      bmdDynamicRangeHDRStaticHLG);
+
+  if (self->output && self->output->attributes) {
+    gint64 tmp_int = 0;
+    HRESULT ret =
+        self->output->attributes->GetInt (BMDDeckLinkSupportedDynamicRange,
+        &tmp_int);
+    if (ret == S_OK)
+      range = (BMDDynamicRange) tmp_int;
+  }
+
+  return range;
+}
+
 static GstCaps *
 gst_decklink_video_sink_get_caps (GstBaseSink * bsink, GstCaps * filter)
 {
@@ -1022,15 +1300,21 @@ gst_decklink_video_sink_get_caps (GstBaseSink * bsink, GstCaps * filter)
       && self->video_format == GST_DECKLINK_VIDEO_FORMAT_AUTO)
     mode_caps = gst_decklink_mode_get_template_caps (FALSE);
   else if (self->video_format == GST_DECKLINK_VIDEO_FORMAT_AUTO)
-    mode_caps = gst_decklink_mode_get_caps_all_formats (self->mode, FALSE);
+    mode_caps =
+        gst_decklink_mode_get_caps_all_formats (self->mode,
+        display_mode_flags (self, self->mode), device_dynamic_range (self),
+        FALSE);
   else if (self->mode == GST_DECKLINK_MODE_AUTO)
     mode_caps =
         gst_decklink_pixel_format_get_caps (gst_decklink_pixel_format_from_type
         (self->video_format), FALSE);
-  else
+  else {
     mode_caps =
         gst_decklink_mode_get_caps (self->mode,
-        gst_decklink_pixel_format_from_type (self->video_format), FALSE);
+        display_mode_flags (self, self->mode),
+        gst_decklink_pixel_format_from_type (self->video_format),
+        device_dynamic_range (self), FALSE);
+  }
   mode_caps = gst_caps_make_writable (mode_caps);
   /* For output we support any framerate and only really care about timestamps */
   gst_caps_map_in_place (mode_caps, reset_framerate, NULL);
@@ -1049,12 +1333,6 @@ gst_decklink_video_sink_get_caps (GstBaseSink * bsink, GstCaps * filter)
   GST_DEBUG_OBJECT (self, "Returning caps %" GST_PTR_FORMAT, caps);
 
   return caps;
-}
-
-static GstFlowReturn
-gst_decklink_video_sink_render (GstBaseSink * bsink, GstBuffer * buffer)
-{
-  return GST_FLOW_OK;
 }
 
 void
@@ -1148,8 +1426,9 @@ gst_decklink_video_sink_convert_to_internal_clock (GstDecklinkVideoSink * self,
     *timestamp = gst_clock_get_internal_time (self->output->clock);
 
   GST_DEBUG_OBJECT (self, "Output timestamp %" GST_TIME_FORMAT
-      " using clock epoch %" GST_TIME_FORMAT,
-      GST_TIME_ARGS (*timestamp), GST_TIME_ARGS (self->output->clock_epoch));
+      " using clock epoch %" GST_TIME_FORMAT " and offset %" GST_TIME_FORMAT,
+      GST_TIME_ARGS (*timestamp), GST_TIME_ARGS (self->output->clock_epoch),
+      GST_TIME_ARGS (internal_offset));
 
   if (clock)
     gst_object_unref (clock);
@@ -1563,6 +1842,16 @@ buffer_is_pbo_memory (GstBuffer * buffer)
   return FALSE;
 }
 
+static void
+gst_decklink_video_sink_get_times (GstBaseSink * bsink,
+    GstBuffer * buffer, GstClockTime * start, GstClockTime * end)
+{
+  /* in order to push multiple buffers into decklink, we need to reimplement
+   * basesink's clock synchronisation */
+  *start = GST_CLOCK_TIME_NONE;
+  *end = GST_CLOCK_TIME_NONE;
+}
+
 static GstFlowReturn
 gst_decklink_video_sink_prepare (GstBaseSink * bsink, GstBuffer * buffer)
 {
@@ -1641,6 +1930,7 @@ gst_decklink_video_sink_prepare (GstBaseSink * bsink, GstBuffer * buffer)
     const guint8 *indata;
     gint i, src_stride, dest_stride, stride;
     IDeckLinkMutableVideoFrame *dframe;
+    GstVideoColorimetry colorimetry;
 
     ret = self->output->output->CreateVideoFrame (self->info.width,
         self->info.height, self->info.stride[0], format, bmdFrameFlagDefault,
@@ -1664,13 +1954,16 @@ gst_decklink_video_sink_prepare (GstBaseSink * bsink, GstBuffer * buffer)
       indata += src_stride;
       outdata += dest_stride;
     }
+    colorimetry = vframe.info.colorimetry;
     gst_video_frame_unmap (&vframe);
 
     // Takes ownership of the frame
     frame = new GstDecklinkVideoFrame (dframe);
+    frame->SetColorimetry (&colorimetry);
   } else {
     // Takes ownership of the frame
     frame = new GstDecklinkVideoFrame (&vframe);
+    frame->SetColorimetry (&vframe.info.colorimetry);
   }
 
   tc_meta = gst_buffer_get_video_time_code_meta (buffer);
@@ -1683,24 +1976,20 @@ gst_decklink_video_sink_prepare (GstBaseSink * bsink, GstBuffer * buffer)
     g_free (tc_str);
   }
 
+  if (self->have_light_level)
+    frame->SetLightLevel (&self->light_level);
+  if (self->have_mastering_info)
+    frame->SetMastringInfo (&self->mastering_info);
+
   write_vbi (self, buffer, format, frame, tc_meta);
 
-  gst_decklink_video_sink_convert_to_internal_clock (self, &running_time,
-      &running_time_duration);
+  frame->running_time = running_time;
+  frame->running_time_duration = running_time_duration;
+  frame->sync_buffer = gst_buffer_ref (buffer);
 
-  GST_LOG_OBJECT (self, "Scheduling video frame %p at %" GST_TIME_FORMAT
-      " with duration %" GST_TIME_FORMAT, frame, GST_TIME_ARGS (running_time),
-      GST_TIME_ARGS (running_time_duration));
+  g_queue_push_tail (self->pending_frames, frame);
 
-  ret = self->output->output->ScheduleVideoFrame (frame,
-      running_time, running_time_duration, GST_SECOND);
-  if (ret != S_OK) {
-    GST_ELEMENT_ERROR (self, STREAM, FAILED,
-        (NULL), ("Failed to schedule frame: 0x%08lx", (unsigned long) ret));
-    flow_ret = GST_FLOW_ERROR;
-    goto out;
-  }
-
+  frame = nullptr;
   flow_ret = GST_FLOW_OK;
 
 out:
@@ -1708,6 +1997,154 @@ out:
   if (frame)
     frame->Release ();
 
+  return flow_ret;
+}
+
+static GstFlowReturn
+gst_decklink_video_sink_render (GstBaseSink * bsink, GstBuffer * buffer)
+{
+  GstDecklinkVideoSink *self = GST_DECKLINK_VIDEO_SINK_CAST (bsink);
+  GstFlowReturn flow_ret = GST_FLOW_OK;
+  HRESULT ret;
+
+  if ((flow_ret = gst_decklink_video_sink_prepare (bsink, buffer)) != GST_FLOW_OK)
+    return flow_ret;
+
+  GST_TRACE_OBJECT (bsink, "render with %u pending frames", self->pending_frames->length);
+
+  GST_OBJECT_LOCK (self);
+  if (self->initial_sync) {
+    /* this is effectively the preroll logic. We wait for at least 2 buffers */
+    GstDecklinkVideoFrame *frame;
+
+    if (self->pending_frames->length < 1) {
+      GST_OBJECT_UNLOCK (self);
+      return GST_FLOW_OK;
+    }
+    GST_OBJECT_UNLOCK (self);
+
+    frame = (GstDecklinkVideoFrame *) g_queue_peek_head (self->pending_frames);
+    GST_DEBUG_OBJECT (self, "attempting preroll");
+    flow_ret =
+        gst_base_sink_do_preroll (bsink,
+        GST_MINI_OBJECT_CAST (frame->sync_buffer));
+    if (flow_ret != GST_FLOW_OK)
+      goto out;
+
+    g_mutex_lock (&self->output->lock);
+    if (self->output->start_scheduled_playback)
+      self->output->start_scheduled_playback (self->output->videosink);
+    g_mutex_unlock (&self->output->lock);
+
+    GstClock *clock = gst_element_get_clock (GST_ELEMENT_CAST (self));
+    GST_OBJECT_LOCK (self);
+    self->initial_sync = FALSE;
+    if (clock) {
+      if (clock != self->output->clock) {
+        gst_clock_set_master (self->output->clock, clock);
+      }
+
+      if (self->external_base_time == GST_CLOCK_TIME_NONE
+          || self->internal_base_time == GST_CLOCK_TIME_NONE) {
+        self->external_base_time = gst_clock_get_internal_time (clock);
+        self->internal_base_time =
+            gst_clock_get_internal_time (self->output->clock);
+        self->internal_time_offset = self->internal_base_time;
+      } else if (GST_CLOCK_TIME_IS_VALID (self->internal_pause_time)) {
+        self->internal_time_offset +=
+            gst_clock_get_internal_time (self->output->clock) -
+            self->internal_pause_time;
+        self->internal_pause_time = GST_CLOCK_TIME_NONE;
+      }
+
+      GST_INFO_OBJECT (self, "clock has been set to %" GST_PTR_FORMAT
+          ", updated base times - internal: %" GST_TIME_FORMAT
+          " external: %" GST_TIME_FORMAT " internal offset %"
+          GST_TIME_FORMAT, clock,
+          GST_TIME_ARGS (self->internal_base_time),
+          GST_TIME_ARGS (self->external_base_time),
+          GST_TIME_ARGS (self->internal_time_offset));
+
+      gst_object_unref (clock);
+    } else {
+      GST_ELEMENT_ERROR (self, STREAM, FAILED,
+          (NULL), ("Need a clock to go to PLAYING"));
+      GST_OBJECT_UNLOCK (self);
+      return GST_FLOW_ERROR;
+    }
+  }
+  GST_OBJECT_UNLOCK (self);
+
+
+  while (self->pending_frames->length > 0) {
+    GstDecklinkVideoFrame *frame =
+        (GstDecklinkVideoFrame *) g_queue_pop_head (self->pending_frames);
+    GstClockTime sync_time = frame->running_time;
+    GstClockTime running_time = frame->running_time;
+    GstClockTime running_time_duration = frame->running_time_duration;
+    GstClockTime clock_time, frame_duration;
+    GstClockTimeDiff jitter;
+    GstClockReturn status;
+
+    flow_ret =
+        gst_base_sink_do_preroll (bsink,
+        GST_MINI_OBJECT_CAST (frame->sync_buffer));
+    if (flow_ret != GST_FLOW_OK) {
+      frame->Release ();
+      goto out;
+    }
+
+    if (GST_CLOCK_TIME_IS_VALID (sync_time)) {
+      if (sync_time > 30 * GST_MSECOND) {
+        sync_time -= 30 * GST_MSECOND;
+      } else {
+        sync_time = 0;
+      }
+    }
+
+    do {
+      status = gst_base_sink_wait_clock (bsink, sync_time, &jitter);
+      if (status == GST_CLOCK_BADTIME)
+        break;
+      if (G_UNLIKELY (bsink->flushing)) {
+        frame->Release ();
+        return GST_FLOW_FLUSHING;
+      }
+    } while (status == GST_CLOCK_UNSCHEDULED);
+
+    /* if we don't have a clock or are not syncing, then display the frame 'now' */
+    clock_time = gst_clock_get_internal_time (self->output->clock);
+    if (status == GST_CLOCK_BADTIME) {
+      running_time = clock_time;
+    }
+
+    gst_decklink_video_sink_convert_to_internal_clock (self, &running_time,
+        &running_time_duration);
+
+    frame_duration =
+        gst_util_uint64_scale_int (GST_SECOND, self->output->mode->fps_d,
+        self->output->mode->fps_n);
+    running_time = gst_util_uint64_scale (running_time, 1, frame_duration);
+    running_time = gst_util_uint64_scale_ceil (running_time, frame_duration, 1);
+
+    GST_DEBUG_OBJECT (self, "Scheduling video frame %p at %" GST_TIME_FORMAT
+        " with duration %" GST_TIME_FORMAT " sync time %" GST_TIME_FORMAT
+        " clock time %" GST_TIME_FORMAT, frame, GST_TIME_ARGS (running_time),
+        GST_TIME_ARGS (running_time_duration), GST_TIME_ARGS (sync_time), GST_TIME_ARGS (clock_time));
+
+    ret = self->output->output->ScheduleVideoFrame (frame,
+        running_time, running_time_duration, GST_SECOND);
+    if (ret != S_OK) {
+      GST_ELEMENT_ERROR (self, STREAM, FAILED,
+          (NULL), ("Failed to schedule frame: 0x%08lx", (unsigned long) ret));
+      frame->Release ();
+      flow_ret = GST_FLOW_ERROR;
+      goto out;
+    }
+    frame->Release ();
+  }
+
+out:
   return flow_ret;
 }
 
@@ -1960,48 +2397,12 @@ gst_decklink_video_sink_change_state (GstElement * element,
       gst_element_post_message (element,
           gst_message_new_clock_provide (GST_OBJECT_CAST (element),
               self->output->clock, TRUE));
-      g_mutex_lock (&self->output->lock);
-      if (self->output->start_scheduled_playback)
-        self->output->start_scheduled_playback (self->output->videosink);
-      g_mutex_unlock (&self->output->lock);
       break;
     case GST_STATE_CHANGE_PAUSED_TO_PLAYING:{
-      GstClock *clock;
-
-      clock = gst_element_get_clock (GST_ELEMENT_CAST (self));
-      if (clock) {
-        if (clock != self->output->clock) {
-          gst_clock_set_master (self->output->clock, clock);
-        }
-
-        GST_OBJECT_LOCK (self);
-        if (self->external_base_time == GST_CLOCK_TIME_NONE
-            || self->internal_base_time == GST_CLOCK_TIME_NONE) {
-          self->external_base_time = gst_clock_get_internal_time (clock);
-          self->internal_base_time =
-              gst_clock_get_internal_time (self->output->clock);
-          self->internal_time_offset = self->internal_base_time;
-        } else if (GST_CLOCK_TIME_IS_VALID (self->internal_pause_time)) {
-          self->internal_time_offset +=
-              gst_clock_get_internal_time (self->output->clock) -
-              self->internal_pause_time;
-        }
-
-        GST_INFO_OBJECT (self, "clock has been set to %" GST_PTR_FORMAT
-            ", updated base times - internal: %" GST_TIME_FORMAT
-            " external: %" GST_TIME_FORMAT " internal offset %"
-            GST_TIME_FORMAT, clock,
-            GST_TIME_ARGS (self->internal_base_time),
-            GST_TIME_ARGS (self->external_base_time),
-            GST_TIME_ARGS (self->internal_time_offset));
-        GST_OBJECT_UNLOCK (self);
-
-        gst_object_unref (clock);
-      } else {
-        GST_ELEMENT_ERROR (self, STREAM, FAILED,
-            (NULL), ("Need a clock to go to PLAYING"));
-        ret = GST_STATE_CHANGE_FAILURE;
-      }
+      GST_OBJECT_LOCK (self);
+      self->initial_sync = TRUE;
+      GST_INFO_OBJECT (self, "initial sync set to TRUE");
+      GST_OBJECT_UNLOCK (self);
       break;
     }
     case GST_STATE_CHANGE_PAUSED_TO_READY:
@@ -2010,6 +2411,9 @@ gst_decklink_video_sink_change_state (GstElement * element,
         ret = GST_STATE_CHANGE_FAILURE;
       break;
     case GST_STATE_CHANGE_PLAYING_TO_PAUSED:
+      GST_OBJECT_LOCK (self);
+      self->initial_sync = FALSE;
+      GST_OBJECT_UNLOCK (self);
       break;
     default:
       break;

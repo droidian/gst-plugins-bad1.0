@@ -414,6 +414,18 @@ mpegts_packetizer_parse_adaptation_field_control (MpegTSPacketizer2 *
     if (packetizer->calculate_skew
         && GST_CLOCK_TIME_IS_VALID (packetizer->last_in_time)) {
       pcrtable = get_pcr_table (packetizer, packet->pid);
+      /* There is a signalled discontinuity and we deal with regularly timed
+       * input. Reset observations */
+      if (afcflags & MPEGTS_AFC_DISCONTINUITY_FLAG &&
+          (GST_CLOCK_TIME_IS_VALID (packetizer->last_dts) ||
+              GST_CLOCK_TIME_IS_VALID (packetizer->last_pts))) {
+        MpegTSPCR *fallback = get_pcr_table (packetizer, 0x1fff);
+        GST_DEBUG ("pcr 0x%04x Discontinuity signalled, resetting observations",
+            packet->pid);
+        pcrtable->base_time = GST_CLOCK_TIME_NONE;
+        pcrtable->base_pcrtime = GST_CLOCK_TIME_NONE;
+        fallback->base_time = GST_CLOCK_TIME_NONE;
+      }
       calculate_skew (packetizer, pcrtable, packet->pcr,
           packetizer->last_in_time);
     }
@@ -871,6 +883,15 @@ mpegts_packetizer_next_packet (MpegTSPacketizer2 * packetizer,
     if (!mpegts_packetizer_map (packetizer, packet_size))
       return PACKET_NEED_MORE;
 
+    /* Get M2TS header start */
+    if (packet_size == MPEGTS_M2TS_PACKETSIZE) {
+      guint8 *m2ts_header_start = &packetizer->map_data[packetizer->map_offset];
+      packet->m2ts_header_start = m2ts_header_start;
+      GST_MEMDUMP ("M2TS header start", packet->m2ts_header_start, 4);
+    } else
+      packet->m2ts_header_start = NULL;
+
+    /* Get TS packet data start */
     packet_data = &packetizer->map_data[packetizer->map_offset + sync_offset];
 
     /* Check sync byte */
@@ -979,6 +1000,12 @@ mpegts_packetizer_push_section (MpegTSPacketizer2 * packetizer,
     }
     stream = mpegts_packetizer_stream_new (packet->pid);
     packetizer->streams[packet->pid] = stream;
+  }
+
+  if (G_UNLIKELY (packet->afc_flags & MPEGTS_AFC_DISCONTINUITY_FLAG)) {
+    GST_DEBUG ("PID 0x%04x  discontinuity flag, resetting stream counter",
+        packet->pid);
+    stream->continuity_counter = CONTINUITY_UNSET;
   }
 
   GST_MEMDUMP ("Full packet data", packet->data,

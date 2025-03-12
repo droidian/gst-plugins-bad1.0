@@ -6,9 +6,9 @@
 #, fuzzy
 msgid ""
 msgstr ""
-"Project-Id-Version: gst-plugins-bad-1.24.12\n"
+"Project-Id-Version: gst-plugins-bad-1.26.0\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2025-01-29 20:14+0000\n"
+"POT-Creation-Date: 2025-03-11 20:15+0000\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -17,7 +17,7 @@ msgstr ""
 "Content-Type: text/plain; charset=CHARSET\n"
 "Content-Transfer-Encoding: 8bit\n"
 
-#: ext/curl/gstcurlhttpsrc.c:1440
+#: ext/curl/gstcurlhttpsrc.c:1441
 msgid "No URL set."
 msgstr ""
 
@@ -48,7 +48,7 @@ msgstr ""
 msgid "Could not read DVD."
 msgstr ""
 
-#: ext/smoothstreaming/gstmssdemux.c:430
+#: ext/smoothstreaming/gstmssdemux.c:439
 #: gst-libs/gst/adaptivedemux/gstadaptivedemux.c:735
 msgid "This file contains no playable streams."
 msgstr ""
@@ -75,7 +75,7 @@ msgstr ""
 msgid "Digitalzoom element couldn't be created"
 msgstr ""
 
-#: gst/dvdspu/gstdvdspu.c:1559
+#: gst/dvdspu/gstdvdspu.c:1570
 msgid "Subpicture format was not configured before data flow"
 msgstr ""
 
@@ -89,7 +89,7 @@ msgid "Couldn't download fragments"
 msgstr ""
 
 #: gst-libs/gst/adaptivedemux/gstadaptivedemux.c:4102
-#: gst/mpegtsdemux/mpegtsbase.c:1775
+#: gst/mpegtsdemux/mpegtsbase.c:1776
 msgid "Internal data stream error."
 msgstr ""
 

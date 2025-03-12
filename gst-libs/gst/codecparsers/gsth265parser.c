@@ -37,15 +37,15 @@
  * Then, depending on the #GstH265NalUnitType of the newly parsed #GstH265NalUnit,
  * you should call the differents functions to parse the structure:
  *
- *   * From #GST_H265_NAL_SLICE_TRAIL_N to #GST_H265_NAL_SLICE_CRA_NUT: gst_h265_parser_parse_slice_hdr()
+ *   * From %GST_H265_NAL_SLICE_TRAIL_N to %GST_H265_NAL_SLICE_CRA_NUT: gst_h265_parser_parse_slice_hdr()
  *
  *   * `GST_H265_NAL_*_SEI`: gst_h265_parser_parse_sei()
  *
- *   * #GST_H265_NAL_VPS: gst_h265_parser_parse_vps()
+ *   * %GST_H265_NAL_VPS: gst_h265_parser_parse_vps()
  *
- *   * #GST_H265_NAL_SPS: gst_h265_parser_parse_sps()
+ *   * %GST_H265_NAL_SPS: gst_h265_parser_parse_sps()
  *
- *   * #GST_H265_NAL_PPS: #gst_h265_parser_parse_pps()
+ *   * %GST_H265_NAL_PPS: #gst_h265_parser_parse_pps()
  *
  *   * Any other: gst_h265_parser_parse_nal()
  *
@@ -69,8 +69,6 @@
 
 #include <gst/base/gstbytereader.h>
 #include <gst/base/gstbitreader.h>
-#include <string.h>
-#include <math.h>
 
 #ifndef GST_DISABLE_GST_DEBUG
 #define GST_CAT_DEFAULT gst_h265_debug_category_get()
@@ -1180,7 +1178,7 @@ gst_h265_parser_parse_recovery_point (GstH265Parser * parser,
     goto error;
   }
 
-  max_pic_order_cnt_lsb = pow (2, (sps->log2_max_pic_order_cnt_lsb_minus4 + 4));
+  max_pic_order_cnt_lsb = 1 << (sps->log2_max_pic_order_cnt_lsb_minus4 + 4);
   READ_SE_ALLOWED (nr, rp->recovery_poc_cnt, -max_pic_order_cnt_lsb / 2,
       max_pic_order_cnt_lsb - 1);
   READ_UINT8 (nr, rp->exact_match_flag, 1);
@@ -1402,13 +1400,12 @@ gst_h265_parser_new (void)
  * gst_h265_parser_free:
  * @parser: the #GstH265Parser to free
  *
- * Frees @parser and sets it to %NULL
+ * Frees @parser
  */
 void
 gst_h265_parser_free (GstH265Parser * parser)
 {
   g_free (parser);
-  parser = NULL;
 }
 
 /**
@@ -1827,7 +1824,7 @@ gst_h265_parser_parse_nal (GstH265Parser * parser, GstH265NalUnit * nalu)
 /**
  * gst_h265_parser_parse_vps:
  * @parser: a #GstH265Parser
- * @nalu: The #GST_H265_NAL_VPS #GstH265NalUnit to parse
+ * @nalu: The %GST_H265_NAL_VPS #GstH265NalUnit to parse
  * @vps: The #GstH265VPS to fill.
  *
  * Parses @data, and fills the @vps structure.
@@ -1852,7 +1849,7 @@ gst_h265_parser_parse_vps (GstH265Parser * parser, GstH265NalUnit * nalu,
 
 /**
  * gst_h265_parse_vps:
- * @nalu: The #GST_H265_NAL_VPS #GstH265NalUnit to parse
+ * @nalu: The %GST_H265_NAL_VPS #GstH265NalUnit to parse
  * @sps: The #GstH265VPS to fill.
  *
  * Parses @data, and fills the @vps structure.
@@ -1997,7 +1994,7 @@ error:
 /**
  * gst_h265_parser_parse_sps:
  * @parser: a #GstH265Parser
- * @nalu: The #GST_H265_NAL_SPS #GstH265NalUnit to parse
+ * @nalu: The %GST_H265_NAL_SPS #GstH265NalUnit to parse
  * @sps: The #GstH265SPS to fill.
  * @parse_vui_params: Whether to parse the vui_params or not
  *
@@ -2025,7 +2022,7 @@ gst_h265_parser_parse_sps (GstH265Parser * parser, GstH265NalUnit * nalu,
 /**
  * gst_h265_parse_sps:
  * parser: The #GstH265Parser
- * @nalu: The #GST_H265_NAL_SPS #GstH265NalUnit to parse
+ * @nalu: The %GST_H265_NAL_SPS #GstH265NalUnit to parse
  * @sps: The #GstH265SPS to fill.
  * @parse_vui_params: Whether to parse the vui_params or not
  *
@@ -2288,7 +2285,7 @@ error:
 /**
  * gst_h265_parse_pps:
  * @parser: a #GstH265Parser
- * @nalu: The #GST_H265_NAL_PPS #GstH265NalUnit to parse
+ * @nalu: The %GST_H265_NAL_PPS #GstH265NalUnit to parse
  * @pps: The #GstH265PPS to fill.
  *
  * Parses @data, and fills the @pps structure.
@@ -2369,14 +2366,11 @@ gst_h265_parse_pps (GstH265Parser * parser, GstH265NalUnit * nalu,
         MinCbLog2SizeY + sps->log2_diff_max_min_luma_coding_block_size;
     CtbSizeY = 1 << CtbLog2SizeY;
     pps->PicHeightInCtbsY =
-        ceil ((gdouble) sps->pic_height_in_luma_samples / (gdouble) CtbSizeY);
-    pps->PicWidthInCtbsY =
-        ceil ((gdouble) sps->pic_width_in_luma_samples / (gdouble) CtbSizeY);
+        div_ceil (sps->pic_height_in_luma_samples, CtbSizeY);
+    pps->PicWidthInCtbsY = div_ceil (sps->pic_width_in_luma_samples, CtbSizeY);
 
-    READ_UE_ALLOWED (&nr,
-        pps->num_tile_columns_minus1, 0, pps->PicWidthInCtbsY - 1);
-    READ_UE_ALLOWED (&nr,
-        pps->num_tile_rows_minus1, 0, pps->PicHeightInCtbsY - 1);
+    READ_UE_MAX (&nr, pps->num_tile_columns_minus1, pps->PicWidthInCtbsY - 1);
+    READ_UE_MAX (&nr, pps->num_tile_rows_minus1, pps->PicHeightInCtbsY - 1);
 
     if (pps->num_tile_columns_minus1 + 1 >
         G_N_ELEMENTS (pps->column_width_minus1)) {
@@ -2494,11 +2488,10 @@ gst_h265_parse_pps (GstH265Parser * parser, GstH265NalUnit * nalu,
         sps->bit_depth_luma_minus8 > 2 ? sps->bit_depth_luma_minus8 - 2 : 0;
     MaxBitDepthC =
         sps->bit_depth_chroma_minus8 > 2 ? sps->bit_depth_chroma_minus8 - 2 : 0;
-    READ_UE_ALLOWED (&nr, pps->pps_extension_params.log2_sao_offset_scale_luma,
-        0, MaxBitDepthY);
-    READ_UE_ALLOWED (&nr,
-        pps->pps_extension_params.log2_sao_offset_scale_chroma, 0,
-        MaxBitDepthC);
+    READ_UE_MAX (&nr, pps->pps_extension_params.log2_sao_offset_scale_luma,
+        MaxBitDepthY);
+    READ_UE_MAX (&nr,
+        pps->pps_extension_params.log2_sao_offset_scale_chroma, MaxBitDepthC);
   }
 
   if (pps->pps_multilayer_extension_flag) {
@@ -2607,7 +2600,7 @@ error:
 /**
  * gst_h265_parser_parse_pps:
  * @parser: a #GstH265Parser
- * @nalu: The #GST_H265_NAL_PPS #GstH265NalUnit to parse
+ * @nalu: The %GST_H265_NAL_PPS #GstH265NalUnit to parse
  * @pps: The #GstH265PPS to fill.
  *
  * Parses @data, and fills the @pps structure.
@@ -2692,10 +2685,8 @@ gst_h265_parser_fill_pps (GstH265Parser * parser, GstH265PPS * pps)
   MinCbLog2SizeY = sps->log2_min_luma_coding_block_size_minus3 + 3;
   CtbLog2SizeY = MinCbLog2SizeY + sps->log2_diff_max_min_luma_coding_block_size;
   CtbSizeY = 1 << CtbLog2SizeY;
-  pps->PicHeightInCtbsY =
-      ceil ((gdouble) sps->pic_height_in_luma_samples / (gdouble) CtbSizeY);
-  pps->PicWidthInCtbsY =
-      ceil ((gdouble) sps->pic_width_in_luma_samples / (gdouble) CtbSizeY);
+  pps->PicHeightInCtbsY = div_ceil (sps->pic_height_in_luma_samples, CtbSizeY);
+  pps->PicWidthInCtbsY = div_ceil (sps->pic_width_in_luma_samples, CtbSizeY);
 
   if (pps->init_qp_minus26 < -(26 + qp_bd_offset))
     return GST_H265_PARSER_BROKEN_LINK;
