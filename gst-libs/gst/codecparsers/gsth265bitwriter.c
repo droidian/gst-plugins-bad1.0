@@ -23,9 +23,8 @@
 #endif
 
 #include "gsth265bitwriter.h"
-#include <gst/codecparsers/nalutils.h>
+#include "nalutils.h"
 #include <gst/base/gstbitwriter.h>
-#include <math.h>
 
 #ifndef GST_DISABLE_GST_DEBUG
 #define GST_CAT_DEFAULT gst_h265_debug_category_get()
@@ -1565,10 +1564,8 @@ _h265_bit_writer_slice_header (const GstH265SliceHdr * slice,
     CtbLog2SizeY =
         MinCbLog2SizeY + sps->log2_diff_max_min_luma_coding_block_size;
     CtbSizeY = 1 << CtbLog2SizeY;
-    PicHeightInCtbsY =
-        ceil ((gdouble) sps->pic_height_in_luma_samples / (gdouble) CtbSizeY);
-    PicWidthInCtbsY =
-        ceil ((gdouble) sps->pic_width_in_luma_samples / (gdouble) CtbSizeY);
+    PicHeightInCtbsY = div_ceil (sps->pic_height_in_luma_samples, CtbSizeY);
+    PicWidthInCtbsY = div_ceil (sps->pic_width_in_luma_samples, CtbSizeY);
     PicSizeInCtbsY = PicWidthInCtbsY * PicHeightInCtbsY;
 
     n = gst_util_ceil_log2 (PicSizeInCtbsY);
@@ -2260,6 +2257,7 @@ gst_h265_bit_writer_convert_to_nal (guint nal_prefix_size,
       GST_H265_BIT_WRITER_ERROR);
   g_return_val_if_fail (raw_data != NULL, GST_H265_BIT_WRITER_ERROR);
   g_return_val_if_fail (raw_size > 0, GST_H265_BIT_WRITER_ERROR);
+  g_return_val_if_fail (raw_size / 8 <= G_MAXUINT, GST_H265_BIT_WRITER_ERROR);
   g_return_val_if_fail (nal_data != NULL, GST_H265_BIT_WRITER_ERROR);
   g_return_val_if_fail (nal_size != NULL, GST_H265_BIT_WRITER_ERROR);
   g_return_val_if_fail (*nal_size > 0, GST_H265_BIT_WRITER_ERROR);
@@ -2287,7 +2285,7 @@ gst_h265_bit_writer_convert_to_nal (guint nal_prefix_size,
 
   nal_writer_init (&nw, nal_prefix_size, packetized);
 
-  if (!nal_writer_put_bytes (&nw, raw_data, raw_size / 8))
+  if (!nal_writer_put_bytes (&nw, raw_data, (guint) (raw_size / 8)))
     goto error;
 
   if (raw_size % 8) {

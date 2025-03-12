@@ -23,7 +23,7 @@
 
 #include <Metal/Metal.h>
 
-#if !HAVE_IOS
+#ifndef HAVE_IOS
 #import <AppKit/AppKit.h>
 #endif
 #include "iosurfacevulkanmemory.h"
@@ -138,6 +138,7 @@ gst_video_texture_cache_vulkan_constructed (GObject * object)
 {
   GstVideoTextureCacheVulkan *cache_vulkan = GST_VIDEO_TEXTURE_CACHE_VULKAN (object);
 
+  G_OBJECT_CLASS (gst_video_texture_cache_vulkan_parent_class)->constructed (object);
   g_return_if_fail (GST_IS_VULKAN_DEVICE (cache_vulkan->device));
 
   gst_io_surface_vulkan_memory_init ();
@@ -288,7 +289,9 @@ gst_io_surface_vulkan_memory_set_surface (GstIOSurfaceVulkanMemory * memory,
     IOSurfaceIncrementUseCount (surface);
 
     gpu = gst_vulkan_device_get_physical_device (vk_mem->device);
+    G_GNUC_BEGIN_IGNORE_DEPRECATIONS;
     vkGetMTLDeviceMVK (gpu, &mtl_dev);
+    G_GNUC_END_IGNORE_DEPRECATIONS;
 
     /* We cannot use vkUseIOSurfaceMVK() for multi-planer as MoltenVK does not
      * support them. */
@@ -300,7 +303,9 @@ gst_io_surface_vulkan_memory_set_surface (GstIOSurfaceVulkanMemory * memory,
     texture_data->pixbuf = (CVPixelBufferRef) vk_mem->user_data;
     texture_data->texture = (__bridge_retained gpointer) texture;
 
+    G_GNUC_BEGIN_IGNORE_DEPRECATIONS;
     VkResult err = vkSetMTLTextureMVK (memory->vulkan_mem.image, texture);
+    G_GNUC_END_IGNORE_DEPRECATIONS;
     GST_DEBUG ("bound texture %p to image %" GST_VULKAN_NON_DISPATCHABLE_HANDLE_FORMAT ": 0x%x",
                texture, memory->vulkan_mem.image, err);
 

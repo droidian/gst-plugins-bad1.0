@@ -97,7 +97,7 @@ get_drmdma_format (void)
     gst_structure_remove_field (new_structure, "height");
     gst_caps_append_structure (drm_caps, new_structure);
     gst_caps_set_features_simple (drm_caps,
-        gst_caps_features_new_single ("memory:DMABuf"));
+        gst_caps_features_new_single_static_str ("memory:DMABuf"));
 
     GST_DEBUG ("have caps %" GST_PTR_FORMAT, drm_caps);
     /* should be fixed without width/height */

@@ -56,8 +56,6 @@ G_BEGIN_DECLS
 #define GST_WEBRTC_DEPRECATED_FOR(f) G_DEPRECATED_FOR(f) GST_WEBRTC_API
 #endif
 
-#include <gst/webrtc/webrtc-enumtypes.h>
-
 /**
  * GstWebRTCDTLSTransport:
  */
@@ -449,7 +447,7 @@ typedef enum /*<underscore_name=gst_webrtc_ice_transport_policy>*/
  * GstWebRTCKind:
  * @GST_WEBRTC_KIND_UNKNOWN: Kind has not yet been set
  * @GST_WEBRTC_KIND_AUDIO: Kind is audio
- * @GST_WEBRTC_KIND_VIDEO: Kind is audio
+ * @GST_WEBRTC_KIND_VIDEO: Kind is video
  *
  * https://w3c.github.io/mediacapture-main/#dom-mediastreamtrack-kind
  *

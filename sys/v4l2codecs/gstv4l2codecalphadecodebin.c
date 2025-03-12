@@ -18,6 +18,17 @@
  * Boston, MA 02110-1301, USA.
  */
 
+/**
+ * SECTION:gstv4l2codecalphadecodebin
+ * @title: GstV4l2CodecAlphaDecodeBin
+ * @short_description: V4L2 base class to implement VP8/VP9 alpha decoding.
+ *
+ * V4L2 base class to implement VP8/VP9 alpha decoding.
+ *
+ * Since: 1.20
+ */
+
+
 #ifdef HAVE_CONFIG_H
 #include "config.h"
 #endif
@@ -26,6 +37,14 @@
 
 #include "gstv4l2codecalphadecodebin.h"
 #include "gstv4l2decoder.h"
+
+/* When wrapping, use the original rank plus this offset. The ad-hoc rules is
+ * that hardware implementation will use PRIMARY+1 or +2 to override the
+ * software decoder, so the offset must be large enough to jump over those.
+ * This should also be small enough so that a marginal (64) or secondary
+ * wrapper does not cross the PRIMARY line.
+ */
+#define GST_V4L2_CODEC_ALPHA_DECODE_BIN_RANK_OFFSET 10
 
 GST_DEBUG_CATEGORY_STATIC (v4l2_codecalphadecodebin_debug);
 #define GST_CAT_DEFAULT (v4l2_codecalphadecodebin_debug)
@@ -224,8 +243,15 @@ gst_v4l2_codec_alpha_decode_bin_register (GstPlugin * plugin,
 {
   /* TODO check that we have compatible src format */
 
-  gst_v4l2_decoder_register (plugin,
-      GST_TYPE_V4L2_CODEC_ALPHA_DECODE_BIN, class_init, class_data, NULL,
-      element_name_tmpl, device,
+  GTypeInfo type_info = {
+    .class_size = sizeof (GstV4l2CodecAlphaDecodeBinClass),
+    .class_init = class_init,
+    .class_data = class_data,
+    .instance_size = sizeof (GstV4l2CodecAlphaDecodeBin),
+    .instance_init = NULL,
+  };
+
+  gst_v4l2_decoder_register (plugin, GST_TYPE_V4L2_CODEC_ALPHA_DECODE_BIN,
+      &type_info, element_name_tmpl, device,
       rank + GST_V4L2_CODEC_ALPHA_DECODE_BIN_RANK_OFFSET, NULL);
 }

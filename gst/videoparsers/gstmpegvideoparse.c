@@ -196,7 +196,7 @@ gst_mpegv_parse_reset_frame (GstMpegvParse * mpvparse)
   mpvparse->ext_count = 0;
   mpvparse->slice_count = 0;
   mpvparse->slice_offset = 0;
-  gst_video_clear_user_data (&mpvparse->user_data);
+  gst_video_clear_user_data (&mpvparse->user_data, FALSE);
 }
 
 static void
@@ -869,6 +869,7 @@ gst_mpegv_parse_update_src_caps (GstMpegvParse * mpvparse)
       switch (level_c) {
         case 2:
           level = levels[0];
+          /* FALLTHROUGH */
         case 5:
           if (!level)
             level = levels[2];
@@ -876,12 +877,15 @@ gst_mpegv_parse_update_src_caps (GstMpegvParse * mpvparse)
           break;
         case 10:
           level = levels[0];
+          /* FALLTHROUGH */
         case 11:
           if (!level)
             level = levels[1];
+          /* FALLTHROUGH */
         case 13:
           if (!level)
             level = levels[2];
+          /* FALLTHROUGH */
         case 14:
           if (!level)
             level = levels[3];

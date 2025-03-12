@@ -285,7 +285,7 @@ _create_internal_pool (GstVaAV1Dec * self, gint width, gint height)
   }
 
   gst_caps_set_features_simple (caps,
-      gst_caps_features_from_string (GST_CAPS_FEATURE_MEMORY_VA));
+      gst_caps_features_new_single_static_str (GST_CAPS_FEATURE_MEMORY_VA));
 
   surface_formats = gst_va_decoder_get_surface_formats (base->decoder);
   allocator = gst_va_allocator_new (base->display, surface_formats);
@@ -922,7 +922,7 @@ gst_va_av1_dec_end_picture (GstAV1Decoder * decoder, GstAV1Picture * picture)
   GstVaBaseDec *base = GST_VA_BASE_DEC (decoder);
   GstVaDecodePicture *va_pic;
 
-  GST_LOG_OBJECT (self, "end picture %p, (system_frame_number %d)",
+  GST_LOG_OBJECT (self, "end picture %p, (system_frame_number %u)",
       picture, GST_CODEC_PICTURE_FRAME_NUMBER (picture));
 
   va_pic = gst_av1_picture_get_user_data (picture);
@@ -949,7 +949,7 @@ gst_va_av1_dec_output_picture (GstAV1Decoder * decoder,
       picture->frame_hdr.show_existing_frame);
 
   GST_LOG_OBJECT (self,
-      "Outputting picture %p (system_frame_number %d)",
+      "Outputting picture %p (system_frame_number %u)",
       picture, codec_picture->system_frame_number);
 
   if (picture->frame_hdr.show_existing_frame) {
