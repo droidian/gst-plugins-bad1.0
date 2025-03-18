@@ -1,3 +1,357 @@
+=== release 1.24.12 ===
+
+2025-01-29 20:12:29 +0000  Tim-Philipp Müller <tim@centricular.com>
+
+	* NEWS:
+	* RELEASE:
+	* gst-plugins-bad.doap:
+	* meson.build:
+	  Release 1.24.12
+
+2024-12-30 21:59:03 +0100  Samuel Thibault <samuel.thibault@ens-lyon.org>
+
+	* ext/gtk/meson.build:
+	* tests/examples/gtk/meson.build:
+	* tests/examples/waylandsink/meson.build:
+	  meson: Fix build with gtk3 but not wayland
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/8260>
+
+2025-01-20 18:19:18 +0100  Andoni Morales Alastruey <ylatuya@gmail.com>
+
+	* sys/applemedia/vtdec.c:
+	  vtdec: fix seeks hangs due to a race condition draining
+	  If the drain function of the decoder triggered by FLUSH_START
+	  is run while the output loop is running, once the output loop
+	  finished vtdec->downstream_ret will be GST_FLOW_FLUSHING instead
+	  of GST_FLOW_OK, which must not be treated as an error since
+	  the queue is cleaned correctly as well.
+	  Fix #4179
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/8361>
+
+2025-01-23 13:20:50 +0100  Guillaume Desmottes <guillaume.desmottes@onestream.live>
+
+	* ext/wpe/gstwpevideosrc.cpp:
+	  wpe: remove glFlush() when filling buffer
+	  According to https://gitlab.freedesktop.org/gstreamer/gstreamer/-/issues/4162#note_2739338
+	  it was introduced as workaround for tearing issues.
+	  I do not experience any tearing without flushing on both nvidia and AMD
+	  GPU, so I suppose it's no longer needed.
+	  Slightly improve CPU usage according to my tests.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/8355>
+
+2025-01-20 18:37:23 +0200  Sebastian Dröge <sebastian@centricular.com>
+
+	* gst/mpegtsdemux/mpegtspacketizer.c:
+	  tsdemux: Fix backwards PTS wraparound detection with ignore-pcr=true
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/8332>
+
+2025-01-10 14:15:21 +0200  Sebastian Dröge <sebastian@centricular.com>
+
+	* sys/decklink/gstdecklinkvideosink.cpp:
+	  decklinkvideosink: Fix handling of caps framerate in auto mode
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/8306>
+
+2025-01-09 00:42:48 +0100  Carlos Bentzen <cadubentzen@igalia.com>
+
+	* ext/webrtc/gstwebrtcbin.c:
+	* tests/check/elements/webrtcbin.c:
+	  webrtc: fix duplicate payload types with RTX and multiple video codecs
+	  Before this patch, there could be duplicate payload types in offers that
+	  have, within a media section, multiple codecs and RTX enabled:
+	  ```
+	  m=video 9 UDP/TLS/RTP/SAVPF 96 97 97 <-- HAS DUPLICATES
+	  a=sendrecv
+	  a=rtpmap:96 VP8/90000
+	  a=rtcp-fb:96 nack
+	  a=rtcp-fb:96 nack pli
+	  a=rtcp-fb:96 ccm fir
+	  a=rtcp-fb:96 transport-cc
+	  a=rtpmap:97 H264/90000
+	  a=rtcp-fb:97 nack
+	  a=rtcp-fb:97 nack pli
+	  a=rtcp-fb:97 ccm fir
+	  a=rtcp-fb:97 transport-cc
+	  a=rtpmap:97 rtx/90000  <--------- PT IS DUPLICATE
+	  a=fmtp:97 apt=96
+	  ```
+	  Fix this by populating the media_mapping array with all media formats
+	  rather than only the first one. The added test case reproduces the issue,
+	  which fails without this patch.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/8294>
+
+2025-01-09 11:39:11 +0100  Edward Hervey <edward@centricular.com>
+
+	* sys/wasapi/gstwasapisink.c:
+	  wasapi: Use signed value for can_frames
+	  The can retrieval function can return negative values (which will be properly handled)
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/8293>
+
+2025-01-09 10:08:23 +0100  Edward Hervey <edward@centricular.com>
+
+	* sys/amfcodec/gstamfav1enc.cpp:
+	* sys/amfcodec/gstamfh264enc.cpp:
+	* sys/amfcodec/gstamfh265enc.cpp:
+	  amfcodec: Add missing break statement
+	  Setting frame-sad would also set ltr
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/8293>
+
+2025-01-06 09:57:33 +0100  Edward Hervey <edward@centricular.com>
+
+	* gst-libs/gst/codecparsers/gsth265bitwriter.c:
+	  h265bitwriter: Don't use type too small
+	  The computed `coef_val` could exceed the maximum range of a gint8. Use a bigger
+	  one, the checks after will ensure it's properly cropped/padded
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/8293>
+
+2025-01-05 12:08:24 +0100  Edward Hervey <edward@centricular.com>
+
+	* gst-libs/gst/mpegts/gstmpegtssection.c:
+	  mpegts: Add missing break
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/8293>
+
+2025-01-05 11:46:21 +0100  Edward Hervey <edward@centricular.com>
+
+	* gst-libs/gst/mse/gstmsemediatype.c:
+	  msemediabuffer: Fix ASCII character detection
+	  Use glib function. The previous check was checking whether a signed int was
+	  lower than its limit (which ... is always TRUE).
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/8293>
+
+2025-01-05 11:43:49 +0100  Edward Hervey <edward@centricular.com>
+
+	* gst-libs/gst/mse/gstsourcebuffer.c:
+	  msesourcebuffer: Fix unsigned value handling
+	  Use the explicit valid clocktime handler instead
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/8293>
+
+2025-01-05 11:41:44 +0100  Edward Hervey <edward@centricular.com>
+
+	* gst/rist/gstristsink.c:
+	  ristsink: Add missing break
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/8293>
+
+2025-01-07 12:56:13 +0200  Sebastian Dröge <sebastian@centricular.com>
+
+	* sys/decklink/gstdecklinkaudiosink.cpp:
+	  decklinkaudiosink: Don't crash if started without corresponding video sink
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/8291>
+
+2025-01-09 16:13:44 -0500  Monty C <montyc1999@gmail.com>
+
+	* sys/d3d12/hlsl/VSMain_color.hlsl:
+	* sys/d3d12/hlsl/VSMain_coord.hlsl:
+	* sys/d3d12/hlsl/VSMain_pos.hlsl:
+	  d3d12: Fix shaders failing to compile with newer dxc versions
+	  Newer dxc versions enable HLSL 2021 by default, which disallows implicit casting of structs.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/8274>
+
+2025-01-09 17:23:41 +0000  Colin Kinloch <colin.kinloch@collabora.com>
+
+	* gst-libs/gst/wayland/gstwldisplay.c:
+	  wayland: Print table split when DMABuf format changes
+	  The `zwp_linux_dmabuf_v1` doesn't specify an order for modifier events
+	  to be sent.
+	  In my case the linear format was sent last resulting in the first item
+	  in each row being the previous format.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/8277>
+
+2024-12-25 15:04:03 +0100  Philippe Normand <philn@igalia.com>
+
+	* ext/wpe/gstwpethreadedview.cpp:
+	* ext/wpe/gstwpethreadedview.h:
+	* ext/wpe/gstwpevideosrc.cpp:
+	  wpevideosrc: Clear cached SHM buffers after caps re-negotiation
+	  Otherwise buffers not corresponding to the negotiated caps might be pushed
+	  downstream.
+	  Fixes #4094
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/8266>
+
+2024-12-27 13:28:18 +0100  Philippe Normand <philn@igalia.com>
+
+	* ext/wpe/gstwpevideosrc.cpp:
+	  wpevideosrc: Post progress messages on the bus
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/8265>
+
+2024-12-25 14:42:16 +0100  Philippe Normand <philn@igalia.com>
+
+	* ext/wpe/gstwpevideosrc.cpp:
+	  wpevideosrc: Handle latency queries
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/8265>
+
+2025-01-06 20:11:58 +0000  Tim-Philipp Müller <tim@centricular.com>
+
+	* meson.build:
+	  Back to development after 1.24.11
+
+=== release 1.24.11 ===
+
+2025-01-06 19:48:08 +0000  Tim-Philipp Müller <tim@centricular.com>
+
+	* NEWS:
+	* RELEASE:
+	* gst-plugins-bad.doap:
+	* meson.build:
+	  Release 1.24.11
+
+2024-12-06 15:15:45 +0100  Armin Begovic <armin.begovic@hotmail.com>
+
+	* docs/plugins/gst_plugins_cache.json:
+	* sys/decklink/gstdecklink.cpp:
+	  decklink: Add missing video modes to gst_decklink_mode_get_type()
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/8122>
+
+2024-12-06 15:15:34 +0100  Armin Begovic <armin.begovic@hotmail.com>
+
+	* sys/decklink/gstdecklink.cpp:
+	  decklink: Fix copy-paste errors regarding 8K modes
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/8122>
+
+2024-08-08 14:36:19 +0200  Benjamin Gräf <benjamin.graef@zuehlke.com>
+
+	* docs/plugins/gst_plugins_cache.json:
+	* sys/decklink/gstdecklink.cpp:
+	* sys/decklink/gstdecklink.h:
+	  decklink: Add support for all modes of Quad HDMI recorder
+	  By extending the GstDecklinkModeEnum with the additional modes supported by the Quad HDMI recorder,
+	  we avoid using mode = 0 in case any of these resolutions is returned by the card.
+	  Fixes #3713
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/8122>
+
+2024-12-30 22:53:02 +0100  Samuel Thibault <samuel.thibault@ens-lyon.org>
+
+	* meson.build:
+	  meson: Also disable drm on GNU/Hurd
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/8228>
+
+2024-12-23 15:17:57 +0100  Tim-Philipp Müller <tim@centricular.com>
+
+	* ext/srtp/gstsrtpdec.c:
+	  srtpdec: fix build when libsrtp1 is being used
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/8207>
+
+2024-12-22 15:00:07 +0100  Philippe Normand <philn@igalia.com>
+
+	* ext/srtp/gstsrtpdec.c:
+	  srtpdec: Fix a use-after-free buffer issue
+	  The gst_srtp_dec_decode_buffer() function modifies the input buffer after making
+	  it writable, so the pointer might change as well, depending on the refcount of
+	  the buffer.
+	  This issue was detected using a netsim element upstream of the decoder in a
+	  WebRTC pipeline.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/8201>
+
+2024-12-16 11:39:10 +0200  Sebastian Dröge <sebastian@centricular.com>
+
+	* gst/videoparsers/gstvp9parse.c:
+	  vp9parse: Add video codec tag to the tag list
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/8186>
+
+2024-12-16 11:38:52 +0200  Sebastian Dröge <sebastian@centricular.com>
+
+	* gst/videoparsers/gstav1parse.c:
+	  av1parse: Add video codec tag to the tag list
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/8186>
+
+2024-12-18 13:35:53 -0500  Nicolas Dufresne <nicolas.dufresne@collabora.com>
+
+	* gst-libs/gst/va/gstvadisplay.c:
+	  va: display: Optimize out some property indirection
+	  Because it was visible during some profiling, I thought it cost nothing
+	  to optimize out the uneeded property get roundtrip.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/8181>
+
+2024-11-18 07:54:55 +0100  Emil Ljungdahl <emillj@axis.com>
+
+	* ext/webrtc/gstwebrtcbin.c:
+	  webrtcbin: Tear down src and sink bins before removing them from webrtc
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/8165>
+
+2024-11-15 15:00:00 +0100  Emil Ljungdahl <emillj@axis.com>
+
+	* ext/webrtc/gstwebrtcbin.c:
+	  webrtcbin: Fix potential deadlock on bin elements cleanup
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/8165>
+
+2024-12-10 16:15:09 +0000  Philippe Normand <philn@igalia.com>
+
+	* ext/webrtc/gstwebrtcstats.c:
+	  webrtc: Simplify fmtp handling in codec stats
+	  Parsing the whole caps as SDP media only to retrieve the fmtp field afterwards
+	  seems a bit superfluous. By looking up the a-fmtp attribute directly the number
+	  of allocations in this function gets down a bit.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/8130>
+
+2024-12-07 00:23:33 -0500  Daniel Morin <daniel.morin@collabora.com>
+
+	* ext/onnx/gstonnxclient.cpp:
+	  onnx: disable onnxruntime telemetry
+	  Disable the telemetry feautre on onnxruntime.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/8106>
+
+2024-12-05 13:39:38 +0100  Francisco Javier Velázquez-García <francisco.velazquez@appear.net>
+
+	* ext/zxing/gstzxing.cpp:
+	  zxing: Update decode hints usage for compatibility with ZXing >= 2.2
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/8085>
+
+2024-12-03 13:14:33 +0200  Sebastian Dröge <sebastian@centricular.com>
+
+	* gst-libs/gst/codecparsers/gsth264parser.c:
+	  h264parse: Free SEI if parsing succeeds but alignment afterwards fails
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/8077>
+
+2024-12-03 13:10:04 +0200  Sebastian Dröge <sebastian@centricular.com>
+
+	* gst-libs/gst/codecparsers/gsth265parser.c:
+	  h265parse: Free SEI if parsing succeeds but alignment afterwards fails
+	  Fixes https://gitlab.freedesktop.org/gstreamer/gstreamer/-/issues/4076
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/8077>
+
+2024-11-29 14:41:12 +0100  Jan Alexander Steffens (heftig) <heftig@archlinux.org>
+
+	* ext/neon/meson.build:
+	  meson: Drop max version bound from neon
+	  Neon 0.34.0 broke the build again, but the API+ABI has been stable since
+	  0.27 and the library is so-versioned.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/8072>
+
+2024-12-03 14:44:30 +0100  Guillaume Desmottes <guillaume.desmottes@onestream.live>
+
+	* gst-libs/gst/codecparsers/gsth265parser.c:
+	* gst/videoparsers/gsth265parse.c:
+	  h265parse: parse unregistered SEI without user data
+	  Same change as in h264parse.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/8071>
+
+2024-11-20 14:16:23 +0100  Guillaume Desmottes <guillaume.desmottes@onestream.live>
+
+	* gst-libs/gst/codecparsers/gsth264parser.c:
+	* gst/videoparsers/gsth264parse.c:
+	* tests/check/elements/h264parse.c:
+	  h264parse: parse unregistered SEI without user data
+	  We get loads of warnings when parsing videos from users:
+	  gsth264parser.c:1115:gst_h264_parser_parse_user_data_unregistered: No more remaining payload data to store
+	  gsth264parse.c:646:gst_h264_parse_process_sei:<h264parse0> failed to parse one or more SEI message
+	  Those are raised because of unregistered SEI without user data.
+	  The spec does not explicitly state that unregistered SEI needs to have
+	  data and I suppose the UUID by itself can carry valuable information.
+	  FFmpeg also parses and exposes such SEI so there is no reason for us no
+	  too as well.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/8071>
+
+2024-11-15 16:44:10 +0200  Sebastian Dröge <sebastian@centricular.com>
+
+	* gst/mpegtsdemux/mpegtsbase.c:
+	  tsdemux: Lower a GST_FIXME to a GST_DEBUG
+	  This is not really a refcounting issue and can happen if a new program is in the
+	  process of being activated that contains streams with the same PIDs.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/8066>
+
+2024-12-03 23:39:54 +0000  Tim-Philipp Müller <tim@centricular.com>
+
+	* meson.build:
+	  Back to development after 1.24.10
+
 === release 1.24.10 ===
 
 2024-12-03 23:29:07 +0000  Tim-Philipp Müller <tim@centricular.com>

@@ -1,3 +1,3 @@
 02_opencv-data-path.patch
 Skip-failing-tests.patch
-0001_drop-max-version-bound-neon.patch
+0001-fix-build-without-wayland.patch

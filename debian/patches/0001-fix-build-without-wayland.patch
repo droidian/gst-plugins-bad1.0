@@ -1,0 +1,52 @@
+commit 5cc93d5002f1f3f22738eddc28724191e28cbfb3
+Author: Samuel Thibault <samuel.thibault@ens-lyon.org>
+Date:   Mon Dec 30 21:59:03 2024 +0100
+
+    meson: Fix build with gtk3 but not wayland
+
+Index: gst-plugins-bad1.0/ext/gtk/meson.build
+===================================================================
+--- gst-plugins-bad1.0.orig/ext/gtk/meson.build
++++ gst-plugins-bad1.0/ext/gtk/meson.build
+@@ -11,9 +11,11 @@ gtkwayland_sources = [
+ ]
+ 
+ gtk_dep = dependency('gtk+-3.0', required : get_option('gtk3'))
+-gtk_wayland_dep = dependency('gtk+-wayland-3.0', required : get_option('gtk3'))
++if use_wayland
++  gtk_wayland_dep = dependency('gtk+-wayland-3.0', required : get_option('gtk3'))
++endif
+ 
+-if gtk_dep.found() and gtk_wayland_dep.found()
++if gtk_dep.found() and gtk_wayland_dep.found() and use_wayland
+   gstgtkwayland = library('gstgtkwayland',
+     gtkwayland_sources,
+     c_args :  gst_plugins_bad_args + ['-DGST_USE_UNSTABLE_API'],
+Index: gst-plugins-bad1.0/tests/examples/gtk/meson.build
+===================================================================
+--- gst-plugins-bad1.0.orig/tests/examples/gtk/meson.build
++++ gst-plugins-bad1.0/tests/examples/gtk/meson.build
+@@ -2,7 +2,7 @@ if not use_wayland
+   subdir_done()
+ endif
+ 
+-if gtk_dep.found() and gtk_wayland_dep.found()
++if gtk_dep.found() and gtk_wayland_dep.found() and use_wayland
+   executable('gtkwaylandsink',
+     'gtkwaylandsink.c',
+     extra_files: ['window.ui'],
+Index: gst-plugins-bad1.0/tests/examples/meson.build
+===================================================================
+--- gst-plugins-bad1.0.orig/tests/examples/meson.build
++++ gst-plugins-bad1.0/tests/examples/meson.build
+@@ -18,7 +18,9 @@ subdir('qsv')
+ subdir('qt6d3d11')
+ subdir('uvch264')
+ subdir('va')
+-subdir('waylandsink')
++if use_wayland
++  subdir('waylandsink')
++endif
+ subdir('webrtc')
+ subdir('wpe')
+ 
