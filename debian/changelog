@@ -1,3 +1,11 @@
+gst-plugins-bad1.0 (1.26.1-1) unstable; urgency=medium
+
+  * d/copyright: add default
+  * d/patches: remove 0002-test-latomic.patch
+  * New upstream version 1.26.1
+
+ -- Marc Leeman <marc.leeman@gmail.com>  Fri, 25 Apr 2025 09:47:03 +0200
+
 gst-plugins-bad1.0 (1.26.0-1) unstable; urgency=medium
 
   [ Marc Leeman ]
