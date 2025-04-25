@@ -1568,6 +1568,7 @@ _vp9_decide_profile (GstVaVp9Enc * self, guint rt_format,
       }
     }
   }
+  gst_caps_unref (allowed_caps);
 
   if (candidates->len == 0) {
     GST_ERROR_OBJECT (self, "No available profile in caps");
@@ -1622,7 +1623,7 @@ out:
   if (ret_profile != VAProfileNone)
     GST_INFO_OBJECT (self, "Decide the profile: %s",
         gst_va_profile_name (ret_profile));
-
+  g_array_unref (candidates);
   return ret_profile;
 }
 
@@ -3234,16 +3235,6 @@ gst_va_vp9_enc_class_init (gpointer g_klass, gpointer class_data)
   }
 
   g_object_class_install_properties (object_class, n_props, properties);
-
-  /**
-   * GstVaFeature:
-   * @GST_VA_FEATURE_DISABLED: The feature is disabled.
-   * @GST_VA_FEATURE_ENABLED: The feature is enabled.
-   * @GST_VA_FEATURE_AUTO: The feature is enabled automatically.
-   *
-   * Since: 1.24
-   */
-  gst_type_mark_as_plugin_api (GST_TYPE_VA_FEATURE, 0);
 }
 
 static GstCaps *

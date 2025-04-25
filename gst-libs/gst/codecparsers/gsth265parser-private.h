@@ -1,9 +1,5 @@
-
-/*
- * GStreamer gstreamer-onnx
- * Copyright (C) 2021 Collabora Ltd
- *
- * gstonnx.c
+/* GStreamer
+ * Copyright (C) 2025 Seungha Yang <seungha@centricular.com>
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -20,32 +16,17 @@
  * Free Software Foundation, Inc., 51 Franklin St, Fifth Floor,
  * Boston, MA 02110-1301, USA.
  */
-#ifdef HAVE_CONFIG_H
-#include "config.h"
-#endif
 
-/**
- * SECTION:plugin-onnx
- * @title: ONNX
- * @short_description: A plugin for ONNX-Runtime
- *
- * A plugin containing the inference elements using the ONNX Runtime project.
- *
- * See https://onnxruntime.ai/
- *
- * Since: 1.20
- */
+#pragma once
 
-#include "gstonnxinference.h"
+#include <gst/gst.h>
+#include <gst/codecparsers/gsth265parser.h>
 
-static gboolean
-plugin_init (GstPlugin * plugin)
-{
-  return GST_ELEMENT_REGISTER (onnx_inference, plugin);
-}
+G_BEGIN_DECLS
 
-GST_PLUGIN_DEFINE (GST_VERSION_MAJOR,
-    GST_VERSION_MINOR,
-    onnx,
-    "ONNX neural network plugin",
-    plugin_init, VERSION, GST_LICENSE, GST_PACKAGE_NAME, GST_PACKAGE_ORIGIN);
+GST_CODEC_PARSERS_API
+GstH265ParserResult gst_h265_parser_link_slice_hdr (GstH265Parser * parser,
+                                                    GstH265SliceHdr * slice,
+                                                    guint pps_id);
+
+G_END_DECLS
