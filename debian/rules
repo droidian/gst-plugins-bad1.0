@@ -33,6 +33,11 @@ conf_flags += -Dauto_features=enabled -Ddoc=disabled -Dgpl=enabled
 # Not available in Debian yet
 conf_flags += -Dfaac=disabled -Dgs=disabled -Diqa=disabled -Disac=disabled -Dmagicleap=disabled
 conf_flags += -Dmicrodns=disabled -Dopensles=disabled -Dsvthevcenc=disabled -Dtinyalsa=disabled
+conf_flags += -Dcuda-nvmm=disabled
+conf_flags += -Dnvcomp=disabled
+conf_flags += -Dnvdswrapper=disabled
+conf_flags += -Dlcevcdecoder=disabled -Dlcevcencoder=disabled
+conf_flags += -Dsvtjpegxs=disabled
 # Unmaintained library
 conf_flags += -Dmsdk=disabled
 # Only available on Windows
@@ -41,6 +46,8 @@ conf_flags += -Damfcodec=disabled -Ddirectshow=disabled -Dwasapi=disabled -Dwasa
 conf_flags += -Dfdkaac=disabled
 # DirectFB is orphaned since 2018 (see #1083040)
 conf_flags += -Ddirectfb=disabled
+# Debian is not android
+conf_flags += -Dandroidmedia=disabled
 
 ifeq (,$(filter $(DEB_HOST_ARCH),amd64 arm64 armel armhf i386 mips64el ppc64el riscv64 s390x alpha hppa hurd-i386 m68k powerpc ppc64 sparc64))
 conf_flags += -Dzxing=disabled
@@ -48,6 +55,11 @@ endif
 
 ifeq (,$(filter $(DEB_HOST_ARCH),amd64 arm64 armhf riscv64))
 conf_flags += -Donnx=disabled
+endif
+
+# gstcuda missing on arm
+ifeq (,$(filter $(DEB_HOST_ARCH),armel arm64 armhf))
+conf_flags += -Dnvcodec=disabled
 endif
 
 ifeq ($(filter gstreamer1.0-opencv,$(built_binaries)),)
@@ -130,11 +142,14 @@ endif
 
 ifneq ($(DEB_HOST_ARCH_OS),hurd)
 	dh_install -pgstreamer1.0-plugins-bad debian/tmp/usr/lib/$(DEB_HOST_MULTIARCH)/gstreamer-1.0/libgstresindvd.so
-	dh_install -pgstreamer1.0-plugins-bad debian/tmp/usr/lib/$(DEB_HOST_MULTIARCH)/gstreamer-1.0/libgstnvcodec.so
 	dh_install -pgstreamer1.0-plugins-bad debian/tmp/usr/lib/$(DEB_HOST_MULTIARCH)/gstreamer-1.0/libgstavtp.so
 	dh_install -pgstreamer1.0-plugins-bad debian/tmp/usr/lib/$(DEB_HOST_MULTIARCH)/gstreamer-1.0/libgstgtkwayland.so
 	dh_install -pgstreamer1.0-plugins-bad debian/tmp/usr/lib/$(DEB_HOST_MULTIARCH)/gstreamer-1.0/libgstuvcgadget.so
 	dh_install -pgstreamer1.0-plugins-bad debian/tmp/usr/lib/$(DEB_HOST_MULTIARCH)/gstreamer-1.0/libgstwebrtcdsp.so
+endif
+
+ifneq (,$(filter $(DEB_HOST_ARCH),armel arm64 armhf hurd))
+	dh_install -pgstreamer1.0-plugins-bad debian/tmp/usr/lib/$(DEB_HOST_MULTIARCH)/gstreamer-1.0/libgstnvcodec.so
 endif
 
 #ifneq (,$(filter $(DEB_HOST_ARCH),amd64 arm64 armel armhf i386 mips64el ppc64el riscv64 s390x alpha hppa hurd-i386 m68k powerpc ppc64 sparc64))

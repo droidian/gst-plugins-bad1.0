@@ -510,8 +510,10 @@ static const struct
 } color_format_mapping_table[] = {
   {
       COLOR_FormatYUV420Planar, GST_VIDEO_FORMAT_I420}, {
+      COLOR_FormatYUV420PackedPlanar, GST_VIDEO_FORMAT_I420}, {
       COLOR_FormatYUV420Flexible, GST_VIDEO_FORMAT_I420}, {
       COLOR_FormatYUV420SemiPlanar, GST_VIDEO_FORMAT_NV12}, {
+      COLOR_FormatYUV420PackedSemiPlanar, GST_VIDEO_FORMAT_NV12}, {
       COLOR_TI_FormatYUV420PackedSemiPlanar, GST_VIDEO_FORMAT_NV12}, {
       COLOR_TI_FormatYUV420PackedSemiPlanarInterlaced, GST_VIDEO_FORMAT_NV12}, {
       COLOR_INTEL_FormatYUV420PackedSemiPlanar, GST_VIDEO_FORMAT_NV12}, {
@@ -523,7 +525,10 @@ static const struct
       COLOR_QCOM_FormatYVU420SemiPlanar32mMultiView, GST_VIDEO_FORMAT_NV12}, {
       COLOR_OMX_SEC_FormatNV12Tiled, GST_VIDEO_FORMAT_NV12}, {
       COLOR_FormatYCbYCr, GST_VIDEO_FORMAT_YUY2}, {
-      COLOR_FormatYV12, GST_VIDEO_FORMAT_YV12}
+      COLOR_FormatYV12, GST_VIDEO_FORMAT_YV12}, {
+      COLOR_FormatYUVP010, GST_VIDEO_FORMAT_P010_10LE}, {
+      COLOR_Format32bitABGR8888, GST_VIDEO_FORMAT_RGBA}, {
+      COLOR_Format32bitABGR2101010, GST_VIDEO_FORMAT_RGB10A2_LE}
 };
 
 static gboolean
@@ -1093,7 +1098,9 @@ static const struct
 } hevc_profile_mapping_table[] = {
   {
       HEVCProfileMain, "main"}, {
-      HEVCProfileMain10, "main-10"}
+      HEVCProfileMain10, "main-10"}, {
+      HEVCProfileMain10HDR10, "main-10"}, {
+      HEVCProfileMain10HDR10Plus, "main-10"}
 };
 
 const gchar *
@@ -1197,10 +1204,12 @@ static const struct
   const gchar *alt_str;
 } avc_profile_mapping_table[] = {
   {
-      AVCProfileBaseline, "baseline", "constrained-baseline"}, {
+      AVCProfileBaseline, "baseline", NULL}, {
+      AVCProfileConstrainedBaseline, "constrained-baseline", NULL}, {
       AVCProfileMain, "main", NULL}, {
       AVCProfileExtended, "extended", NULL}, {
       AVCProfileHigh, "high"}, {
+      AVCProfileConstrainedHigh, "constrained-high", NULL}, {
       AVCProfileHigh10, "high-10", "high-10-intra"}, {
       AVCProfileHigh422, "high-4:2:2", "high-4:2:2-intra"}, {
       AVCProfileHigh444, "high-4:4:4", "high-4:4:4-intra"}

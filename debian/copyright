@@ -5,6 +5,10 @@ Source: https://gstreamer.freedesktop.org
 Comment: This package was debianized by David I. Lehn <dlehn@debian.org> on
  Mon, 15 Jan 2001 18:21:37 -0500.
 
+Files: *
+Copyright: Contributors to the GStreamer project
+License: LGPL-2+
+
 Files: ext/gsettings/gstgsettings.h
  ext/gsettings/gstgsettingsaudiosink.c
  ext/gsettings/gstgsettingsaudiosink.h

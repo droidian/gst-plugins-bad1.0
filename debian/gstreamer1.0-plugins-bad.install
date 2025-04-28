@@ -124,5 +124,6 @@ usr/lib/*/gstreamer-1.0/libgstlc3.so
 usr/lib/*/gstreamer-1.0/libgstmse.so
 usr/lib/*/gstreamer-1.0/libgstsvtav1.so
 usr/lib/*/gstreamer-1.0/libgstunixfd.so
+usr/lib/*/gstreamer-1.0/libgsttensordecoders.so
 usr/share/gstreamer-1.0/presets/
 usr/share/locale

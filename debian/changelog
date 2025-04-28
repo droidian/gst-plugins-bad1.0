@@ -1,3 +1,41 @@
+gst-plugins-bad1.0 (1.26.1-1) unstable; urgency=medium
+
+  * d/copyright: add default
+  * d/patches: remove 0002-test-latomic.patch
+  * New upstream version 1.26.1
+
+ -- Marc Leeman <marc.leeman@gmail.com>  Fri, 25 Apr 2025 09:47:03 +0200
+
+gst-plugins-bad1.0 (1.26.0-1) unstable; urgency=medium
+
+  [ Marc Leeman ]
+  * Revert "d/watch: pin on 1.24.x"
+  * New upstream version 1.26.0
+  * d/patches: remove 0001-fix-build-without-wayland.patch
+  * d/patches: refresh Skip-failing-tests.patch
+  * d/rules: cuda-nvmm not available in debian yet
+  * d/rules: disable android media
+  * d/rules: cevc not in debian yet
+  * d/rules: nvcomp not in debian yet
+  * d/rules: nvdswrapper not in debian yet
+  * d/rules: svtjpegxs not in debian yet
+  * d/install: install libgsttensordecoders.so
+  * d/control: bump GStreamer version dependency
+  * d/patches: test for latomic generic
+  * d/rules: gstcuda missing on arm
+  * d/patches: disable libs_vkwindow elements_vkdeviceprovider
+  * Revert "d/install: remove libweebrtcdsp"
+  * d/: disable webrtcdsp for hurd
+  * d/control: update dependency version to 1.25.90
+
+  [ Jeremy Bícha ]
+  * Mark -good as only needed for build tests
+
+  [ Marc Leeman ]
+  * d/control: update GStreamer dependencies to >= 1.26.0
+
+ -- Marc Leeman <marc.leeman@gmail.com>  Wed, 12 Mar 2025 10:50:20 +0100
+
 gst-plugins-bad1.0 (1.24.12-3) unstable; urgency=medium
 
   * d/: disable webrtcdsp for hurd
