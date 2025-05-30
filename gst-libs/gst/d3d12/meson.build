@@ -162,14 +162,15 @@ gstd3d12 = library('gstd3d12-' + api_version,
   c_args : gst_plugins_bad_args + extra_args,
   cpp_args: gst_plugins_bad_args + extra_args,
   include_directories : [configinc, libsinc],
-  dependencies : [gstbase_dep, gstvideo_dep, gstd3dshader_dep, d3d12_lib,
+  dependencies : [gst_dep, gstbase_dep, gstvideo_dep, gstd3dshader_dep, d3d12_lib,
                   dxgi_lib, dx_headers_dep, gmodule_dep] + extra_deps,
   version : libversion,
   install : true,
+  override_options : ['cpp_std=c++14'],
 )
 
 pkgconfig.generate(gstd3d12,
-  libraries : [gstbase_dep, gstvideo_dep, d3d12_lib, dxgi_lib],
+  libraries : [gst_dep, gstbase_dep, gstvideo_dep, d3d12_lib, dxgi_lib],
   variables : pkgconfig_variables,
   subdirs : pkgconfig_subdirs,
   name : pkg_name,
@@ -177,12 +178,36 @@ pkgconfig.generate(gstd3d12,
 )
 
 library_def = {'lib': gstd3d12}
+gen_sources = []
+
+if build_gir
+  gir = {
+    'sources' : d3d12_sources + d3d12_headers,
+    'namespace' : 'GstD3D12',
+    'nsversion' : api_version,
+    'identifier_prefix' : 'Gst',
+    'symbol_prefix' : 'gst',
+    'export_packages' : pkg_name,
+    'includes' : ['Gst-1.0', 'GstBase-1.0', 'GstVideo-1.0'],
+    'install' : true,
+    'extra_args' : gir_init_section + ['-DGST_USE_UNSTABLE_API'],
+    'dependencies' : [gst_dep, gstbase_dep, gstvideo_dep, d3d12_lib, dxgi_lib]
+  }
+  library_def += {'gir': [gir]}
+  if not static_build
+    d3d12_gir = gnome.generate_gir(gstd3d12, kwargs: gir)
+    library_def += {'gir_targets':  library_def.get('gir_targets', []) + [d3d12_gir]}
+    gen_sources += d3d12_gir
+  endif
+endif
+
 gst_libraries += [[pkg_name, library_def]]
 
 install_headers(d3d12_headers, subdir : 'gstreamer-1.0/gst/d3d12')
 
 gstd3d12_dep = declare_dependency(link_with : gstd3d12,
   include_directories : [libsinc],
-  dependencies : [gstbase_dep, gstvideo_dep, d3d12_lib, dxgi_lib])
+  dependencies : [gstbase_dep, gstvideo_dep, d3d12_lib, dxgi_lib],
+  sources : gen_sources)
 
 meson.override_dependency(pkg_name, gstd3d12_dep)
