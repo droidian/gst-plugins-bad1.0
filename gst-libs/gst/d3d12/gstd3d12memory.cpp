@@ -683,14 +683,14 @@ gst_d3d12_memory_init_once (void)
  * gst_d3d12_memory_get_resource_handle:
  * @mem: a #GstD3D12Memory
  *
- * Returns: (transfer none) (nullable): ID3D12Resource handle
+ * Returns: (transfer none): ID3D12Resource handle
  *
  * Since: 1.26
  */
 ID3D12Resource *
 gst_d3d12_memory_get_resource_handle (GstD3D12Memory * mem)
 {
-  g_return_val_if_fail (gst_is_d3d12_memory (GST_MEMORY_CAST (mem)), FALSE);
+  g_return_val_if_fail (gst_is_d3d12_memory (GST_MEMORY_CAST (mem)), nullptr);
 
   return mem->priv->resource.Get ();
 }
@@ -980,7 +980,7 @@ gst_d3d12_memory_get_nt_handle_unlocked (GstD3D12Memory * mem, HANDLE * handle)
 /**
  * gst_d3d12_memory_get_nt_handle:
  * @mem: a #GstD3D12Memory
- * @handle: (out) (transfer none) a sharable NT handle
+ * @handle: (out) (transfer none): a sharable NT handle
  *
  * Gets NT handle created via ID3D12Device::CreateSharedHandle().
  * Returned NT handle is owned by @mem, thus caller should not close
@@ -1071,6 +1071,7 @@ gst_d3d12_memory_set_fence (GstD3D12Memory * mem, ID3D12Fence * fence,
     guint64 fence_value, gboolean wait)
 {
   g_return_if_fail (gst_is_d3d12_memory (GST_MEMORY_CAST (mem)));
+  g_return_if_fail (gst_mini_object_is_writable ((GstMiniObject *) mem));
 
   auto priv = mem->priv;
 
@@ -1929,7 +1930,7 @@ gst_d3d12_pool_allocator_acquire_memory_internal (GstD3D12PoolAllocator * self,
  * @heap_flags: a D3D12_HEAP_FLAGS
  * @desc: a D3D12_RESOURCE_DESC
  * @initial_state: initial resource state
- * @optimized_clear_value: (allow-none) optimized clear value
+ * @optimized_clear_value: (allow-none): optimized clear value
  *
  * Returns: (transfer full) (nullable): a new #GstD3D12PoolAllocator instance
  *

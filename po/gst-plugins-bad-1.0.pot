@@ -6,9 +6,9 @@
 #, fuzzy
 msgid ""
 msgstr ""
-"Project-Id-Version: gst-plugins-bad-1.26.1\n"
+"Project-Id-Version: gst-plugins-bad-1.26.2\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2025-04-24 20:21+0100\n"
+"POT-Creation-Date: 2025-05-29 23:57+0100\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -93,27 +93,27 @@ msgstr ""
 msgid "Internal data stream error."
 msgstr ""
 
-#: sys/dvb/gstdvbsrc.c:1597 sys/dvb/gstdvbsrc.c:1811
+#: sys/dvb/gstdvbsrc.c:1644 sys/dvb/gstdvbsrc.c:1858
 #, c-format
 msgid "Device \"%s\" does not exist."
 msgstr ""
 
-#: sys/dvb/gstdvbsrc.c:1601
+#: sys/dvb/gstdvbsrc.c:1648
 #, c-format
 msgid "Could not open frontend device \"%s\"."
 msgstr ""
 
-#: sys/dvb/gstdvbsrc.c:1620
+#: sys/dvb/gstdvbsrc.c:1667
 #, c-format
 msgid "Could not get settings from frontend device \"%s\"."
 msgstr ""
 
-#: sys/dvb/gstdvbsrc.c:1637
+#: sys/dvb/gstdvbsrc.c:1684
 #, c-format
 msgid "Cannot enumerate delivery systems from frontend device \"%s\"."
 msgstr ""
 
-#: sys/dvb/gstdvbsrc.c:1815
+#: sys/dvb/gstdvbsrc.c:1862
 #, c-format
 msgid "Could not open file \"%s\" for reading."
 msgstr ""

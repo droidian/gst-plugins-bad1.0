@@ -2186,6 +2186,14 @@ gst_h264_parse_update_src_caps (GstH264Parse * h264parse, GstCaps * caps)
         buf = gst_buffer_ref (h264parse->codec_data_in);
       modified = TRUE;
     }
+
+    /* In AVC or AVC3, we can't issue caps without a codec_data */
+    if (buf == NULL) {
+      GST_DEBUG_OBJECT (h264parse, "Couldn't construct codec_data, not yet"
+          " ready to send out src caps for AVC stream");
+      gst_caps_unref (sink_caps);
+      return;
+    }
   }
 
   caps = NULL;
@@ -3684,8 +3692,9 @@ gst_h264_parse_set_caps (GstBaseParse * parse, GstCaps * caps)
   }
 
   /* avc caps sanity checks */
-  if (format == GST_H264_PARSE_FORMAT_AVC) {
-    /* AVC requires codec_data, AVC3 might have one and/or SPS/PPS inline */
+  if (format == GST_H264_PARSE_FORMAT_AVC ||
+      format == GST_H264_PARSE_FORMAT_AVC3) {
+    /* AVC and AVC3 requires codec_data */
     if (codec_data_value == NULL)
       goto avc_caps_codec_data_missing;
 
@@ -3703,7 +3712,7 @@ gst_h264_parse_set_caps (GstBaseParse * parse, GstCaps * caps)
       goto bytestream_caps_with_codec_data;
   }
 
-  /* packetized video has codec_data (required for AVC, optional for AVC3) */
+  /* packetized video has codec_data (required for AVC and AVC3) */
   if (codec_data_value != NULL) {
     GstMapInfo map;
     guint i;
@@ -3764,7 +3773,8 @@ gst_h264_parse_set_caps (GstBaseParse * parse, GstCaps * caps)
     /* we have 4 sync bytes */
     h264parse->nal_length_size = 4;
   } else {
-    /* probably AVC3 without codec_data field, anything to do here? */
+    /* probably avc1 or avc3 without codec_data field, its invalid */
+    goto codec_data_missing;
   }
 
   {
@@ -3824,6 +3834,12 @@ bytestream_caps_with_codec_data:
 avcC_failed:
   {
     GST_DEBUG_OBJECT (h264parse, "Failed to parse avcC data");
+    goto refuse_caps;
+  }
+codec_data_missing:
+  {
+    GST_WARNING_OBJECT (h264parse, "Is not bytestream and lacks codec_data,"
+        " invalid caps: %" GST_PTR_FORMAT, caps);
     goto refuse_caps;
   }
 refuse_caps:
