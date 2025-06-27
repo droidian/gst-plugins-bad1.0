@@ -757,6 +757,8 @@ static GstCaps *gst_decklink_video_sink_get_caps (GstBaseSink * bsink,
     GstCaps * filter);
 static gboolean gst_decklink_video_sink_set_caps (GstBaseSink * bsink,
     GstCaps * caps);
+static GstFlowReturn gst_decklink_video_sink_preroll (GstBaseSink * bsink,
+    GstBuffer * buffer);
 static GstFlowReturn gst_decklink_video_sink_render (GstBaseSink * bsink,
     GstBuffer * buffer);
 static gboolean gst_decklink_video_sink_open (GstBaseSink * bsink);
@@ -810,6 +812,7 @@ gst_decklink_video_sink_class_init (GstDecklinkVideoSinkClass * klass)
       GST_DEBUG_FUNCPTR (gst_decklink_video_sink_get_caps);
   basesink_class->set_caps =
       GST_DEBUG_FUNCPTR (gst_decklink_video_sink_set_caps);
+  basesink_class->preroll = GST_DEBUG_FUNCPTR (gst_decklink_video_sink_preroll);
   basesink_class->render = GST_DEBUG_FUNCPTR (gst_decklink_video_sink_render);
   // FIXME: These are misnamed in basesink!
   basesink_class->start = GST_DEBUG_FUNCPTR (gst_decklink_video_sink_open);
@@ -1340,49 +1343,31 @@ gst_decklink_video_sink_convert_to_internal_clock (GstDecklinkVideoSink * self,
     GstClockTime * timestamp, GstClockTime * duration)
 {
   GstClock *clock;
-  GstClockTime internal_base, external_base, internal_offset;
+  GstClockTime internal_base, external_base, base_time;
 
   g_assert (timestamp != NULL);
 
   clock = gst_element_get_clock (GST_ELEMENT_CAST (self));
+  base_time = gst_element_get_base_time (GST_ELEMENT_CAST (self));
+
   GST_OBJECT_LOCK (self);
   internal_base = self->internal_base_time;
   external_base = self->external_base_time;
-  internal_offset = self->internal_time_offset;
   GST_OBJECT_UNLOCK (self);
 
-  if (!clock || clock != self->output->clock) {
+  // If we don't have any initial correlation between multiple clocks
+  if (external_base == GST_CLOCK_TIME_NONE ||
+      internal_base == GST_CLOCK_TIME_NONE) {
+    *timestamp = gst_clock_get_internal_time (self->output->clock);
+  } else if (!clock || clock != self->output->clock) {
     GstClockTime internal, external, rate_n, rate_d;
     GstClockTime external_timestamp = *timestamp;
-    GstClockTime base_time;
 
     gst_clock_get_calibration (self->output->clock, &internal, &external,
         &rate_n, &rate_d);
 
-    // Convert to the running time corresponding to both clock times
-    if (!GST_CLOCK_TIME_IS_VALID (internal_base) || internal < internal_base)
-      internal = 0;
-    else
-      internal -= internal_base;
-
-    if (!GST_CLOCK_TIME_IS_VALID (external_base) || external < external_base)
-      external = 0;
-    else
-      external -= external_base;
-
-    // Convert timestamp to the "running time" since we started scheduled
-    // playback, that is the difference between the pipeline's base time
-    // and our own base time.
-    base_time = gst_element_get_base_time (GST_ELEMENT_CAST (self));
-    if (base_time > external_base)
-      base_time = 0;
-    else
-      base_time = external_base - base_time;
-
-    if (external_timestamp < base_time)
-      external_timestamp = 0;
-    else
-      external_timestamp = external_timestamp - base_time;
+    // get the clock time for this running time
+    external_timestamp += base_time;
 
     // Get the difference in the external time, note
     // that the running time is external time.
@@ -1417,18 +1402,12 @@ gst_decklink_video_sink_convert_to_internal_clock (GstDecklinkVideoSink * self,
   } else {
     GST_LOG_OBJECT (self, "No clock conversion needed, same clocks: %"
         GST_TIME_FORMAT, GST_TIME_ARGS (*timestamp));
+    *timestamp += base_time;
   }
 
-  if (external_base != GST_CLOCK_TIME_NONE &&
-      internal_base != GST_CLOCK_TIME_NONE)
-    *timestamp += internal_offset;
-  else
-    *timestamp = gst_clock_get_internal_time (self->output->clock);
-
   GST_DEBUG_OBJECT (self, "Output timestamp %" GST_TIME_FORMAT
-      " using clock epoch %" GST_TIME_FORMAT " and offset %" GST_TIME_FORMAT,
-      GST_TIME_ARGS (*timestamp), GST_TIME_ARGS (self->output->clock_epoch),
-      GST_TIME_ARGS (internal_offset));
+      " using clock epoch %" GST_TIME_FORMAT,
+      GST_TIME_ARGS (*timestamp), GST_TIME_ARGS (self->output->clock_epoch));
 
   if (clock)
     gst_object_unref (clock);
@@ -2001,6 +1980,49 @@ out:
 }
 
 static GstFlowReturn
+gst_decklink_video_sink_preroll (GstBaseSink * bsink, GstBuffer * buffer)
+{
+  GstDecklinkVideoSink *self = GST_DECKLINK_VIDEO_SINK_CAST (bsink);
+  GstFlowReturn flow_ret = GST_FLOW_OK;
+  GstDecklinkVideoFrame *frame;
+  GstClockTime running_time, frame_duration;
+  HRESULT ret;
+
+  if ((flow_ret = gst_decklink_video_sink_prepare (bsink, buffer)) != GST_FLOW_OK)
+    return flow_ret;
+
+  frame =
+        (GstDecklinkVideoFrame *) g_queue_pop_head (self->pending_frames);
+  running_time = gst_clock_get_internal_time (self->output->clock);
+
+  frame_duration =
+      gst_util_uint64_scale_int (GST_SECOND, self->output->mode->fps_d,
+      self->output->mode->fps_n);
+  running_time = gst_util_uint64_scale (running_time, 1, frame_duration);
+  running_time = gst_util_uint64_scale_ceil (running_time, frame_duration, 1);
+
+  GST_DEBUG_OBJECT (self, "Scheduling preroll video frame %p at %" GST_TIME_FORMAT
+      " with duration %" GST_TIME_FORMAT, frame, GST_TIME_ARGS (running_time),
+      GST_TIME_ARGS (frame_duration));
+
+  ret = self->output->output->ScheduleVideoFrame (frame,
+      running_time, frame_duration, GST_SECOND);
+  if (ret != S_OK) {
+    GST_ELEMENT_ERROR (self, STREAM, FAILED,
+        (NULL), ("Failed to schedule frame: 0x%08lx", (unsigned long) ret));
+    frame->Release ();
+    flow_ret = GST_FLOW_ERROR;
+    goto out;
+  }
+  frame->Release ();
+
+  return flow_ret;
+
+out:
+  return flow_ret;
+}
+
+static GstFlowReturn
 gst_decklink_video_sink_render (GstBaseSink * bsink, GstBuffer * buffer)
 {
   GstDecklinkVideoSink *self = GST_DECKLINK_VIDEO_SINK_CAST (bsink);
@@ -2040,30 +2062,24 @@ gst_decklink_video_sink_render (GstBaseSink * bsink, GstBuffer * buffer)
     GST_OBJECT_LOCK (self);
     self->initial_sync = FALSE;
     if (clock) {
+      GstClockTime external_time = gst_clock_get_internal_time (clock);
+      GstClockTime internal_time = gst_clock_get_internal_time (self->output->clock);
+
       if (clock != self->output->clock) {
         gst_clock_set_master (self->output->clock, clock);
       }
 
       if (self->external_base_time == GST_CLOCK_TIME_NONE
           || self->internal_base_time == GST_CLOCK_TIME_NONE) {
-        self->external_base_time = gst_clock_get_internal_time (clock);
-        self->internal_base_time =
-            gst_clock_get_internal_time (self->output->clock);
-        self->internal_time_offset = self->internal_base_time;
-      } else if (GST_CLOCK_TIME_IS_VALID (self->internal_pause_time)) {
-        self->internal_time_offset +=
-            gst_clock_get_internal_time (self->output->clock) -
-            self->internal_pause_time;
-        self->internal_pause_time = GST_CLOCK_TIME_NONE;
+        self->external_base_time = external_time;
+        self->internal_base_time = internal_time;
       }
 
       GST_INFO_OBJECT (self, "clock has been set to %" GST_PTR_FORMAT
           ", updated base times - internal: %" GST_TIME_FORMAT
-          " external: %" GST_TIME_FORMAT " internal offset %"
-          GST_TIME_FORMAT, clock,
+          " external: %" GST_TIME_FORMAT, clock,
           GST_TIME_ARGS (self->internal_base_time),
-          GST_TIME_ARGS (self->external_base_time),
-          GST_TIME_ARGS (self->internal_time_offset));
+          GST_TIME_ARGS (self->external_base_time));
 
       gst_object_unref (clock);
     } else {
@@ -2074,7 +2090,6 @@ gst_decklink_video_sink_render (GstBaseSink * bsink, GstBuffer * buffer)
     }
   }
   GST_OBJECT_UNLOCK (self);
-
 
   while (self->pending_frames->length > 0) {
     GstDecklinkVideoFrame *frame =
@@ -2176,7 +2191,6 @@ gst_decklink_video_sink_open (GstBaseSink * bsink)
   self->output->clock_start_time = GST_CLOCK_TIME_NONE;
   self->output->clock_epoch += self->output->clock_last_time;
   self->output->clock_last_time = 0;
-  self->output->clock_offset = 0;
   GST_OBJECT_LOCK (self);
   self->internal_base_time = GST_CLOCK_TIME_NONE;
   self->external_base_time = GST_CLOCK_TIME_NONE;
@@ -2392,7 +2406,6 @@ gst_decklink_video_sink_change_state (GstElement * element,
       g_mutex_lock (&self->output->lock);
       self->output->clock_epoch += self->output->clock_last_time;
       self->output->clock_last_time = 0;
-      self->output->clock_offset = 0;
       g_mutex_unlock (&self->output->lock);
       gst_element_post_message (element,
           gst_message_new_clock_provide (GST_OBJECT_CAST (element),
@@ -2436,13 +2449,11 @@ gst_decklink_video_sink_change_state (GstElement * element,
       g_mutex_lock (&self->output->lock);
       self->output->clock_epoch += self->output->clock_last_time;
       self->output->clock_last_time = 0;
-      self->output->clock_offset = 0;
       g_mutex_unlock (&self->output->lock);
       gst_decklink_video_sink_stop (self);
       GST_OBJECT_LOCK (self);
       self->internal_base_time = GST_CLOCK_TIME_NONE;
       self->external_base_time = GST_CLOCK_TIME_NONE;
-      self->internal_pause_time = GST_CLOCK_TIME_NONE;
       GST_OBJECT_UNLOCK (self);
       break;
     }
@@ -2452,8 +2463,6 @@ gst_decklink_video_sink_change_state (GstElement * element,
     case GST_STATE_CHANGE_PAUSED_TO_PLAYING:
       break;
     case GST_STATE_CHANGE_PLAYING_TO_PAUSED:
-      self->internal_pause_time =
-          gst_clock_get_internal_time (self->output->clock);
       break;
     default:
       break;
@@ -2482,6 +2491,7 @@ gst_decklink_video_sink_event (GstBaseSink * bsink, GstEvent * event)
         /* force a recalculation of clock base times */
         self->external_base_time = GST_CLOCK_TIME_NONE;
         self->internal_base_time = GST_CLOCK_TIME_NONE;
+        self->initial_sync = TRUE;
         GST_OBJECT_UNLOCK (self);
       }
       break;
