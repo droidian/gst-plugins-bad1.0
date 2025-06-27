@@ -116,7 +116,7 @@ Files: ext/opencv/gstcvdilate.h
  gst/geometrictransform/gstwaterripple.c
  gst/geometrictransform/gstwaterripple.h
 Copyright: 2010, Thiago Santos <thiago.sousa.santos@collabora.co.uk>
-License: MIT/X11 (BSD like) LGPL-2+
+License: MIT or LGPL-2+
 
 Files: sys/applemedia/avfvideosrc.h
  sys/applemedia/coremediabuffer.c
@@ -315,7 +315,7 @@ Files: gst/geometrictransform/gstbulge.c
  gst/geometrictransform/gsttunnel.c
  gst/geometrictransform/gsttunnel.h
 Copyright: 2010, Filippo Argiolas <filippo.argiolas@gmail.com>
-License: MIT/X11 (BSD like) LGPL-2+
+License: MIT or LGPL-2+
 
 Files: gst/audiovisualizers/gstspacescope.c
  gst/audiovisualizers/gstspacescope.h
@@ -350,7 +350,7 @@ Files:
  gst/mpegdemux/gstpesfilter.h
 Copyright: 2005
   2005-2009
-License: MPL-1.1 LGPL-2+
+License: MPL-1.1 or LGPL-2+
 
 Files: ext/ladspa/gstladspa.c
  ext/lv2/gstlv2.c
@@ -381,7 +381,7 @@ Files: gst/gaudieffects/gstburn.c
  gst/gaudieffects/gstsolarize.c
  gst/gaudieffects/gstsolarize.h
 Copyright: 2010, Luis de Bethencourt <luis@debethencourt.com>
-License: MIT/X11 (BSD like) LGPL-2+
+License: MIT or LGPL-2+
 
 Files: ext/rsvg/gstrsvgdec.c
  ext/rsvg/gstrsvgdec.h
@@ -424,7 +424,7 @@ Files: gst/mpegpsmux/crc.h
  gst/mpegpsmux/psmuxstream.c
  gst/mpegpsmux/psmuxstream.h
 Copyright: 2008, Lin YANG <oxcsnicho@gmail.com>
-License: MIT/X11 (BSD like) LGPL-2+
+License: MIT or LGPL-2+
 
 Files: gst/camerabin2/gstplugin.c
  gst/geometrictransform/gstgeometrictransform.c
@@ -449,7 +449,7 @@ Files: ext/opencv/gstedgedetect.h
 Copyright: 2005, Ronald S. Bultje <rbultje@ronald.bitfreak.net>
   2005, Thomas Vander Stichele <thomas@apestaart.org>
   2008, Michael Sheldon <mike@mikeasoft.com>
-License: MIT/X11 (BSD like) LGPL-2+
+License: MIT or LGPL-2+
 
 Files: ext/resindvd/gstmpegdefs.h
  ext/resindvd/gstmpegdemux.c
@@ -523,7 +523,7 @@ Files: ext/opencv/MotionCells.cpp
  ext/opencv/motioncells_wrapper.h
 Copyright: 2011, Nicola Murino <nicola.murino@gmail.com>
   2011, Robert Jobbagy <jobbagy.robert@gmail.com>
-License: MIT/X11 (BSD like) LGPL-2+
+License: MIT or LGPL-2+
 
 Files: sys/shm/gstshm.c
  sys/shm/gstshmsink.c
@@ -579,7 +579,7 @@ Files: gst/mpegtsmux/tsmux/tsmuxcommon.h
  gst/mpegtsmux/tsmux/tsmuxstream.c
  gst/mpegtsmux/tsmux/tsmuxstream.h
 Copyright: 2006, BBC and Fluendo S.A
-License: MPL-1.1 GPL GPL-2+ LGPL (v2 or later) (with incorrect FSF address)
+License: MPL-1.1 or MIT or LGPL-2+
 
 Files: gst/videosignal/gstvideoanalyse.c
  gst/videosignal/gstvideoanalyse.h
@@ -605,7 +605,7 @@ Files: sys/shm/shmalloc.c
  sys/shm/shmpipe.h
 Copyright: <2009> Collabora Ltd
   <2009> Nokia Inc
-License: MIT/X11 (BSD like)
+License: MIT
 
 Files: gst/mpegpsmux/mpegpsmux_aac.c
  gst/mpegpsmux/mpegpsmux_aac.h
@@ -613,7 +613,7 @@ Files: gst/mpegpsmux/mpegpsmux_aac.c
  gst/mpegpsmux/mpegpsmux_h264.h
 Copyright: 2006-2008, Fluendo S.A
   2008, Lin YANG <oxcsnicho@gmail.com>
-License: MPL-1.1 GPL GPL-2+ LGPL (v2 or later) (with incorrect FSF address)
+License: MPL-1.1 or MIT or LGPL-2+
 
 Files: gst/mpegtsdemux/gstmpegdefs.h
  gst/mpegtsdemux/gstmpegdesc.h
@@ -743,7 +743,7 @@ Files: gst/gaudieffects/gstchromium.h
  gst/gaudieffects/gstdodge.h
  gst/gaudieffects/gstexclusion.h
 Copyright: 2010, Luis de Bethencourt <luis@debethencourt.com>>
-License: MIT/X11 (BSD like) LGPL-2+
+License: MIT or LGPL-2+
 
 Files: sys/dvb/camconditionalaccess.c
  sys/dvb/camconditionalaccess.h
@@ -999,55 +999,55 @@ Copyright: 2005, Ronald S. Bultje <rbultje@ronald.bitfreak.net>
   2005, S?bastien Moutte <sebastien@moutte.net>
   2005, Thomas Vander Stichele <thomas@apestaart.org>
   2006, Joni Valtanen <joni.valtanen@movial.fi>
-License: MIT/X11 (BSD like) LGPL-2+
+License: MIT or LGPL-2+
 
 Files: gst/faceoverlay/gstfaceoverlay.c
  gst/faceoverlay/gstfaceoverlay.h
 Copyright: 2011, Laura Lucas Alday <lauralucas@gmail.com>
-License: MIT/X11 (BSD like) LGPL-2+
+License: MIT or LGPL-2+
 
 Files: gst/gaudieffects/gstplugin.c
 Copyright: 2005, Ronald S. Bultje <rbultje@ronald.bitfreak.net>
   2005, Thomas Vander Stichele <thomas@apestaart.org>
   2010, Luis de Bethencourt <luis@debethencourt.com>
-License: MIT/X11 (BSD like) LGPL-2+
+License: MIT or LGPL-2+
 
 Files: ext/opencv/gstfacedetect.h
 Copyright: 2005, Ronald S. Bultje <rbultje@ronald.bitfreak.net>
   2005, Thomas Vander Stichele <thomas@apestaart.org>
   2008, Michael Sheldon <mike@mikeasoft.com>
   2011, Stefan Sauer <ensonic@users.sf.net>
-License: MIT/X11 (BSD like) LGPL-2+
+License: MIT or LGPL-2+
 
 Files: gst/fieldanalysis/gstfieldanalysis.c
  gst/fieldanalysis/gstfieldanalysis.h
 Copyright: 2010, Robert Swain <robert.swain@collabora.co.uk>
   2011, Robert Swain <robert.swain@collabora.co.uk>
-License: MIT/X11 (BSD like) LGPL-2+
+License: MIT or LGPL-2+
 
 Files: gst/aiff/aiffmux.c
  gst/aiff/aiffmux.h
 Copyright: 2009, Robert Swain <robert.swain@gmail.com>
-License: MIT/X11 (BSD like) LGPL-2+
+License: MIT or LGPL-2+
 
 Files: ext/opencv/gsttextoverlay.h
 Copyright: 2005, Ronald S. Bultje <rbultje@ronald.bitfreak.net>
   2005, Thomas Vander Stichele <thomas@apestaart.org>
   2010, Sreerenj Balachandran <bsreerenj@gmail.com>
-License: MIT/X11 (BSD like) LGPL-2+
+License: MIT or LGPL-2+
 
 Files: ext/openal/gstopenalsrc.c
  ext/openal/gstopenalsrc.h
 Copyright: 2005, Ronald S. Bultje <rbultje@ronald.bitfreak.net>
   2005, Thomas Vander Stichele <thomas@apestaart.org>
   2008, Victor Lin <bornstub@gmail.com>
-License: MIT/X11 (BSD like) LGPL-2+
+License: MIT or LGPL-2+
 
 Files: gst/librfb/d3des.c
  gst/librfb/d3des.h
 Copyright: 1988-1992, Richard Outerbridge
   1999, AT&T Laboratories Cambridge.
-License: MIT/X11 (BSD like)
+License: MIT
 
 Files: ext/resindvd/rsnparsetter.c
  ext/resindvd/rsnparsetter.h
@@ -1057,7 +1057,7 @@ License: LGPL-2+
 Files: gst/inter/gstintertest.c
 Copyright: 2010, Entropy Wave Inc
   2011, David Schleef <ds@schleef.org>
-License: BSD (2 clause)
+License: BSD-2-clause
 
 Files: gst/audiovisualizers/gstdrawhelpers.h
 Copyright: <2011> Stefan Sauer <ensonic@users.sf.net>
@@ -1269,7 +1269,7 @@ License: LGPL-2.1+
 
 Files: tests/examples/directfb/gstdfb.c
 Copyright: 2000-2002, convergence integrated media GmbH
-License: MIT/X11 (BSD like)
+License: MIT
 
 Files: ext/teletextdec/gstteletextdec.h
 Copyright: 2009, Sebastian Pölsterl <sebp@k-d-w.org>
