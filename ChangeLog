@@ -1,3 +1,279 @@
+=== release 1.26.4 ===
+
+2025-07-16 15:26:21 +0200  Tim-Philipp Müller <tim@centricular.com>
+
+	* NEWS:
+	* RELEASE:
+	* gst-plugins-bad.doap:
+	* meson.build:
+	  Release 1.26.4
+
+2025-07-09 02:52:27 -0400  Doug Nazar <nazard@nazar.ca>
+
+	* ext/avtp/gstavtpcrfbase.c:
+	* ext/avtp/gstavtpcrfbase.h:
+	  avtp: crf: Setup socket during state change to ensure we handle failure
+	  Previously the socket would be created in the thread, which take some
+	  time to start. As the tests were so short they would usually pass as
+	  they don't actually use the socket.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/9374>
+
+2025-07-09 02:51:11 -0400  Doug Nazar <nazard@nazar.ca>
+
+	* tests/check/elements/avtpcrfcheck.c:
+	* tests/check/elements/avtpcrfsync.c:
+	  avtp: crf: tests: Only run tests if packet socket is available
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/9374>
+
+2025-07-09 00:47:58 +0200  Mathieu Duponchelle <mathieu@centricular.com>
+
+	* gst/rtmp2/rtmp/rtmpclient.c:
+	  rtmp2src: don't send window acknowledgement size commands twice
+	  This causes servers such as AWS MediaLive to drop the connection, and
+	  the message flow chart as documented in the "spec" always has the
+	  server sending it first, and the client replying to it on reception of
+	  the Set Peer Bandwidth, which we do since 286a3829b637.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/9372>
+
+2025-07-09 00:44:36 +0200  Mathieu Duponchelle <mathieu@centricular.com>
+
+	* gst/rtmp2/gstrtmp2locationhandler.c:
+	  rtmp2src: fix playback of URIs without a playpath
+	  ffmpeg manages to play RTMP URLs in the form:
+	  ```
+	  protocol://servername:port/appname
+	  ```
+	  and does not require a second component to the path, adapt our code to
+	  allow using such URLs as `tcUrl`.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/9372>
+
+2025-07-09 12:21:31 +0200  Piotr Brzeziński <piotr@centricular.com>
+
+	* sys/applemedia/vtenc.c:
+	  vtenc: Fix negotiation failure with profile=main-422-10
+	  Previous version passed just enough data to the parser to detect
+	  main/main-10, but main-422-10 is one of the range extensions profiles.
+	  Those need a few more bits to be accurately detected, and since those
+	  were just uinitialized memory previously, we'd incorrectly end up with
+	  main or main-10 when the encoder was in fact giving us 4:2:2 10bit
+	  output.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/9371>
+
+2025-07-07 11:59:18 +0200  Hanna Weiß <hweiss@igalia.com>
+
+	* gst-libs/gst/vulkan/gstvkfullscreenquad.c:
+	  vulkan: Fix drawing too many triangles in fullscreenquad
+	  was using a index buffer for triangle list but drawn as strip
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/9370>
+
+2025-06-17 06:38:59 -0400  Doug Nazar <nazard@nazar.ca>
+
+	* ext/openh264/gstopenh264enc.cpp:
+	  openh264: Ensure src_pic is initialized before use
+	  valgrind was showing reads of uninitialized memory and the
+	  library examples all memset the structure before use.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/9362>
+
+2025-07-07 10:12:52 +1000  Matthew Waters <matthew@centricular.com>
+
+	* gst-libs/gst/vulkan/gstvkfullscreenquad.c:
+	  vulkanfullscreenquad: add locks for synchronisation
+	  Now all API can be accessed from any thread.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/9357>
+
+2025-05-31 03:35:27 -0400  Doug Nazar <nazard@nazar.ca>
+
+	* gst/transcode/gst-cpu-throttling-clock.c:
+	  cpu-throttling-clock: fix race between async callback and unscheduling
+	  It's possible that the callback is already scheduled to run on another
+	  thread when we unschedule it during dispose and we would then access
+	  a freed object.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/9347>
+
+2025-05-30 19:15:56 -0400  Doug Nazar <nazard@nazar.ca>
+
+	* tests/check/elements/h266parse.c:
+	  h266parse: test: Pass correct size argument to va_arg function
+	  sizeof(int) != sizeof (gsize)
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/9347>
+
+2025-05-30 15:23:03 -0400  Doug Nazar <nazard@nazar.ca>
+
+	* tests/check/libs/analyticsmeta.c:
+	  analytics: tests: Copy correct size of array to buffer
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/9347>
+
+2025-05-30 15:20:41 -0400  Doug Nazar <nazard@nazar.ca>
+
+	* sys/decklink/gstdecklink.cpp:
+	  decklink: Fix a memory leak
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/9347>
+
+2025-05-30 15:21:58 -0400  Doug Nazar <nazard@nazar.ca>
+
+	* tests/check/elements/webrtcbin.c:
+	  webrtc: tests: Fix a few memory leaks
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/9347>
+
+2025-05-30 15:20:02 -0400  Doug Nazar <nazard@nazar.ca>
+
+	* gst/camerabin2/gstcamerabin2.c:
+	  camerabin: Fix a memory leak
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/9347>
+
+2025-05-28 08:45:40 -0400  Doug Nazar <nazard@nazar.ca>
+
+	* gst/codecalpha/gstalphacombine.c:
+	  alphacombine: fix memory leaks
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/9343>
+
+2025-05-28 08:44:01 -0400  Doug Nazar <nazard@nazar.ca>
+
+	* gst/transcode/gst-cpu-throttling-clock.c:
+	  cpu-throttling-clock: free clock when finished
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/9343>
+
+2025-07-05 03:10:51 +0900  Seungha Yang <seungha@centricular.com>
+
+	* sys/d3d12/gstd3d12screencapturedevice.cpp:
+	  d3d12screencapture: Add support for monitor add/remove in device provider
+	  Update device list on WM_DISPLAYCHANGE event
+	  Fixes: https://gitlab.freedesktop.org/gstreamer/gstreamer/-/issues/4521
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/9333>
+
+2025-07-04 10:56:27 -0400  Nicolas Dufresne <nicolas.dufresne@collabora.com>
+
+	* gst/videoparsers/gstvp9parse.c:
+	  Revert "vp9parse: Always default to super-frame"
+	  This reverts commit fd1428d3ebf937d7656c3788df3ef3ff85fecc31.
+	  As reported in #4524, this changes cause regressions. The problem is due to a
+	  bug in how vp9parse interact with parsebin, presenting downstream negotiation of
+	  alignment to work. This revert to being stuck using frame alignment always,
+	  which fortunately works with libvpx, though less efficient.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/9331>
+
+2025-05-07 14:02:05 -0400  Nicolas Dufresne <nicolas.dufresne@collabora.com>
+
+	* gst/videoparsers/gstvp9parse.c:
+	  vp9parse: Only show the last frame of a super frame
+	  Only the last frame of a super frame should be displayed by default. When
+	  converting from super frame to frame, mark all frames as decode only except the
+	  last one. This fixes vp90-2-22-svc_1280x720_3.ivf conformance test with
+	  stateless decoders such as VA.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/9327>
+
+2025-05-07 13:48:04 -0400  Nicolas Dufresne <nicolas.dufresne@collabora.com>
+
+	* gst/videoparsers/gstvp9parse.c:
+	  vp9parse: Always default to super-frame
+	  Sort the list of structure before truncating so that we don't prefer
+	  "frame"" alignment over "super-frame" in some cases.
+	  Fixes vp90-2-22-svc_1280x720_3.ivf conformance test when using libvpx based
+	  decoder.
+	  Fixes #4371
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/9327>
+
+2025-05-07 10:29:10 -0400  Nicolas Dufresne <nicolas.dufresne@collabora.com>
+
+	* gst/videoparsers/gstvp9parse.c:
+	  vp9parse: Fix typo Aligment vs Alignment
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/9327>
+
+2025-07-02 22:38:41 +0300  Sebastian Dröge <sebastian@centricular.com>
+
+	* gst/tensordecoders/gstssdobjectdetector.c:
+	  ssdobjectdetector: Use correct tensor data index for the scores
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/9324>
+
+2025-06-27 10:06:34 -0400  Nicolas Dufresne <nicolas.dufresne@collabora.com>
+
+	* sys/v4l2codecs/gstv4l2codech265dec.c:
+	  v4l2codecs: h265dec: Fail when frame cropping is needed while using DMABuf
+	  It is not possible to do frame cropping when DMABuf caps feature is negotiated.
+	  The VideoInfo size is zero, resulting in empty destination buffers, and video
+	  convert library may not understand what the format actually is.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/9315>
+
+2025-06-27 10:00:37 -0400  Nicolas Dufresne <nicolas.dufresne@collabora.com>
+
+	* sys/v4l2codecs/gstv4l2codech265dec.c:
+	  v4l2codecs: h265dec: Avoid cropping for zero top/left alignments
+	  If the conformance window does not requires cropping the top or left of the
+	  window, we can use GstVideoMeta to crop in a zero-copy fashion. If a copy
+	  is needed, the frame copy can also handle it, and is a lot faster.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/9315>
+
+2025-06-27 09:49:00 -0400  Nicolas Dufresne <nicolas.dufresne@collabora.com>
+
+	* sys/v4l2codecs/gstv4l2codecav1dec.c:
+	* sys/v4l2codecs/gstv4l2codech264dec.c:
+	* sys/v4l2codecs/gstv4l2codech265dec.c:
+	* sys/v4l2codecs/gstv4l2codecmpeg2dec.c:
+	* sys/v4l2codecs/gstv4l2codecvp8dec.c:
+	* sys/v4l2codecs/gstv4l2codecvp9dec.c:
+	  v4l2codecs: dec: Remove has_videometa member
+	  Now that the code is properly located, this member is not needed
+	  anymore.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/9315>
+
+2025-06-27 09:37:06 -0400  Nicolas Dufresne <nicolas.dufresne@collabora.com>
+
+	* sys/v4l2codecs/gstv4l2codecav1dec.c:
+	* sys/v4l2codecs/gstv4l2codech264dec.c:
+	* sys/v4l2codecs/gstv4l2codech265dec.c:
+	* sys/v4l2codecs/gstv4l2codecmpeg2dec.c:
+	* sys/v4l2codecs/gstv4l2codecvp8dec.c:
+	* sys/v4l2codecs/gstv4l2codecvp9dec.c:
+	  v4l2codecs: dec: Move copy_frames logic inside decide_allocation
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/9315>
+
+2025-06-22 03:23:59 -0400  Doug Nazar <nazard@nazar.ca>
+
+	* ext/avtp/gstavtpvfdepaybase.c:
+	  avtp: Fix memory leak
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/9314>
+
+2025-06-22 03:22:27 -0400  Doug Nazar <nazard@nazar.ca>
+
+	* ext/srt/gstsrtsrc.c:
+	  srt: Fix warning about uninitialized memory
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/9314>
+
+2025-06-22 03:20:35 -0400  Doug Nazar <nazard@nazar.ca>
+
+	* gst-libs/gst/codecparsers/gstvc1parser.c:
+	  vc1parser: Fix warning about printing uninitialized variables
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/9314>
+
+2025-06-22 03:16:55 -0400  Doug Nazar <nazard@nazar.ca>
+
+	* gst/proxy/gstproxysrc.c:
+	  proxysrc: Fix order freeing pads
+	  Free pads from bottom of parent tree first else with GST_DEBUG
+	  enabled it would access freed memory printing object info.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/9314>
+
+2025-06-22 03:14:39 -0400  Doug Nazar <nazard@nazar.ca>
+
+	* tests/check/elements/avtpcvfpay.c:
+	  avtpcvfpay: tests: Initialize codec memory
+	  If GST_DEBUG was enabled we would print unintialized memory
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/9314>
+
+2025-06-25 09:30:15 -0600  David Monge <david.monge@ridgerun.com>
+
+	* gst/mpegtsmux/tsmux/tsmuxstream.c:
+	  mpegtsmux: fix double free caused by shared PMT descriptor
+	  The PMT descriptor was owned by the stream object but also added to
+	  the descriptors array without copying, leading to a double free and
+	  core dump during cleanup
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/9303>
+
+2025-06-26 21:29:34 +0100  Tim-Philipp Müller <tim@centricular.com>
+
+	* meson.build:
+	  Back to development after 1.26.3
+
 === release 1.26.3 ===
 
 2025-06-26 21:25:24 +0100  Tim-Philipp Müller <tim@centricular.com>
