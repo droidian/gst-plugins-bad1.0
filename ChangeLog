@@ -1,3 +1,238 @@
+=== release 1.26.5 ===
+
+2025-08-07 19:06:46 +0100  Tim-Philipp Müller <tim@centricular.com>
+
+	* NEWS:
+	* RELEASE:
+	* gst-plugins-bad.doap:
+	* meson.build:
+	  Release 1.26.5
+
+2025-08-07 13:58:27 +0300  Sebastian Dröge <sebastian@centricular.com>
+
+	* gst-libs/gst/codecparsers/gstav1parser.c:
+	  av1parser: Don't error out on "currently" undefined seq-level indices
+	  They might very well be defined in the future and that shouldn't affect the
+	  parsing in any way. Specifically, ffmpeg with `av1_nvenc` seems to create
+	  `GST_AV1_SEQ_LEVEL_7_3` currently and parsing such streams would fail otherwise.
+	  Fixes https://gitlab.freedesktop.org/gstreamer/gstreamer/-/issues/4589
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/9504>
+
+2025-08-01 14:55:12 +0200  Víctor Manuel Jáquez Leal <vjaquez@igalia.com>
+
+	* gst-libs/gst/vulkan/gstvkphysicaldevice-private.h:
+	* gst-libs/gst/vulkan/gstvkphysicaldevice.c:
+	  vkphysicaldevice: enable sampler ycbcr, sync2 and timeline semaphore features
+	  For the features VkPhysicalDeviceSamplerYcbcrConversionFeaturesKHR,
+	  VkPhysicalDeviceSynchronization2Features and
+	  VkPhisicalDeviceTimelineSemaphoreFeatures
+	  The Vulkan specification states:
+	  If the `VkPhysicalDeviceXXXFeatures` structure is included in the `pNext`
+	  chain of the `VkPhysicalDeviceFeatures2` structure passed to
+	  `vkGetPhysicalDeviceFeatures2`, it is filled in to indicate whether each
+	  corresponding feature is supported. If the application wishes to use a
+	  `VkDevice` with any features described by `VkPhysicalDeviceXXXFeatures`,
+	  it **must** add an instance of the structure, with the desired feature members
+	  set to `VK_TRUE`, to the `pNext` chain of `VkDeviceCreateInfo` when creating
+	  the `VkDevice`.
+	  And that was missing in the code.
+	  Strangely, that functionality doesn't have a Valid-Usage ID assigned, so it
+	  isn't caught by the validation layer.
+	  This patch adds the structures in the physical devices to get them and later set
+	  them in the device creation.
+	  In order to link these features, videomaintenance1, and others to come, without
+	  knowing if Vulkan 1.3 features are chained in the device properties structure, a
+	  static and inlined function was added in gstvkphysicaldevice-private.h. It was
+	  added in a header file to avoid compiler warnings if it's not used because of
+	  old Vulkan headers.
+	  Also the value dump videomaintenance1 was moved to another function to pack
+	  there all these queried features.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/9489>
+
+2025-08-01 11:52:17 +0200  Víctor Manuel Jáquez Leal <vjaquez@igalia.com>
+
+	* sys/va/gstvaav1enc.c:
+	* sys/va/gstvah264enc.c:
+	* sys/va/gstvah265enc.c:
+	* sys/va/gstvavp8enc.c:
+	* sys/va/gstvavp9enc.c:
+	  vaXXXenc: fix potential race condition
+	  VA encoders, at reconfiguration, have to check if the rate-control was changed
+	  by the user, but since user parameters setting are in another thread, the
+	  comparison was racy.
+	  This patch locks the object to compare the current rate-control with the one set
+	  by the user.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/9484>
+
+2025-05-29 13:20:59 +0200  Víctor Manuel Jáquez Leal <vjaquez@igalia.com>
+
+	* gst-libs/gst/vulkan/gstvkdevice.c:
+	  vulkan: ycbcr conversion extension got promoted in 1.1.0
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/9482>
+
+2025-08-01 01:03:10 +0900  Seungha Yang <seungha@centricular.com>
+
+	* sys/d3d12/gstd3d12screencapturedevice.cpp:
+	  d3d12screencapturedevice: Avoid false device removal on monitor reconfiguration
+	  Post device-changed instead of device-removed/device-added when
+	  only HMONITOR or display position changed without actual device change.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/9481>
+
+2025-07-30 15:50:56 +0400  Marc-André Lureau <marcandre.lureau@redhat.com>
+
+	* gst-libs/gst/d3d12/meson.build:
+	* sys/d3d12/meson.build:
+	  meson: d3d12: Add support for MinGW DirectXMath package
+	  This is a similar issue that was found for d3d11:
+	  https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/6495
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/9473>
+
+2025-07-29 11:42:54 +0100  Philippe Normand <philn@igalia.com>
+
+	* sys/va/gstvavp9dec.c:
+	  vavp9dec: Always chain to parent class negotiate vmethod
+	  When the base videodecoder class re-attempts a negotiation after flush, the
+	  vabasedec `need_negotiation` flag isn't necessarily set to TRUE, because in that
+	  situation the input state hasn't changed.
+	  By always chaining up we are sure that buffer pool negotiation will always be
+	  attempted.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/9461>
+
+2025-07-29 11:42:44 +0100  Philippe Normand <philn@igalia.com>
+
+	* sys/va/gstvajpegdec.c:
+	  vajpegdec: Always chain to parent class negotiate vmethod
+	  When the base videodecoder class re-attempts a negotiation after flush, the
+	  vabasedec `need_negotiation` flag isn't necessarily set to TRUE, because in that
+	  situation the input state hasn't changed.
+	  By always chaining up we are sure that buffer pool negotiation will always be
+	  attempted.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/9461>
+
+2025-07-29 11:42:33 +0100  Philippe Normand <philn@igalia.com>
+
+	* sys/va/gstvaav1dec.c:
+	  vaav1dec: Always chain to parent class negotiate vmethod
+	  When the base videodecoder class re-attempts a negotiation after flush, the
+	  vabasedec `need_negotiation` flag isn't necessarily set to TRUE, because in that
+	  situation the input state hasn't changed.
+	  By always chaining up we are sure that buffer pool negotiation will always be
+	  attempted.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/9461>
+
+2025-07-28 12:52:22 +0100  Philippe Normand <philn@igalia.com>
+
+	* sys/va/gstvabasedec.c:
+	  vabasedec: Instrument negotiate function with debug statements
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/9461>
+
+2025-07-28 12:49:36 +0100  Philippe Normand <philn@igalia.com>
+
+	* sys/va/gstvabasedec.c:
+	  vabasedec: Always chain to parent class negotiate vmethod
+	  When the base videodecoder class re-attempts a negotiation after flush, the
+	  vabasedec `need_negotiation` flag isn't necessarily set to TRUE, because in that
+	  situation the input state hasn't changed.
+	  By always chaining up we are sure that buffer pool negotiation will always be
+	  attempted.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/9461>
+
+2025-07-28 12:45:25 +0100  Philippe Normand <philn@igalia.com>
+
+	* sys/va/gstvah264dec.c:
+	  vah264dec: Spelling fix in warning debug statement
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/9461>
+
+2025-07-28 12:44:48 +0100  Philippe Normand <philn@igalia.com>
+
+	* gst-libs/gst/codecs/gsth264decoder.c:
+	  h264decoder: Spelling fix in warning debug statement
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/9461>
+
+2025-07-24 18:16:51 +0200  Víctor Manuel Jáquez Leal <vjaquez@igalia.com>
+
+	* sys/va/gstvaav1enc.c:
+	* sys/va/gstvah264enc.c:
+	* sys/va/gstvah265enc.c:
+	* sys/va/gstvajpegenc.c:
+	* sys/va/gstvavp8enc.c:
+	* sys/va/gstvavp9enc.c:
+	  vaXXXenc: calculate latency with corrected framerate
+	  Fixes: #4558
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/9447>
+
+2025-06-29 22:52:37 +0900  Seungha Yang <seungha@centricular.com>
+
+	* sys/wasapi2/gstwasapi2ringbuffer.cpp:
+	  wasapi2: Fix various MinGW build warnings
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/9428>
+
+2025-06-29 20:45:51 +0900  Seungha Yang <seungha@centricular.com>
+
+	* sys/wasapi2/AsyncOperations.h:
+	* sys/wasapi2/gstwasapi2client.cpp:
+	* sys/wasapi2/gstwasapi2client.h:
+	* sys/wasapi2/gstwasapi2util.cpp:
+	* sys/wasapi2/meson.build:
+	  waapi2: Remove unused WinRT deps and implementations
+	  Removing unused WinRT API based implementations
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/9428>
+
+2025-06-29 01:46:44 +0900  Seungha Yang <seungha@centricular.com>
+
+	* sys/wasapi2/gstwasapi2object.cpp:
+	* sys/wasapi2/gstwasapi2object.h:
+	* sys/wasapi2/gstwasapi2ringbuffer.cpp:
+	* sys/wasapi2/gstwasapi2ringbuffer.h:
+	* sys/wasapi2/gstwasapi2sink.c:
+	* sys/wasapi2/gstwasapi2src.c:
+	* sys/wasapi2/meson.build:
+	  wasapi2: Port to IMMDevice based device selection
+	  Because of a couple of issues reported related to WinRT device
+	  enumeration, porting to IMMDevice device id based device selection.
+	  Fixes: https://gitlab.freedesktop.org/gstreamer/gstreamer/-/issues/4311
+	  Fixes: https://gitlab.freedesktop.org/gstreamer/gstreamer/-/issues/3936
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/9428>
+
+2025-06-27 21:36:53 +0900  Seungha Yang <seungha@centricular.com>
+
+	* sys/wasapi2/gstwasapi2activator.cpp:
+	* sys/wasapi2/gstwasapi2activator.h:
+	* sys/wasapi2/gstwasapi2client.cpp:
+	* sys/wasapi2/gstwasapi2device.c:
+	* sys/wasapi2/gstwasapi2device.cpp:
+	* sys/wasapi2/gstwasapi2device.h:
+	* sys/wasapi2/gstwasapi2enumerator.cpp:
+	* sys/wasapi2/gstwasapi2enumerator.h:
+	* sys/wasapi2/gstwasapi2util.cpp:
+	* sys/wasapi2/gstwasapi2util.h:
+	* sys/wasapi2/meson.build:
+	* sys/wasapi2/plugin.cpp:
+	  wasapi2: Implement IMMDeviceEnumerator based enumerator
+	  ... and merge wasapi2{capture,render}deviceprovider into single
+	  wasapi2deviceprovider since we can enumerate input/output audio
+	  devices at once using IMMDeviceEnumerator
+	  This is a preparation for complete porting to Win32 API
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/9428>
+
+2025-06-01 00:02:16 +0900  Seungha Yang <seungha@centricular.com>
+
+	* sys/d3d12/gstd3d12graphicscapture.cpp:
+	* sys/d3d12/gstd3d12graphicscapture.h:
+	* sys/d3d12/plugin.cpp:
+	  d3d12screencapturesrc: Fix OS handle leaks/random crash in WGC mode
+	  Multiple DispatcherQueues per thread seems to be causing OS handle leak
+	  and random crashes were observed. Instead of creating
+	  thread/DispatcherQueue per GstD3D12GraphicsCapture object,
+	  reuse only single thread and DispatcherQueue
+	  Fixes: https://gitlab.freedesktop.org/gstreamer/gstreamer/-/issues/4351
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/9424>
+
+2025-07-16 15:33:19 +0200  Tim-Philipp Müller <tim@centricular.com>
+
+	* meson.build:
+	  Back to development after 1.26.4
+
 === release 1.26.4 ===
 
 2025-07-16 15:26:21 +0200  Tim-Philipp Müller <tim@centricular.com>
