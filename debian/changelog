@@ -1,3 +1,9 @@
+gst-plugins-bad1.0 (1.26.5-1) experimental; urgency=medium
+
+  * New upstream version 1.26.5
+
+ -- Marc Leeman <marc.leeman@gmail.com>  Fri, 08 Aug 2025 09:07:45 +0200
+
 gst-plugins-bad1.0 (1.26.4-1) experimental; urgency=medium
 
   * d/watch: pin to 1.26.x
