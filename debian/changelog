@@ -1,3 +1,18 @@
+gst-plugins-bad1.0 (1.27.1-1) experimental; urgency=medium
+
+  * Revert "d/watch: pin to 1.26.x"
+  * d/gbp.conf: adjust for experimental
+  * New upstream version 1.27.1
+  * d/rules: disable tflite
+  * d/control: bump Standards-Version
+  * d/rules: disable wpe2
+  * d/install: gsty4m moved to good
+  * d/install: install libgsthip.so
+  * d/control: remove  superfluous-file-pattern gst/y4m/gsty4mdec.[ch]
+  * d/control: API change, gst deps to 1.27.1
+
+ -- Marc Leeman <marc.leeman@gmail.com>  Tue, 12 Aug 2025 13:58:54 +0200
+
 gst-plugins-bad1.0 (1.26.5-2) unstable; urgency=medium
 
   * trixie has been released, re-upload to unstable
