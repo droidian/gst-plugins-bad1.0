@@ -38,6 +38,7 @@ conf_flags += -Dnvcomp=disabled
 conf_flags += -Dnvdswrapper=disabled
 conf_flags += -Dlcevcdecoder=disabled -Dlcevcencoder=disabled
 conf_flags += -Dsvtjpegxs=disabled
+conf_flags += -Dtflite=disabled
 # Unmaintained library
 conf_flags += -Dmsdk=disabled
 # Only available on Windows
