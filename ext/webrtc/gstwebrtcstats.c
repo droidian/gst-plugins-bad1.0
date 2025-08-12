@@ -615,6 +615,11 @@ _get_stats_from_ice_candidates (GstWebRTCBin * webrtc,
      long                priority;
      DOMString           url;
      DOMString           relayProtocol;
+     DOMString           foundation;
+     DOMString           relatedAddress;
+     long                relatedPort;
+     DOMString           usernameFragment;
+     RTCIceTcpCandidateType tcpType;
    */
 
   if (transport_id)
@@ -630,6 +635,21 @@ _get_stats_from_ice_candidates (GstWebRTCBin * webrtc,
         NULL);
   if (can->url)
     gst_structure_set (stats, "url", G_TYPE_STRING, can->url, NULL);
+  if (can->ABI.abi.foundation)
+    gst_structure_set (stats, "foundation", G_TYPE_STRING,
+        can->ABI.abi.foundation, NULL);
+  if (can->ABI.abi.related_address)
+    gst_structure_set (stats, "related-address", G_TYPE_STRING,
+        can->ABI.abi.related_address, NULL);
+  if (can->ABI.abi.related_port)
+    gst_structure_set (stats, "related-port", G_TYPE_UINT,
+        can->ABI.abi.related_port, NULL);
+  if (can->ABI.abi.username_fragment)
+    gst_structure_set (stats, "username-fragment", G_TYPE_STRING,
+        can->ABI.abi.username_fragment, NULL);
+  if (can->ABI.abi.tcp_type != GST_WEBRTC_ICE_TCP_CANDIDATE_TYPE_NONE)
+    gst_structure_set (stats, "tcp-type",
+        GST_TYPE_WEBRTC_ICE_TCP_CANDIDATE_TYPE, can->ABI.abi.tcp_type, NULL);
 
   gst_structure_set (s, id, GST_TYPE_STRUCTURE, stats, NULL);
   gst_structure_free (stats);
@@ -1015,6 +1035,28 @@ out:
   return TRUE;
 }
 
+static void
+_get_data_channel_transport_stats (GstWebRTCBin * webrtc, GstStructure * s)
+{
+  struct transport_stream_stats ts_stats = {
+    NULL,
+  };
+  GObject *gst_rtp_session;
+
+  if (!webrtc->priv->data_channel_transport)
+    return;
+
+  ts_stats.stream = webrtc->priv->data_channel_transport;
+
+  g_signal_emit_by_name (webrtc->rtpbin, "get-session",
+      ts_stats.stream->session_id, &gst_rtp_session);
+
+  ts_stats.transport_id =
+      _get_stats_from_dtls_transport (webrtc, ts_stats.stream->transport,
+      GST_WEBRTC_ICE_STREAM (ts_stats.stream->stream), NULL, s);
+  g_clear_pointer (&ts_stats.transport_id, g_free);
+}
+
 GstStructure *
 gst_webrtc_bin_create_stats (GstWebRTCBin * webrtc, GstPad * pad)
 {
@@ -1038,6 +1080,8 @@ gst_webrtc_bin_create_stats (GstWebRTCBin * webrtc, GstPad * pad)
     gst_structure_set (s, id, GST_TYPE_STRUCTURE, pc_stats, NULL);
     gst_structure_free (pc_stats);
   }
+
+  _get_data_channel_transport_stats (webrtc, s);
 
   if (pad)
     _get_stats_from_pad (webrtc, pad, s);

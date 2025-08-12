@@ -28,11 +28,11 @@ G_BEGIN_DECLS
 #define GST_TYPE_WL_WINDOW (gst_wl_window_get_type ())
 
 GST_WL_API
-G_DECLARE_FINAL_TYPE (GstWlWindow, gst_wl_window, GST, WL_WINDOW, GObject);
+G_DECLARE_FINAL_TYPE (GstWlWindow, gst_wl_window, GST, WL_WINDOW, GstObject);
 
 struct _GstWlWindow
 {
-  GObject parent_instance;
+  GstObject parent_instance;
 };
 
 GST_WL_API
@@ -73,5 +73,9 @@ const GstVideoRectangle *gst_wl_window_get_render_rectangle (GstWlWindow * self)
 GST_WL_API
 void gst_wl_window_set_rotate_method (GstWlWindow               *self,
         GstVideoOrientationMethod  rotate_method);
+
+GST_WL_API
+void gst_wl_window_set_force_aspect_ratio (GstWlWindow * self,
+        gboolean force_aspect_ratio);
 
 G_END_DECLS

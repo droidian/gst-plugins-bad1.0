@@ -26,6 +26,8 @@
 
 #include "gstwlwindow.h"
 
+#include "color-management-v1-client-protocol.h"
+#include "color-representation-v1-client-protocol.h"
 #include "fullscreen-shell-unstable-v1-client-protocol.h"
 #include "single-pixel-buffer-v1-client-protocol.h"
 #include "viewporter-client-protocol.h"
@@ -51,6 +53,8 @@ typedef struct _GstWlWindowPrivate
   struct wp_viewport *video_viewport;
   struct xdg_surface *xdg_surface;
   struct xdg_toplevel *xdg_toplevel;
+  struct wp_color_management_surface_v1 *color_management_surface;
+  struct wp_color_representation_surface_v1 *color_representation_surface;
   gboolean configured;
   GCond configure_cond;
   GMutex configure_mutex;
@@ -68,6 +72,8 @@ typedef struct _GstWlWindowPrivate
   gint scaled_width;
 
   enum wl_output_transform buffer_transform;
+
+  gboolean force_aspect_ratio;
 
   /* when this is not set both the area_surface and the video_surface are not
    * visible and certain steps should be skipped */
@@ -104,12 +110,15 @@ static void gst_wl_window_update_borders (GstWlWindow * self);
 static void gst_wl_window_commit_buffer (GstWlWindow * self,
     GstWlBuffer * buffer);
 
+static void gst_wl_window_set_colorimetry (GstWlWindow * self,
+    GstVideoColorimetry * colorimetry);
+
 static void
 handle_xdg_toplevel_close (void *data, struct xdg_toplevel *xdg_toplevel)
 {
   GstWlWindow *self = data;
 
-  GST_DEBUG ("XDG toplevel got a \"close\" event.");
+  GST_DEBUG_OBJECT (self, "XDG toplevel got a \"close\" event.");
   g_signal_emit (self, signals[CLOSED], 0);
 }
 
@@ -120,7 +129,7 @@ handle_xdg_toplevel_configure (void *data, struct xdg_toplevel *xdg_toplevel,
   GstWlWindow *self = data;
   const uint32_t *state;
 
-  GST_DEBUG ("XDG toplevel got a \"configure\" event, [ %d, %d ].",
+  GST_DEBUG_OBJECT (self, "XDG toplevel got a \"configure\" event, [ %d, %d ].",
       width, height);
 
   wl_array_for_each (state, states) {
@@ -210,6 +219,13 @@ gst_wl_window_finalize (GObject * gobject)
   if (priv->video_viewport)
     wp_viewport_destroy (priv->video_viewport);
 
+  if (priv->color_management_surface)
+    wp_color_management_surface_v1_destroy (priv->color_management_surface);
+
+  if (priv->color_representation_surface)
+    wp_color_representation_surface_v1_destroy
+        (priv->color_representation_surface);
+
   wl_proxy_wrapper_destroy (priv->video_surface_wrapper);
   wl_subsurface_destroy (priv->video_subsurface);
   wl_surface_destroy (priv->video_surface);
@@ -243,6 +259,7 @@ gst_wl_window_new_internal (GstWlDisplay * display, GMutex * render_lock)
   priv->display = g_object_ref (display);
   priv->render_lock = render_lock;
   g_cond_init (&priv->configure_cond);
+  priv->force_aspect_ratio = TRUE;
 
   compositor = gst_wl_display_get_compositor (display);
   priv->area_surface = wl_compositor_create_surface (compositor);
@@ -316,7 +333,7 @@ gst_wl_window_new_toplevel (GstWlDisplay * display, const GstVideoInfo * info,
     priv->xdg_surface = xdg_wm_base_get_xdg_surface (xdg_wm_base,
         priv->area_surface);
     if (!priv->xdg_surface) {
-      GST_ERROR ("Unable to get xdg_surface");
+      GST_ERROR_OBJECT (self, "Unable to get xdg_surface");
       goto error;
     }
     xdg_surface_add_listener (priv->xdg_surface, &xdg_surface_listener, self);
@@ -324,7 +341,7 @@ gst_wl_window_new_toplevel (GstWlDisplay * display, const GstVideoInfo * info,
     /* Then the toplevel */
     priv->xdg_toplevel = xdg_surface_get_toplevel (priv->xdg_surface);
     if (!priv->xdg_toplevel) {
-      GST_ERROR ("Unable to get xdg_toplevel");
+      GST_ERROR_OBJECT (self, "Unable to get xdg_toplevel");
       goto error;
     }
     xdg_toplevel_add_listener (priv->xdg_toplevel,
@@ -347,7 +364,8 @@ gst_wl_window_new_toplevel (GstWlDisplay * display, const GstVideoInfo * info,
     while (!priv->configured) {
       if (!g_cond_wait_until (&priv->configure_cond, &priv->configure_mutex,
               timeout)) {
-        GST_WARNING ("The compositor did not send configure event.");
+        GST_WARNING_OBJECT (self,
+            "The compositor did not send configure event.");
         break;
       }
     }
@@ -356,7 +374,8 @@ gst_wl_window_new_toplevel (GstWlDisplay * display, const GstVideoInfo * info,
     zwp_fullscreen_shell_v1_present_surface (fullscreen_shell,
         priv->area_surface, ZWP_FULLSCREEN_SHELL_V1_PRESENT_METHOD_ZOOM, NULL);
   } else {
-    GST_ERROR ("Unable to use either xdg_wm_base or zwp_fullscreen_shell.");
+    GST_ERROR_OBJECT (self,
+        "Unable to use either xdg_wm_base or zwp_fullscreen_shell.");
     goto error;
   }
 
@@ -486,7 +505,10 @@ gst_wl_window_resize_video_surface (GstWlWindow * self, gboolean commit)
 
   /* center the video_subsurface inside area_subsurface */
   if (priv->video_viewport) {
-    gst_video_center_rect (&src, &dst, &res, TRUE);
+    if (!priv->force_aspect_ratio)
+      res = dst;
+    else
+      gst_video_center_rect (&src, &dst, &res, TRUE);
     wp_viewport_set_source (priv->video_viewport, wl_fixed_from_int (0),
         wl_fixed_from_int (0), wl_fixed_from_int (wp_src_width),
         wl_fixed_from_int (wp_src_height));
@@ -535,7 +557,7 @@ frame_redraw_callback (void *data, struct wl_callback *callback, uint32_t time)
   GstWlWindowPrivate *priv = gst_wl_window_get_instance_private (self);
   GstWlBuffer *next_buffer;
 
-  GST_INFO ("frame_redraw_cb ");
+  GST_DEBUG_OBJECT (self, "frame_redraw_cb");
 
   wl_callback_destroy (callback);
   priv->frame_callback = NULL;
@@ -572,6 +594,8 @@ gst_wl_window_commit_buffer (GstWlWindow * self, GstWlBuffer * buffer)
     wl_subsurface_set_sync (priv->video_subsurface);
     gst_wl_window_resize_video_surface (self, FALSE);
     gst_wl_window_set_opaque (self, info);
+
+    gst_wl_window_set_colorimetry (self, &info->colorimetry);
   }
 
   if (G_LIKELY (buffer)) {
@@ -825,6 +849,274 @@ gst_wl_window_set_rotate_method (GstWlWindow * self,
   GstWlWindowPrivate *priv = gst_wl_window_get_instance_private (self);
 
   priv->buffer_transform = output_transform_from_orientation_method (method);
+
+  gst_wl_window_update_geometry (self);
+}
+
+enum ImageDescriptionFeedback
+{
+  IMAGE_DESCRIPTION_FEEDBACK_UNKNOWN = 0,
+  IMAGE_DESCRIPTION_FEEDBACK_READY,
+  IMAGE_DESCRIPTION_FEEDBACK_FAILED,
+};
+
+static void
+image_description_failed (void *data,
+    struct wp_image_description_v1 *wp_image_description_v1, uint32_t cause,
+    const char *msg)
+{
+  enum ImageDescriptionFeedback *image_description_feedback = data;
+
+  *image_description_feedback = IMAGE_DESCRIPTION_FEEDBACK_FAILED;
+}
+
+static void
+image_description_ready (void *data,
+    struct wp_image_description_v1 *wp_image_description_v1, uint32_t identity)
+{
+  enum ImageDescriptionFeedback *image_description_feedback = data;
+
+  *image_description_feedback = IMAGE_DESCRIPTION_FEEDBACK_READY;
+}
+
+static const struct wp_image_description_v1_listener description_listerer = {
+  .failed = image_description_failed,
+  .ready = image_description_ready,
+};
+
+static enum wp_color_manager_v1_transfer_function
+gst_colorimetry_tf_to_wl (GstVideoTransferFunction tf)
+{
+  switch (tf) {
+    case GST_VIDEO_TRANSFER_SRGB:
+      return WP_COLOR_MANAGER_V1_TRANSFER_FUNCTION_SRGB;
+    case GST_VIDEO_TRANSFER_BT601:
+    case GST_VIDEO_TRANSFER_BT709:
+    case GST_VIDEO_TRANSFER_BT2020_10:
+      return WP_COLOR_MANAGER_V1_TRANSFER_FUNCTION_BT1886;
+    case GST_VIDEO_TRANSFER_SMPTE2084:
+      return WP_COLOR_MANAGER_V1_TRANSFER_FUNCTION_ST2084_PQ;
+    case GST_VIDEO_TRANSFER_ARIB_STD_B67:
+      return WP_COLOR_MANAGER_V1_TRANSFER_FUNCTION_HLG;
+    default:
+      GST_WARNING ("Transfer function not handled");
+      return 0;
+  }
+}
+
+static enum wp_color_manager_v1_primaries
+gst_colorimetry_primaries_to_wl (GstVideoColorPrimaries primaries)
+{
+  switch (primaries) {
+    case GST_VIDEO_COLOR_PRIMARIES_BT709:
+      return WP_COLOR_MANAGER_V1_PRIMARIES_SRGB;
+    case GST_VIDEO_COLOR_PRIMARIES_SMPTE170M:
+      return WP_COLOR_MANAGER_V1_PRIMARIES_NTSC;
+    case GST_VIDEO_COLOR_PRIMARIES_BT2020:
+      return WP_COLOR_MANAGER_V1_PRIMARIES_BT2020;
+    default:
+      GST_WARNING ("Primaries not handled");
+      return 0;
+  }
+}
+
+static enum wp_color_representation_surface_v1_coefficients
+gst_colorimetry_matrix_to_wl (GstVideoColorMatrix matrix)
+{
+  switch (matrix) {
+    case GST_VIDEO_COLOR_MATRIX_RGB:
+      return WP_COLOR_REPRESENTATION_SURFACE_V1_COEFFICIENTS_IDENTITY;
+    case GST_VIDEO_COLOR_MATRIX_BT709:
+      return WP_COLOR_REPRESENTATION_SURFACE_V1_COEFFICIENTS_BT709;
+    case GST_VIDEO_COLOR_MATRIX_BT601:
+      return WP_COLOR_REPRESENTATION_SURFACE_V1_COEFFICIENTS_BT601;
+    case GST_VIDEO_COLOR_MATRIX_BT2020:
+      return WP_COLOR_REPRESENTATION_SURFACE_V1_COEFFICIENTS_BT2020;
+    default:
+      GST_WARNING ("Matrix not handled");
+      return 0;
+  }
+}
+
+static enum wp_color_representation_surface_v1_range
+gst_colorimetry_range_to_wl (GstVideoColorRange range)
+{
+  switch (range) {
+    case GST_VIDEO_COLOR_RANGE_0_255:
+      return WP_COLOR_REPRESENTATION_SURFACE_V1_RANGE_FULL;
+    case GST_VIDEO_COLOR_RANGE_16_235:
+      return WP_COLOR_REPRESENTATION_SURFACE_V1_RANGE_LIMITED;
+    default:
+      GST_WARNING ("Range not handled");
+      return 0;
+  }
+}
+
+static void
+gst_wl_window_set_image_description (GstWlWindow * self,
+    GstVideoColorimetry * colorimetry)
+{
+  GstWlWindowPrivate *priv = gst_wl_window_get_instance_private (self);
+  struct wl_display *wl_display;
+  struct wp_color_manager_v1 *color_manager;
+  struct wp_color_manager_v1 *color_manager_wrapper = NULL;
+  struct wl_event_queue *color_manager_queue = NULL;
+  struct wp_image_description_v1 *image_description = NULL;
+  struct wp_image_description_creator_params_v1 *params;
+  enum ImageDescriptionFeedback image_description_feedback =
+      IMAGE_DESCRIPTION_FEEDBACK_UNKNOWN;
+  uint32_t wl_transfer_function;
+  uint32_t wl_primaries;
+
+  if (!gst_wl_display_is_color_parametric_creator_supported (priv->display)) {
+    GST_INFO_OBJECT (self,
+        "Color management or parametric creator not supported");
+    return;
+  }
+
+  color_manager = gst_wl_display_get_color_manager_v1 (priv->display);
+  if (!priv->color_management_surface) {
+    priv->color_management_surface =
+        wp_color_manager_v1_get_surface (color_manager,
+        priv->video_surface_wrapper);
+  }
+
+  wl_transfer_function = gst_colorimetry_tf_to_wl (colorimetry->transfer);
+  wl_primaries = gst_colorimetry_primaries_to_wl (colorimetry->primaries);
+
+  if (!gst_wl_display_is_color_transfer_function_supported (priv->display,
+          wl_transfer_function) ||
+      !gst_wl_display_are_color_primaries_supported (priv->display,
+          wl_primaries)) {
+    wp_color_management_surface_v1_unset_image_description
+        (priv->color_management_surface);
+
+    GST_INFO_OBJECT (self,
+        "Can not create image description: primaries or transfer function not supported");
+    return;
+  }
+
+  color_manager_wrapper = wl_proxy_create_wrapper (color_manager);
+  wl_display = gst_wl_display_get_display (priv->display);
+  color_manager_queue = wl_display_create_queue (wl_display);
+  wl_proxy_set_queue ((struct wl_proxy *) color_manager_wrapper,
+      color_manager_queue);
+
+  params =
+      wp_color_manager_v1_create_parametric_creator (color_manager_wrapper);
+
+  wp_image_description_creator_params_v1_set_tf_named (params,
+      wl_transfer_function);
+  wp_image_description_creator_params_v1_set_primaries_named (params,
+      wl_primaries);
+
+  image_description = wp_image_description_creator_params_v1_create (params);
+  wp_image_description_v1_add_listener (image_description,
+      &description_listerer, &image_description_feedback);
+
+  while (image_description_feedback == IMAGE_DESCRIPTION_FEEDBACK_UNKNOWN) {
+    if (wl_display_dispatch_queue (wl_display, color_manager_queue) == -1)
+      break;
+  }
+
+  if (image_description_feedback == IMAGE_DESCRIPTION_FEEDBACK_READY) {
+    wp_color_management_surface_v1_set_image_description
+        (priv->color_management_surface, image_description,
+        WP_COLOR_MANAGER_V1_RENDER_INTENT_PERCEPTUAL);
+
+    GST_INFO_OBJECT (self, "Successfully set parametric image description");
+  } else {
+    wp_color_management_surface_v1_unset_image_description
+        (priv->color_management_surface);
+
+    GST_INFO_OBJECT (self, "Creating image description failed");
+  }
+
+  /* Setting the image description has copy semantics */
+  wp_image_description_v1_destroy (image_description);
+  wl_proxy_wrapper_destroy (color_manager_wrapper);
+  wl_event_queue_destroy (color_manager_queue);
+}
+
+static void
+gst_wl_window_set_color_representation (GstWlWindow * self,
+    GstVideoColorimetry * colorimetry)
+{
+  GstWlWindowPrivate *priv = gst_wl_window_get_instance_private (self);
+  struct wp_color_representation_manager_v1 *cr_manager;
+  uint32_t wl_alpha_mode;
+  uint32_t wl_coefficients;
+  uint32_t wl_range;
+  gboolean alpha_mode_supported;
+  gboolean coefficients_supported;
+
+  cr_manager =
+      gst_wl_display_get_color_representation_manager_v1 (priv->display);
+  if (!cr_manager) {
+    GST_INFO_OBJECT (self, "Color representation not supported");
+    return;
+  }
+
+  wl_alpha_mode = WP_COLOR_REPRESENTATION_SURFACE_V1_ALPHA_MODE_STRAIGHT;
+  alpha_mode_supported =
+      gst_wl_display_is_color_alpha_mode_supported (priv->display,
+      wl_alpha_mode);
+
+  wl_coefficients = gst_colorimetry_matrix_to_wl (colorimetry->matrix);
+  wl_range = gst_colorimetry_range_to_wl (colorimetry->range);
+  coefficients_supported =
+      gst_wl_display_are_color_coefficients_supported (priv->display,
+      wl_coefficients, wl_range);
+
+  if (alpha_mode_supported || coefficients_supported) {
+    if (!priv->color_representation_surface) {
+      priv->color_representation_surface =
+          wp_color_representation_manager_v1_get_surface (cr_manager,
+          priv->video_surface_wrapper);
+    }
+
+    if (alpha_mode_supported)
+      wp_color_representation_surface_v1_set_alpha_mode
+          (priv->color_representation_surface, wl_alpha_mode);
+
+    if (coefficients_supported)
+      wp_color_representation_surface_v1_set_coefficients_and_range
+          (priv->color_representation_surface, wl_coefficients, wl_range);
+
+    GST_INFO_OBJECT (self, "Successfully set color representation");
+  } else {
+    if (priv->color_representation_surface) {
+      wp_color_representation_surface_v1_destroy
+          (priv->color_representation_surface);
+      priv->color_representation_surface = NULL;
+    }
+
+    GST_INFO_OBJECT (self, "Coefficients and range not supported");
+  }
+}
+
+static void
+gst_wl_window_set_colorimetry (GstWlWindow * self,
+    GstVideoColorimetry * colorimetry)
+{
+  GST_OBJECT_LOCK (self);
+
+  GST_INFO_OBJECT (self, "Trying to set colorimetry: %s",
+      gst_video_colorimetry_to_string (colorimetry));
+
+  gst_wl_window_set_image_description (self, colorimetry);
+  gst_wl_window_set_color_representation (self, colorimetry);
+
+  GST_OBJECT_UNLOCK (self);
+}
+
+void
+gst_wl_window_set_force_aspect_ratio (GstWlWindow * self,
+    gboolean force_aspect_ratio)
+{
+  GstWlWindowPrivate *priv = gst_wl_window_get_instance_private (self);
+
+  priv->force_aspect_ratio = force_aspect_ratio;
 
   gst_wl_window_update_geometry (self);
 }

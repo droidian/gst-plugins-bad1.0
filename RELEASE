@@ -1,17 +1,15 @@
-This is GStreamer gst-plugins-bad 1.26.5.
+This is GStreamer gst-plugins-bad 1.27.1.
 
-The GStreamer team is thrilled to announce a new major feature release
-of your favourite cross-platform multimedia framework!
-
-As always, this release is again packed with new features, bug fixes and
-other improvements.
+GStreamer 1.27 is the unstable development branch leading up to the next major
+stable version which will be 1.28.
  
-The 1.26 release series adds new features on top of the 1.24 series and is
-part of the API and ABI-stable 1.x release series.
+The 1.27 development series adds new features on top of the 1.26 series and is
+part of the API and ABI-stable 1.x release series of the GStreamer multimedia
+framework.
 
-Full release notes can be found at:
+Full release notes will one day be found at:
 
-  https://gstreamer.freedesktop.org/releases/1.26/
+  https://gstreamer.freedesktop.org/releases/1.28/
 
 Binaries for Android, iOS, Mac OS X and Windows will usually be provided
 shortly after the release.
@@ -41,10 +39,6 @@ with other GStreamer modules for a complete multimedia experience.
  - gst-libav: a set of codecs plugins based on the ffmpeg library. This is
                     where you can find audio and video decoders and encoders
                     for a wide variety of formats including H.264, AAC, etc.
-
- - gstreamer-vaapi: hardware-accelerated video decoding and encoding using
-                    VA-API on Linux. Primarily for Intel graphics hardware.
-                    (Deprecated, use the new "va" plugin instead)
 
  - gst-rtsp-server: library to serve files or streaming pipelines via RTSP
 

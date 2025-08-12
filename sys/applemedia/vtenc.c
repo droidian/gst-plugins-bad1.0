@@ -914,7 +914,7 @@ gst_vtenc_h264_parse_profile_level_key (GstVTEnc * self, const gchar * profile,
     profile = "main";
   if (level_arg == NULL)
     level_arg = "AutoLevel";
-  strncpy (level, level_arg, sizeof (level));
+  strlcpy (level, level_arg, sizeof (level));
 
   if (!strcmp (profile, "constrained-baseline") ||
       !strcmp (profile, "baseline")) {
@@ -1163,6 +1163,7 @@ gst_vtenc_negotiate_downstream (GstVTEnc * self, CMSampleBufferRef sbuf)
       guint8 *codec_data;
       gsize codec_data_size;
       GstBuffer *codec_data_buf;
+      guint8 sps[12];
 
       fmt = CMSampleBufferGetFormatDescription (sbuf);
       atoms = CMFormatDescriptionGetExtension (fmt,
@@ -1188,27 +1189,10 @@ gst_vtenc_negotiate_downstream (GstVTEnc * self, CMSampleBufferRef sbuf)
 
       if (self->details->format_id == kCMVideoCodecType_HEVC ||
           self->details->format_id == kCMVideoCodecType_HEVCWithAlpha) {
-        if (codec_data_size < 1 + 12) {
-          GST_ERROR_OBJECT (self,
-              "Codec data malformed, can't parse profile and level");
-          gst_buffer_unref (codec_data_buf);
-          gst_caps_unref (caps);
-          return FALSE;
-        }
-
-        gst_codec_utils_h265_caps_set_level_tier_and_profile (caps,
-            &codec_data[1], 12);
+        sps[0] = codec_data[1];
+        sps[11] = codec_data[12];
+        gst_codec_utils_h265_caps_set_level_tier_and_profile (caps, sps, 12);
       } else {
-        guint8 sps[3];
-
-        if (codec_data_size < 1 + 3) {
-          GST_ERROR_OBJECT (self,
-              "Codec data malformed, can't parse profile and level");
-          gst_buffer_unref (codec_data_buf);
-          gst_caps_unref (caps);
-          return FALSE;
-        }
-
         sps[0] = codec_data[1];
         sps[1] = codec_data[2] & ~0xDF;
         sps[2] = codec_data[3];

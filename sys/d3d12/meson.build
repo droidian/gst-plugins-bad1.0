@@ -23,6 +23,7 @@ d3d12_sources = [
   'gstd3d12mipmapping.cpp',
   'gstd3d12overlaycompositor.cpp',
   'gstd3d12pluginutils.cpp',
+  'gstd3d12remap.cpp',
   'gstd3d12screencapture.cpp',
   'gstd3d12screencapturedevice.cpp',
   'gstd3d12screencapturesrc.cpp',
@@ -60,6 +61,7 @@ d3d12_headers = [
   'gstd3d12window-swapchain.h',
   'gstd3d12dpbstorage.h',
   'gstd3d12pluginutils.h',
+  'gstd3d12remap.h',
   'gstd3d12h265dec.h',
   'gstd3d12screencapturesrc.h',
   'gstd3d12overlaycompositor.h',
@@ -198,7 +200,7 @@ have_dx_math = cxx.compiles('''
     name: 'DirectXMath support in Windows SDK')
 
 if not have_dx_math
-  directxmath_dep = dependency('DirectXMath', 'directxmath',
+  directxmath_dep = dependency('directxmath',
       allow_fallback: true,
       required: d3d12_option)
   if not directxmath_dep.found()

@@ -1,10 +1,14 @@
 tensordecoders_sources = [
   'gsttensordecoders.c',
-  'gstssdobjectdetector.c'
+  'gstssdobjectdetector.c',
+  'gstclassifiertensordecoder.c',
+  'gstfacedetectortensordecoder.c'
 ]
 
 tensordecoders_headers = [
   'gstssdobjectdetector.h',
+  'gstclassifiertensordecoder.h',
+  'gstfacedetectortensordecoder.h'
 ]
 
 doc_sources = []

@@ -265,6 +265,7 @@ gst_h264_parse_reset_stream_info (GstH264Parse * h264parse)
   h264parse->parsed_colorimetry.matrix = GST_VIDEO_COLOR_MATRIX_UNKNOWN;
   h264parse->parsed_colorimetry.transfer = GST_VIDEO_TRANSFER_UNKNOWN;
   h264parse->parsed_colorimetry.primaries = GST_VIDEO_COLOR_PRIMARIES_UNKNOWN;
+  h264parse->lcevc = FALSE;
 
   h264parse->have_pps = FALSE;
   h264parse->have_sps = FALSE;
@@ -1317,8 +1318,15 @@ gst_h264_parse_handle_frame_packetized (GstBaseParse * parse,
        * a replacement output buffer is provided anyway. */
       gst_h264_parse_parse_frame (parse, &tmp_frame);
       ret = gst_base_parse_finish_frame (parse, &tmp_frame, nl + nalu.size);
-      left -= nl + nalu.size;
+
+      /* Bail out if we get a flow error. */
+      if (ret != GST_FLOW_OK) {
+        gst_buffer_unmap (buffer, &map);
+        gst_buffer_unref (buffer);
+        return ret;
+      }
     }
+    left -= nl + nalu.size;
 
     parse_res = gst_h264_parser_identify_nalu_avc (h264parse->nalparser,
         map.data, nalu.offset + nalu.size, map.size, nl, &nalu);
@@ -1327,17 +1335,53 @@ gst_h264_parse_handle_frame_packetized (GstBaseParse * parse,
   gst_buffer_unmap (buffer, &map);
 
   if (!h264parse->split_packetized) {
-    h264parse->marker = TRUE;
-    gst_h264_parse_parse_frame (parse, frame);
-    ret = gst_base_parse_finish_frame (parse, frame, map.size);
+    gint parsed = map.size - left;
+
+    /* Nothing to do if no NAL unit was parsed, the whole AU will be dropped
+     * below. */
+    if (parsed > 0) {
+      if (G_UNLIKELY (left)) {
+        /* Only part of the AU could be parsed, split out that part the rest
+         * will be dropped below. Should not be happening for nice AVC. */
+        GST_WARNING_OBJECT (parse, "Problem parsing part of AU, keep part that "
+            "has been correctly parsed (%d bytes).", parsed);
+        buffer = gst_buffer_copy (frame->buffer);
+        GstBaseParseFrame tmp_frame;
+
+        gst_base_parse_frame_init (&tmp_frame);
+        tmp_frame.flags |= frame->flags;
+        tmp_frame.offset = frame->offset;
+        tmp_frame.overhead = frame->overhead;
+        tmp_frame.buffer = gst_buffer_copy_region (buffer, GST_BUFFER_COPY_ALL,
+            0, parsed);
+
+        h264parse->marker = TRUE;
+        gst_h264_parse_parse_frame (parse, &tmp_frame);
+        ret = gst_base_parse_finish_frame (parse, &tmp_frame, parsed);
+        gst_buffer_unref (buffer);
+
+        /* Bail out if we get a flow error. */
+        if (ret != GST_FLOW_OK) {
+          gst_buffer_unmap (buffer, &map);
+          gst_buffer_unref (buffer);
+          return ret;
+        }
+      } else {
+        /* The whole AU succesfully parsed. */
+        h264parse->marker = TRUE;
+        gst_h264_parse_parse_frame (parse, frame);
+        ret = gst_base_parse_finish_frame (parse, frame, map.size);
+      }
+    }
   } else {
     gst_buffer_unref (buffer);
-    if (G_UNLIKELY (left)) {
-      /* should not be happening for nice AVC */
-      GST_WARNING_OBJECT (parse, "skipping leftover AVC data %d", left);
-      frame->flags |= GST_BASE_PARSE_FRAME_FLAG_DROP;
-      ret = gst_base_parse_finish_frame (parse, frame, map.size);
-    }
+  }
+
+  if (G_UNLIKELY (left)) {
+    /* should not be happening for nice AVC */
+    GST_WARNING_OBJECT (parse, "skipping leftover AVC data %d", left);
+    frame->flags |= GST_BASE_PARSE_FRAME_FLAG_DROP;
+    ret = gst_base_parse_finish_frame (parse, frame, left);
   }
 
   if (parse_res == GST_H264_PARSER_NO_NAL_END ||
@@ -2491,7 +2535,7 @@ gst_h264_parse_update_src_caps (GstH264Parse * h264parse, GstCaps * caps)
           "Couldn't set content light level to caps");
     }
 
-    if (h264parse->user_data.lcevc_enhancement_data)
+    if (h264parse->user_data.lcevc_enhancement_data || h264parse->lcevc)
       gst_caps_set_simple (caps, "lcevc", G_TYPE_BOOLEAN, TRUE, NULL);
     else
       gst_caps_set_simple (caps, "lcevc", G_TYPE_BOOLEAN, FALSE, NULL);
@@ -3670,6 +3714,7 @@ gst_h264_parse_set_caps (GstBaseParse * parse, GstCaps * caps)
       &h264parse->fps_den);
   gst_structure_get_fraction (str, "pixel-aspect-ratio",
       &h264parse->upstream_par_n, &h264parse->upstream_par_d);
+  gst_structure_get_boolean (str, "lcevc", &h264parse->lcevc);
 
   /* get upstream format and align from caps */
   gst_h264_parse_format_from_caps (caps, &format, &align);

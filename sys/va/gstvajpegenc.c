@@ -53,9 +53,7 @@
 #include "vacompat.h"
 #include "gstvabaseenc.h"
 #include "gstvaencoder.h"
-#include "gstvacaps.h"
 #include "gstvaprofile.h"
-#include "gstvadisplay_priv.h"
 #include "gstvapluginutils.h"
 
 GST_DEBUG_CATEGORY_STATIC (gst_va_jpegenc_debug);
@@ -378,7 +376,8 @@ gst_va_jpeg_enc_reconfig (GstVaBaseEnc * base)
   }
 
   /* Unknown frame rate is allowed for jpeg, such as a single still image. */
-  if (GST_VIDEO_INFO_FPS_D (&base->in_info) == 0) {
+  if (GST_VIDEO_INFO_FPS_N (&base->in_info) == 0
+      || GST_VIDEO_INFO_FPS_D (&base->in_info) == 0) {
     GST_DEBUG_OBJECT (self, "Unknown framerate");
     GST_VIDEO_INFO_FPS_N (&base->in_info) = 0;
     GST_VIDEO_INFO_FPS_D (&base->in_info) = 1;
@@ -394,8 +393,8 @@ gst_va_jpeg_enc_reconfig (GstVaBaseEnc * base)
 
     /* Set the latency */
     latency = gst_util_uint64_scale (latency_num,
-        GST_VIDEO_INFO_FPS_D (&base->in_info) * GST_SECOND,
-        GST_VIDEO_INFO_FPS_N (&base->in_info));
+        GST_VIDEO_INFO_FPS_D (&base->input_state->info) * GST_SECOND,
+        GST_VIDEO_INFO_FPS_N (&base->input_state->info));
     gst_video_encoder_set_latency (venc, latency, latency);
   }
 
