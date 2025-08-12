@@ -73,8 +73,6 @@ Files: ext/flite/gstflite.c
  gst/debugutils/gstchopmydata.c
  gst/videofilters/gstzebrastripe.h
  gst/videoparsers/gstdiracparse.c
- gst/y4m/gsty4mdec.c
- gst/y4m/gsty4mdec.h
  sys/decklink/gstdecklink.cpp
  sys/decklink/gstdecklink.h
 Copyright: 2005, David Schleef <ds@schleef.org>
