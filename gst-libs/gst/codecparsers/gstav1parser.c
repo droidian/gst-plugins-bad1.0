@@ -486,7 +486,18 @@ static gboolean
 av1_seq_level_idx_is_valid (GstAV1SeqLevels seq_level_idx)
 {
   return seq_level_idx == GST_AV1_SEQ_LEVEL_MAX
-      || seq_level_idx < GST_AV1_SEQ_LEVELS;
+      || (seq_level_idx < GST_AV1_SEQ_LEVELS
+      /* The following levels are currently undefined. */
+      && seq_level_idx != GST_AV1_SEQ_LEVEL_2_2
+      && seq_level_idx != GST_AV1_SEQ_LEVEL_2_3
+      && seq_level_idx != GST_AV1_SEQ_LEVEL_3_2
+      && seq_level_idx != GST_AV1_SEQ_LEVEL_3_3
+      && seq_level_idx != GST_AV1_SEQ_LEVEL_4_2
+      && seq_level_idx != GST_AV1_SEQ_LEVEL_4_3
+      && seq_level_idx != GST_AV1_SEQ_LEVEL_7_0
+      && seq_level_idx != GST_AV1_SEQ_LEVEL_7_1
+      && seq_level_idx != GST_AV1_SEQ_LEVEL_7_2
+      && seq_level_idx != GST_AV1_SEQ_LEVEL_7_3);
 }
 
 static void
@@ -2045,7 +2056,7 @@ gst_av1_parse_segmentation_params (GstAV1Parser * parser, GstBitReader * br,
   gint i, j;
   GstAV1ParserResult retval = GST_AV1_PARSER_OK;
   gint clipped_value /* clippedValue */ ;
-  GstAV1SegmenationParams *seg_params;
+  GstAV1SegmentationParams *seg_params;
   gint feature_value = 0;
 
   const guint8 segmentation_feature_bits[GST_AV1_SEG_LVL_MAX] = {
@@ -2119,7 +2130,7 @@ gst_av1_parse_segmentation_params (GstAV1Parser * parser, GstBitReader * br,
       }
     } else {
       gint8 ref_idx;
-      GstAV1SegmenationParams *ref_seg_params;
+      GstAV1SegmentationParams *ref_seg_params;
 
       /* Copy it from prime_ref */
       if (frame_header->primary_ref_frame >= GST_AV1_PRIMARY_REF_NONE) {

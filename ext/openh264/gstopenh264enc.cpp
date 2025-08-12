@@ -922,7 +922,7 @@ gst_openh264enc_handle_frame (GstVideoEncoder * encoder,
   GST_OBJECT_UNLOCK (openh264enc);
 
   if (frame) {
-    src_pic = g_new0 (SSourcePicture, 1);
+    src_pic = new SSourcePicture;
 
     if (src_pic == NULL) {
       if (frame)
@@ -977,7 +977,7 @@ gst_openh264enc_handle_frame (GstVideoEncoder * encoder,
     if (frame) {
       gst_video_frame_unmap (&video_frame);
       gst_video_codec_frame_unref (frame);
-      g_free (src_pic);
+      delete src_pic;
       GST_ELEMENT_ERROR (openh264enc, STREAM, ENCODE,
           ("Could not encode frame"), ("Openh264 returned %d", ret));
       return GST_FLOW_ERROR;
@@ -990,7 +990,7 @@ gst_openh264enc_handle_frame (GstVideoEncoder * encoder,
     if (frame) {
       gst_video_frame_unmap (&video_frame);
       gst_video_encoder_finish_frame (encoder, frame);
-      g_free (src_pic);
+      delete src_pic;
     }
 
     return GST_FLOW_OK;
@@ -999,7 +999,7 @@ gst_openh264enc_handle_frame (GstVideoEncoder * encoder,
   if (frame) {
     gst_video_frame_unmap (&video_frame);
     gst_video_codec_frame_unref (frame);
-    g_free (src_pic);
+    delete src_pic;
     src_pic = NULL;
     frame = NULL;
   }

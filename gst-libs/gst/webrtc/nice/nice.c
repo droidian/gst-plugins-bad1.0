@@ -23,6 +23,7 @@
 
 #include "nice.h"
 #include "nicestream.h"
+#include "niceutils.h"
 /* libnice */
 #include <agent.h>
 
@@ -70,6 +71,9 @@ struct _GstWebRTCNicePrivate
   GHashTable *turn_servers;
 
   GstUri *http_proxy;
+
+  gchar *remote_ufrag;
+  gchar *remote_pwd;
 };
 
 #define gst_webrtc_nice_parent_class parent_class
@@ -551,25 +555,16 @@ gst_webrtc_nice_add_stream (GstWebRTCICE * ice, guint session_id)
 }
 
 static void
-_on_new_candidate (NiceAgent * agent, NiceCandidate * candidate,
-    GstWebRTCNice * ice)
+_fill_local_candidate_credentials (NiceAgent * agent, NiceCandidate * candidate)
 {
-  struct NiceStreamItem *item;
-  gchar *attr;
-
-  item = _find_item (ice, -1, candidate->stream_id, NULL);
-  if (!item) {
-    GST_WARNING_OBJECT (ice, "received signal for non-existent stream %u",
-        candidate->stream_id);
-    return;
-  }
 
   if (!candidate->username || !candidate->password) {
     gboolean got_credentials;
     gchar *ufrag, *password;
 
-    got_credentials = nice_agent_get_local_credentials (ice->priv->nice_agent,
-        candidate->stream_id, &ufrag, &password);
+    got_credentials =
+        nice_agent_get_local_credentials (agent, candidate->stream_id, &ufrag,
+        &password);
     g_warn_if_fail (got_credentials);
 
     if (!candidate->username)
@@ -582,8 +577,40 @@ _on_new_candidate (NiceAgent * agent, NiceCandidate * candidate,
     else
       g_free (password);
   }
+}
 
-  attr = nice_agent_generate_local_candidate_sdp (agent, candidate);
+static void
+_fill_remote_candidate_credentials (GstWebRTCNice * nice,
+    NiceCandidate * candidate)
+{
+  if (!candidate->username)
+    candidate->username = g_strdup (nice->priv->remote_ufrag);
+
+  if (!candidate->password)
+    candidate->password = g_strdup (nice->priv->remote_pwd);
+}
+
+static void
+_on_new_candidate (NiceAgent * agent, NiceCandidate * candidate,
+    GstWebRTCNice * ice)
+{
+  struct NiceStreamItem *item;
+  NiceCandidate *c;
+  gchar *attr;
+
+  item = _find_item (ice, -1, candidate->stream_id, NULL);
+  if (!item) {
+    GST_WARNING_OBJECT (ice, "received signal for non-existent stream %u",
+        candidate->stream_id);
+    return;
+  }
+
+  c = nice_candidate_copy (candidate);
+  _fill_local_candidate_credentials (agent, c);
+
+  attr = nice_agent_generate_local_candidate_sdp (agent, c);
+
+  nice_candidate_free (c);
 
   if (ice->priv->on_candidate)
     ice->priv->on_candidate (GST_WEBRTC_ICE (ice), item->session_id, attr,
@@ -604,79 +631,6 @@ gst_webrtc_nice_find_transport (GstWebRTCICE * ice, GstWebRTCICEStream * stream,
 
   return gst_webrtc_ice_stream_find_transport (item->stream, component);
 }
-
-#if 0
-/* TODO don't rely on libnice to (de)serialize candidates */
-static NiceCandidateType
-_candidate_type_from_string (const gchar * s)
-{
-  if (g_strcmp0 (s, "host") == 0) {
-    return NICE_CANDIDATE_TYPE_HOST;
-  } else if (g_strcmp0 (s, "srflx") == 0) {
-    return NICE_CANDIDATE_TYPE_SERVER_REFLEXIVE;
-  } else if (g_strcmp0 (s, "prflx") == 0) {     /* FIXME: is the right string? */
-    return NICE_CANDIDATE_TYPE_PEER_REFLEXIVE;
-  } else if (g_strcmp0 (s, "relay") == 0) {
-    return NICE_CANDIDATE_TYPE_RELAY;
-  } else {
-    g_assert_not_reached ();
-    return 0;
-  }
-}
-
-static const gchar *
-_candidate_type_to_string (NiceCandidateType type)
-{
-  switch (type) {
-    case NICE_CANDIDATE_TYPE_HOST:
-      return "host";
-    case NICE_CANDIDATE_TYPE_SERVER_REFLEXIVE:
-      return "srflx";
-    case NICE_CANDIDATE_TYPE_PEER_REFLEXIVE:
-      return "prflx";
-    case NICE_CANDIDATE_TYPE_RELAY:
-      return "relay";
-    default:
-      g_assert_not_reached ();
-      return NULL;
-  }
-}
-
-static NiceCandidateTransport
-_candidate_transport_from_string (const gchar * s)
-{
-  if (g_strcmp0 (s, "UDP") == 0) {
-    return NICE_CANDIDATE_TRANSPORT_UDP;
-  } else if (g_strcmp0 (s, "TCP tcptype") == 0) {
-    return NICE_CANDIDATE_TRANSPORT_TCP_ACTIVE;
-  } else if (g_strcmp0 (s, "tcp-passive") == 0) {       /* FIXME: is the right string? */
-    return NICE_CANDIDATE_TRANSPORT_TCP_PASSIVE;
-  } else if (g_strcmp0 (s, "tcp-so") == 0) {
-    return NICE_CANDIDATE_TRANSPORT_TCP_SO;
-  } else {
-    g_assert_not_reached ();
-    return 0;
-  }
-}
-
-static const gchar *
-_candidate_type_to_string (NiceCandidateType type)
-{
-  switch (type) {
-    case NICE_CANDIDATE_TYPE_HOST:
-      return "host";
-    case NICE_CANDIDATE_TYPE_SERVER_REFLEXIVE:
-      return "srflx";
-    case NICE_CANDIDATE_TYPE_PEER_REFLEXIVE:
-      return "prflx";
-    case NICE_CANDIDATE_TYPE_RELAY:
-      return "relay";
-    default:
-      g_assert_not_reached ();
-      return NULL;
-  }
-}
-#endif
 
 /* parse the address for possible resolution */
 static gboolean
@@ -934,6 +888,11 @@ gst_webrtc_nice_set_remote_credentials (GstWebRTCICE * ice,
   nice_agent_set_remote_credentials (nice->priv->nice_agent,
       item->nice_stream_id, ufrag, pwd);
 
+  g_free (nice->priv->remote_ufrag);
+  g_free (nice->priv->remote_pwd);
+  nice->priv->remote_ufrag = g_strdup (ufrag);
+  nice->priv->remote_pwd = g_strdup (pwd);
+
   return TRUE;
 }
 
@@ -1094,8 +1053,8 @@ gst_webrtc_nice_set_tos (GstWebRTCICE * ice, GstWebRTCICEStream * stream,
   nice_agent_set_stream_tos (nice->priv->nice_agent, item->nice_stream_id, tos);
 }
 
-static const gchar *
-_relay_type_to_string (GstUri * turn_server)
+const gchar *
+gst_webrtc_nice_get_candidate_relay_protocol (GstUri * turn_server)
 {
   const gchar *scheme;
   const gchar *transport;
@@ -1118,8 +1077,9 @@ _relay_type_to_string (GstUri * turn_server)
   return "none";
 }
 
-static gchar *
-_get_server_url (GstWebRTCNice * ice, NiceCandidate * cand)
+gchar *
+gst_webrtc_nice_get_candidate_server_url (GstWebRTCNice * ice,
+    NiceCandidate * cand)
 {
   switch (cand->type) {
     case NICE_CANDIDATE_TYPE_RELAYED:{
@@ -1145,28 +1105,6 @@ _get_server_url (GstWebRTCNice * ice, NiceCandidate * cand)
   }
 }
 
-/* TODO: replace it with nice_candidate_type_to_string()
- * when it's ready for use
- * https://libnice.freedesktop.org/libnice/NiceCandidate.html#nice-candidate-type-to-string
- */
-static const gchar *
-_candidate_type_to_string (NiceCandidateType type)
-{
-  switch (type) {
-    case NICE_CANDIDATE_TYPE_HOST:
-      return "host";
-    case NICE_CANDIDATE_TYPE_SERVER_REFLEXIVE:
-      return "srflx";
-    case NICE_CANDIDATE_TYPE_PEER_REFLEXIVE:
-      return "prflx";
-    case NICE_CANDIDATE_TYPE_RELAYED:
-      return "relay";
-    default:
-      g_assert_not_reached ();
-      return NULL;
-  }
-}
-
 static void
 _populate_candidate_stats (GstWebRTCNice * ice, NiceCandidate * cand,
     GstWebRTCICEStream * stream, GstWebRTCICECandidateStats * stats,
@@ -1177,18 +1115,56 @@ _populate_candidate_stats (GstWebRTCNice * ice, NiceCandidate * cand,
   g_assert (cand != NULL);
 
   nice_address_to_string (&cand->addr, ipaddr);
-  stats->port = nice_address_get_port (&cand->addr);
-  stats->ipaddr = g_strdup (ipaddr);
-  stats->stream_id = stream->stream_id;
-  stats->type = _candidate_type_to_string (cand->type);
-  stats->prio = cand->priority;
-  stats->proto =
+  GST_WEBRTC_ICE_CANDIDATE_STATS_PORT (stats) =
+      nice_address_get_port (&cand->addr);
+  GST_WEBRTC_ICE_CANDIDATE_STATS_ADDRESS (stats) = g_strdup (ipaddr);
+  GST_WEBRTC_ICE_CANDIDATE_STATS_STREAM_ID (stats) = stream->stream_id;
+  GST_WEBRTC_ICE_CANDIDATE_STATS_TYPE (stats) =
+      nice_candidate_type_to_string (cand->type);
+  GST_WEBRTC_ICE_CANDIDATE_STATS_PRIORITY (stats) = cand->priority;
+  GST_WEBRTC_ICE_CANDIDATE_STATS_PROTOCOL (stats) =
       cand->transport == NICE_CANDIDATE_TRANSPORT_UDP ? "udp" : "tcp";
   if (is_local) {
-    if (cand->type == NICE_CANDIDATE_TYPE_RELAYED)
-      stats->relay_proto = _relay_type_to_string (ice->priv->turn_server);
-    stats->url = _get_server_url (ice, cand);
+    if (cand->type == NICE_CANDIDATE_TYPE_RELAYED) {
+      NiceAddress relay_address;
+      nice_candidate_relay_address (cand, &relay_address);
+
+      GST_WEBRTC_ICE_CANDIDATE_STATS_RELATED_ADDRESS (stats) =
+          nice_address_dup_string (&relay_address);
+      GST_WEBRTC_ICE_CANDIDATE_STATS_RELATED_PORT (stats) =
+          nice_address_get_port (&relay_address);
+
+      GST_WEBRTC_ICE_CANDIDATE_STATS_RELAY_PROTOCOL (stats) =
+          gst_webrtc_nice_get_candidate_relay_protocol (ice->priv->turn_server);
+    }
+    GST_WEBRTC_ICE_CANDIDATE_STATS_URL (stats) =
+        gst_webrtc_nice_get_candidate_server_url (ice, cand);
   }
+
+  GST_WEBRTC_ICE_CANDIDATE_STATS_FOUNDATION (stats) =
+      g_strdup (cand->foundation);
+
+  switch (cand->transport) {
+    case NICE_CANDIDATE_TRANSPORT_UDP:
+      GST_WEBRTC_ICE_CANDIDATE_STATS_TCP_TYPE (stats) =
+          GST_WEBRTC_ICE_TCP_CANDIDATE_TYPE_NONE;
+      break;
+    case NICE_CANDIDATE_TRANSPORT_TCP_ACTIVE:
+      GST_WEBRTC_ICE_CANDIDATE_STATS_TCP_TYPE (stats) =
+          GST_WEBRTC_ICE_TCP_CANDIDATE_TYPE_ACTIVE;
+      break;
+    case NICE_CANDIDATE_TRANSPORT_TCP_PASSIVE:
+      GST_WEBRTC_ICE_CANDIDATE_STATS_TCP_TYPE (stats) =
+          GST_WEBRTC_ICE_TCP_CANDIDATE_TYPE_PASSIVE;
+      break;
+    case NICE_CANDIDATE_TRANSPORT_TCP_SO:
+      GST_WEBRTC_ICE_CANDIDATE_STATS_TCP_TYPE (stats) =
+          GST_WEBRTC_ICE_TCP_CANDIDATE_TYPE_SO;
+      break;
+  };
+
+  GST_WEBRTC_ICE_CANDIDATE_STATS_USERNAME_FRAGMENT (stats) =
+      g_strdup (cand->username);
 }
 
 static void
@@ -1259,6 +1235,9 @@ gst_webrtc_nice_get_selected_pair (GstWebRTCICE * ice,
   if (stream) {
     if (nice_agent_get_selected_pair (nice->priv->nice_agent, stream->stream_id,
             NICE_COMPONENT_TYPE_RTP, &local_cand, &remote_cand)) {
+      _fill_local_candidate_credentials (nice->priv->nice_agent, local_cand);
+      _fill_remote_candidate_credentials (nice, remote_cand);
+
       *local_stats = g_new0 (GstWebRTCICECandidateStats, 1);
       _populate_candidate_stats (nice, local_cand, stream, *local_stats, TRUE);
 
@@ -1666,6 +1645,9 @@ gst_webrtc_nice_finalize (GObject * object)
   g_object_unref (ice->priv->nice_agent);
 
   g_hash_table_unref (ice->priv->turn_servers);
+
+  g_free (ice->priv->remote_ufrag);
+  g_free (ice->priv->remote_pwd);
 
   G_OBJECT_CLASS (parent_class)->finalize (object);
 }

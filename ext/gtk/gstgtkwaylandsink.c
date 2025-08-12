@@ -155,7 +155,8 @@ gst_gtk_wayland_sink_class_init (GstGtkWaylandSinkClass * klass)
           "rotate method",
           "rotate method",
           GST_TYPE_VIDEO_ORIENTATION_METHOD, GST_VIDEO_ORIENTATION_IDENTITY,
-          G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
+          G_PARAM_READWRITE | GST_PARAM_MUTABLE_PLAYING |
+          G_PARAM_STATIC_STRINGS));
 
   /**
    * GstGtkWaylandSink:drm-device:
@@ -171,8 +172,8 @@ gst_gtk_wayland_sink_class_init (GstGtkWaylandSinkClass * klass)
   gstelement_class->change_state =
       GST_DEBUG_FUNCPTR (gst_gtk_wayland_sink_change_state);
 
-  gst_element_class_set_metadata (gstelement_class, "Gtk Wayland Video Sink",
-      "Sink/Video",
+  gst_element_class_set_static_metadata (gstelement_class,
+      "Gtk Wayland Video Sink", "Sink/Video",
       "A video sink that renders to a GtkWidget using Wayland API",
       "George Kiagiadakis <george.kiagiadakis@collabora.com>");
 

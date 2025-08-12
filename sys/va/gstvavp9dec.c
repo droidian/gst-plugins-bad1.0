@@ -555,12 +555,9 @@ gst_va_vp9_dec_negotiate (GstVideoDecoder * decoder)
   GstVaVp9Dec *self = GST_VA_VP9_DEC (decoder);
   gboolean need_open;
 
-  /* Do not (re-)open the decoder in case the input state hasn't changed. */
-  if (!base->need_negotiation) {
-    GST_DEBUG_OBJECT (decoder,
-        "Input state hasn't changed, no need to (re-)open the decoder");
-    goto done;
-  }
+  /* Ignore downstream renegotiation request. */
+  if (!base->need_negotiation)
+    return TRUE;
 
   base->need_negotiation = FALSE;
 
@@ -604,7 +601,6 @@ gst_va_vp9_dec_negotiate (GstVideoDecoder * decoder)
   if (!gst_va_base_dec_set_output_state (base))
     return FALSE;
 
-done:
   return GST_VIDEO_DECODER_CLASS (parent_class)->negotiate (decoder);
 }
 

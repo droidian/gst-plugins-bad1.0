@@ -473,6 +473,30 @@ gst_vulkan_encoder_quality_level (GstVulkanEncoder * self)
 }
 
 /**
+ * gst_vulkan_encoder_rc_mdoe:
+ * @self: a #GstVulkanEncoder
+ *
+ * Get the current rate control mode.
+ *
+ * Returns: whether the encoder has started, it will return the rate control
+ *     mode; otherwise it will return -1
+ */
+gint32
+gst_vulkan_encoder_rc_mode (GstVulkanEncoder * self)
+{
+  GstVulkanEncoderPrivate *priv;
+
+  g_return_val_if_fail (GST_IS_VULKAN_ENCODER (self), -1);
+
+  priv = gst_vulkan_encoder_get_instance_private (self);
+
+  if (!priv->started)
+    return -1;
+
+  return priv->rc_mode;
+}
+
+/**
  * gst_vulkan_encoder_stop:
  * @self: a #GstVulkanEncoder
  *
@@ -537,20 +561,20 @@ _rate_control_mode_to_str (VkVideoEncodeRateControlModeFlagBitsKHR rc_mode)
 
 static void
 _rate_control_mode_validate (GstVulkanEncoder * self,
-    VkVideoEncodeRateControlModeFlagBitsKHR rc_mode)
+    VkVideoEncodeRateControlModeFlagBitsKHR * rc_mode)
 {
   GstVulkanEncoderPrivate *priv =
       gst_vulkan_encoder_get_instance_private (self);
 
   if (rc_mode > VK_VIDEO_ENCODE_RATE_CONTROL_MODE_DEFAULT_KHR
-      && !(priv->caps.encoder.caps.rateControlModes & rc_mode)) {
-    rc_mode = VK_VIDEO_ENCODE_RATE_CONTROL_MODE_DEFAULT_KHR;
+      && !(priv->caps.encoder.caps.rateControlModes & *rc_mode)) {
+    *rc_mode = VK_VIDEO_ENCODE_RATE_CONTROL_MODE_DEFAULT_KHR;
     for (int i = VK_VIDEO_ENCODE_RATE_CONTROL_MODE_DISABLED_BIT_KHR;
         i <= VK_VIDEO_ENCODE_RATE_CONTROL_MODE_VBR_BIT_KHR; i++) {
       if ((priv->caps.encoder.caps.rateControlModes) & i) {
         GST_DEBUG_OBJECT (self, "rate control mode is forced to: %s",
             _rate_control_mode_to_str (i));
-        rc_mode = i;
+        *rc_mode = i;
         break;
       }
     }
@@ -815,7 +839,7 @@ gst_vulkan_encoder_start (GstVulkanEncoder * self,
     goto failed;
 
   /* check rate control mode if it was set before start */
-  _rate_control_mode_validate (self, priv->rc_mode);
+  _rate_control_mode_validate (self, &priv->rc_mode);
 
   priv->session_reset = TRUE;
   priv->started = TRUE;
@@ -967,8 +991,10 @@ gst_vulkan_encoder_video_session_parameters_overrides (GstVulkanEncoder * self,
   res = priv->vk.GetEncodedVideoSessionParameters (self->queue->device->device,
       &video_params_info, &feedback_info, &size, param_data);
   if (gst_vulkan_error_to_g_error (res, error,
-          "vGetEncodedVideoSessionParametersKHR") != VK_SUCCESS)
+          "vGetEncodedVideoSessionParametersKHR") != VK_SUCCESS) {
+    g_free (param_data);
     return FALSE;
+  }
 
   if (data_size)
     *data_size = size;
@@ -1182,7 +1208,7 @@ gst_vulkan_encoder_encode (GstVulkanEncoder * self, GstVideoInfo * info,
       .width = GST_VIDEO_INFO_WIDTH (info),
       .height = GST_VIDEO_INFO_HEIGHT (info),
     },
-    .baseArrayLayer = 0,
+    .baseArrayLayer = priv->layered_dpb ? slot_index : 0,
     .imageViewBinding = pic->dpb_view->view,
   };
   pic->dpb_slot = (VkVideoReferenceSlotInfoKHR) {
@@ -1309,13 +1335,18 @@ gst_vulkan_encoder_encode (GstVulkanEncoder * self, GstVideoInfo * info,
   priv->vk.CmdEndVideoCoding (cmd_buf->cmd, &end_coding);
 
   if (!gst_vulkan_operation_end (priv->exec, &err)) {
-    GST_ERROR_OBJECT (self, "The operation did not complete properly");
+    GST_ERROR_OBJECT (self, "The operation did not complete properly: %s",
+        err->message);
     goto bail;
   }
   /* Wait the operation to complete or we might have a failing query */
   gst_vulkan_operation_wait (priv->exec);
 
-  gst_vulkan_operation_get_query (priv->exec, (gpointer *) & encode_res, &err);
+  if (!gst_vulkan_operation_get_query (priv->exec, (gpointer *) & encode_res,
+          &err)) {
+    GST_ERROR_OBJECT (self, "Failed to query the operation: %s", err->message);
+    goto bail;
+  }
   if (encode_res->status == VK_QUERY_RESULT_STATUS_COMPLETE_KHR) {
     GST_INFO_OBJECT (self, "The frame %p has been encoded with size %"
         G_GUINT64_FORMAT, pic, encode_res->data_size + pic->offset);
@@ -1330,6 +1361,8 @@ gst_vulkan_encoder_encode (GstVulkanEncoder * self, GstVideoInfo * info,
   return ret;
 bail:
   {
+    if (err)
+      g_error_free (err);
     return FALSE;
   }
 }
@@ -1442,8 +1475,11 @@ gst_vulkan_encoder_set_rc_mode (GstVulkanEncoder * self,
   if (priv->rc_mode == rc_mode)
     return;
 
-  if (priv->started)
-    _rate_control_mode_validate (self, rc_mode);
+  if (priv->started) {
+    _rate_control_mode_validate (self, &rc_mode);
+    if (priv->rc_mode == rc_mode)
+      return;
+  }
 
   priv->session_reset = TRUE;
   priv->rc_mode = rc_mode;

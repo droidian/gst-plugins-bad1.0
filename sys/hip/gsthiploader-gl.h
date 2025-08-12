@@ -20,13 +20,23 @@
 #pragma once
 
 #include <gst/gst.h>
-#include <gst/codecparsers/gsth265parser.h>
+#include <hip/hip_runtime.h>
+#include <hip/hip_gl_interop.h>
+#include "gsthip-enums.h"
 
 G_BEGIN_DECLS
 
-GST_CODEC_PARSERS_API
-GstH265ParserResult gst_h265_parser_link_slice_hdr (GstH265Parser * parser,
-                                                    GstH265SliceHdr * slice,
-                                                    guint pps_id);
+hipError_t HipGLGetDevices (GstHipVendor vendor,
+                            unsigned int* pHipDeviceCount,
+                            int* pHipDevices,
+                            unsigned int hipDeviceCount,
+                            hipGLDeviceList deviceList);
+
+hipError_t HipGraphicsGLRegisterBuffer (GstHipVendor vendor,
+                                        hipGraphicsResource** resource,
+                                        unsigned int buffer,
+                                        unsigned int flags);
 
 G_END_DECLS
+
+

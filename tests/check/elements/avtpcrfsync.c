@@ -29,11 +29,6 @@
 #include <gst/check/gstharness.h>
 #include "../../../ext/avtp/gstavtpcrfutil.h"
 
-#include <unistd.h>
-#include <arpa/inet.h>
-#include <netinet/ether.h>
-#include <sys/socket.h>
-
 #define STREAM_ID 0xDEADC0DEDEADC0DE
 
 struct buffer_tstamps
@@ -374,19 +369,6 @@ GST_START_TEST (test_crf_period_zero)
 
 GST_END_TEST;
 
-static gboolean
-packet_socket_allowed (void)
-{
-  int fd;
-
-  fd = socket (AF_PACKET, SOCK_DGRAM, htons (ETH_P_ALL));
-  if (fd < 0)
-    return FALSE;
-
-  close (fd);
-  return TRUE;
-}
-
 static Suite *
 avtpcrfsync_suite (void)
 {
@@ -400,11 +382,9 @@ avtpcrfsync_suite (void)
   tcase_add_test (tc_chain, test_properties);
   tcase_add_test (tc_chain, test_set_avtp_tstamp);
   tcase_add_test (tc_chain, test_set_avtp_mr_bit);
-  if (packet_socket_allowed ()) {
-    tcase_add_test (tc_chain, test_crf_cvf_data);
-    tcase_add_test (tc_chain, test_crf_aaf_data);
-    tcase_add_test (tc_chain, test_crf_period_zero);
-  }
+  tcase_add_test (tc_chain, test_crf_cvf_data);
+  tcase_add_test (tc_chain, test_crf_aaf_data);
+  tcase_add_test (tc_chain, test_crf_period_zero);
 
   return s;
 }

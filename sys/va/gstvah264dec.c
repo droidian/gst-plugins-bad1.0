@@ -500,7 +500,7 @@ gst_va_h264_dec_new_picture (GstH264Decoder * decoder,
 error:
   {
     GST_WARNING_OBJECT (self,
-        "Failed to allocate output buffer, returning %s",
+        "Failed to allocated output buffer, return %s",
         gst_flow_get_name (ret));
     return ret;
   }

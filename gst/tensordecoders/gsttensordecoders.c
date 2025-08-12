@@ -25,6 +25,8 @@
 #endif
 
 #include "gstssdobjectdetector.h"
+#include "gstclassifiertensordecoder.h"
+#include "gstfacedetectortensordecoder.h"
 
 /**
  * SECTION:plugin-tensordecoders
@@ -38,6 +40,8 @@ plugin_init (GstPlugin * plugin)
 {
   gboolean ret = FALSE;
   ret |= GST_ELEMENT_REGISTER (ssd_object_detector, plugin);
+  ret |= GST_ELEMENT_REGISTER (classifier_tensor_decoder, plugin);
+  ret |= GST_ELEMENT_REGISTER (face_detector_tensor_decoder, plugin);
 
   return ret;
 }

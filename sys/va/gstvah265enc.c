@@ -73,9 +73,7 @@
 #include "vacompat.h"
 #include "gstvabaseenc.h"
 #include "gstvaencoder.h"
-#include "gstvacaps.h"
 #include "gstvaprofile.h"
-#include "gstvadisplay_priv.h"
 #include "gstvapluginutils.h"
 
 #include "gst/glib-compat-private.h"
@@ -4506,7 +4504,7 @@ gst_va_h265_enc_reconfig (GstVaBaseEnc * base)
   GstVideoCodecState *output_state = NULL;
   GstVideoFormat format, reconf_format = GST_VIDEO_FORMAT_UNKNOWN;
   VAProfile profile = VAProfileNone;
-  gboolean do_renegotiation = TRUE, do_reopen, need_negotiation, rc_same;
+  gboolean do_renegotiation = TRUE, do_reopen, need_negotiation;
   guint max_ref_frames, max_surfaces = 0, rt_format = 0,
       codedbuf_size, latency_num;
   gint width, height;
@@ -4532,14 +4530,10 @@ gst_va_h265_enc_reconfig (GstVaBaseEnc * base)
   if (!_h265_decide_profile (self, &profile, &rt_format))
     return FALSE;
 
-  GST_OBJECT_LOCK (self);
-  rc_same = (self->prop.rc_ctrl == self->rc.rc_ctrl_mode);
-  GST_OBJECT_UNLOCK (self);
-
   /* first check */
   do_reopen = !(base->profile == profile && base->rt_format == rt_format
       && format == reconf_format && width == base->width
-      && height == base->height && rc_same);
+      && height == base->height && self->prop.rc_ctrl == self->rc.rc_ctrl_mode);
 
   if (do_reopen && gst_va_encoder_is_open (base->encoder))
     gst_va_encoder_close (base->encoder);
@@ -4656,8 +4650,8 @@ gst_va_h265_enc_reconfig (GstVaBaseEnc * base)
 
   /* Set the latency */
   latency = gst_util_uint64_scale (latency_num,
-      GST_VIDEO_INFO_FPS_D (&base->in_info) * GST_SECOND,
-      GST_VIDEO_INFO_FPS_N (&base->in_info));
+      GST_VIDEO_INFO_FPS_D (&base->input_state->info) * GST_SECOND,
+      GST_VIDEO_INFO_FPS_N (&base->input_state->info));
   gst_video_encoder_set_latency (venc, latency, latency);
 
   max_ref_frames = self->gop.b_pyramid ?
