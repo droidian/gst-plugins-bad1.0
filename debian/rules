@@ -38,7 +38,7 @@ conf_flags += -Dnvcomp=disabled
 conf_flags += -Dnvdswrapper=disabled
 conf_flags += -Dlcevcdecoder=disabled -Dlcevcencoder=disabled
 conf_flags += -Dsvtjpegxs=disabled
-conf_flags += -Dtflite=disabled
+conf_flags += -Dtflite-edgetpu=disabled
 conf_flags += -Dwpe2=disabled
 # Unmaintained library
 conf_flags += -Dmsdk=disabled
@@ -80,6 +80,7 @@ conf_flags += -Dbluez=disabled -Ddc1394=disabled -Dfbdev=disabled -Dsbc=disabled
 conf_flags += -Dva=disabled -Dv4l2codecs=disabled -Dwpe=disabled -Duvch264=disabled
 conf_flags += -Dvulkan=disabled -Dwayland=disabled -Ddvb=disabled
 conf_flags += -Dopenni2=disabled -Dsctp=disabled -Dwebrtc=disabled
+conf_flags += -Dtflite=disabled
 endif
 
 ifeq ($(DEB_HOST_ARCH_OS),hurd)
@@ -134,6 +135,7 @@ ifeq ($(DEB_HOST_ARCH_OS),linux)
 	dh_install -pgstreamer1.0-plugins-bad debian/tmp/usr/lib/$(DEB_HOST_MULTIARCH)/gstreamer-1.0/libgstsctp.so
 	dh_install -pgstreamer1.0-plugins-bad debian/tmp/usr/lib/$(DEB_HOST_MULTIARCH)/gstreamer-1.0/libgstwebrtc.so
 	dh_install -plibgstreamer-plugins-bad1.0-0 debian/tmp/usr/lib/$(DEB_HOST_MULTIARCH)/libgstwebrtcnice-1.0.so.* usr/lib/$(DEB_HOST_MULTIARCH)
+	dh_install -pgstreamer1.0-plugins-bad debian/tmp/usr/lib/$(DEB_HOST_MULTIARCH)/gstreamer-1.0/libgsttflite.so
 ifeq ($(DEB_HOST_ARCH),amd64)
 	dh_install -pgstreamer1.0-plugins-bad debian/tmp/usr/lib/$(DEB_HOST_MULTIARCH)/gstreamer-1.0/libgstqsv.so
 endif
