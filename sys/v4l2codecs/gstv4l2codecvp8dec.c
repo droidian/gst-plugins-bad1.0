@@ -123,7 +123,6 @@ struct _GstV4l2CodecVp8Dec
   GstV4l2CodecAllocator *src_allocator;
   GstV4l2CodecPool *src_pool;
   gint min_pool_size;
-  gboolean has_videometa;
   gboolean streaming;
   gboolean copy_frames;
 
@@ -337,6 +336,7 @@ gst_v4l2_codec_vp8_dec_decide_allocation (GstVideoDecoder * decoder,
   GstCaps *caps = NULL;
   guint min = 0;
   guint num_bitstream;
+  gboolean has_videometa;
 
   if (self->streaming)
     goto no_internal_changes;
@@ -345,7 +345,7 @@ gst_v4l2_codec_vp8_dec_decide_allocation (GstVideoDecoder * decoder,
   g_clear_object (&self->src_allocator);
   g_clear_object (&self->sink_allocator);
 
-  self->has_videometa = gst_query_find_allocation_meta (query,
+  has_videometa = gst_query_find_allocation_meta (query,
       GST_VIDEO_META_API_TYPE, NULL);
 
   gst_query_parse_allocation (query, &caps, NULL);
@@ -354,11 +354,35 @@ gst_v4l2_codec_vp8_dec_decide_allocation (GstVideoDecoder * decoder,
     return FALSE;
   }
 
-  if (gst_video_is_dma_drm_caps (caps) && !self->has_videometa) {
+  if (gst_video_is_dma_drm_caps (caps) && !has_videometa) {
     GST_ERROR_OBJECT (self,
         "DMABuf caps negotiated without the mandatory support of VideoMeta");
     return FALSE;
   }
+
+  /* Check if we can zero-copy buffers */
+  if (!has_videometa) {
+    GstVideoInfo ref_vinfo;
+    gint i;
+
+    gst_video_info_set_format (&ref_vinfo,
+        GST_VIDEO_INFO_FORMAT (&self->vinfo_drm.vinfo), self->width,
+        self->height);
+
+    for (i = 0; i < GST_VIDEO_INFO_N_PLANES (&self->vinfo_drm.vinfo); i++) {
+      if (self->vinfo_drm.vinfo.stride[i] != ref_vinfo.stride[i] ||
+          self->vinfo_drm.vinfo.offset[i] != ref_vinfo.offset[i]) {
+        GST_WARNING_OBJECT (self,
+            "GstVideoMeta support required, copying frames.");
+        self->copy_frames = TRUE;
+        break;
+      }
+    }
+  } else {
+    self->copy_frames = FALSE;
+  }
+
+
 
   if (gst_query_get_n_allocation_pools (query) > 0)
     gst_query_parse_nth_allocation_pool (query, 0, NULL, NULL, &min, NULL);
@@ -561,28 +585,6 @@ gst_v4l2_codec_vp8_dec_new_sequence (GstVp8Decoder * decoder,
       GST_ERROR_OBJECT (self, "Failed to negotiate with downstream");
       return GST_FLOW_NOT_NEGOTIATED;
     }
-  }
-
-  /* Check if we can zero-copy buffers */
-  if (!self->has_videometa) {
-    GstVideoInfo ref_vinfo;
-    gint i;
-
-    gst_video_info_set_format (&ref_vinfo,
-        GST_VIDEO_INFO_FORMAT (&self->vinfo_drm.vinfo), self->width,
-        self->height);
-
-    for (i = 0; i < GST_VIDEO_INFO_N_PLANES (&self->vinfo_drm.vinfo); i++) {
-      if (self->vinfo_drm.vinfo.stride[i] != ref_vinfo.stride[i] ||
-          self->vinfo_drm.vinfo.offset[i] != ref_vinfo.offset[i]) {
-        GST_WARNING_OBJECT (self,
-            "GstVideoMeta support required, copying frames.");
-        self->copy_frames = TRUE;
-        break;
-      }
-    }
-  } else {
-    self->copy_frames = FALSE;
   }
 
   return GST_FLOW_OK;

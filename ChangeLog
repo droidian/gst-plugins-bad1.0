@@ -1,3 +1,852 @@
+=== release 1.26.5 ===
+
+2025-08-07 19:06:46 +0100  Tim-Philipp Müller <tim@centricular.com>
+
+	* NEWS:
+	* RELEASE:
+	* gst-plugins-bad.doap:
+	* meson.build:
+	  Release 1.26.5
+
+2025-08-07 13:58:27 +0300  Sebastian Dröge <sebastian@centricular.com>
+
+	* gst-libs/gst/codecparsers/gstav1parser.c:
+	  av1parser: Don't error out on "currently" undefined seq-level indices
+	  They might very well be defined in the future and that shouldn't affect the
+	  parsing in any way. Specifically, ffmpeg with `av1_nvenc` seems to create
+	  `GST_AV1_SEQ_LEVEL_7_3` currently and parsing such streams would fail otherwise.
+	  Fixes https://gitlab.freedesktop.org/gstreamer/gstreamer/-/issues/4589
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/9504>
+
+2025-08-01 14:55:12 +0200  Víctor Manuel Jáquez Leal <vjaquez@igalia.com>
+
+	* gst-libs/gst/vulkan/gstvkphysicaldevice-private.h:
+	* gst-libs/gst/vulkan/gstvkphysicaldevice.c:
+	  vkphysicaldevice: enable sampler ycbcr, sync2 and timeline semaphore features
+	  For the features VkPhysicalDeviceSamplerYcbcrConversionFeaturesKHR,
+	  VkPhysicalDeviceSynchronization2Features and
+	  VkPhisicalDeviceTimelineSemaphoreFeatures
+	  The Vulkan specification states:
+	  If the `VkPhysicalDeviceXXXFeatures` structure is included in the `pNext`
+	  chain of the `VkPhysicalDeviceFeatures2` structure passed to
+	  `vkGetPhysicalDeviceFeatures2`, it is filled in to indicate whether each
+	  corresponding feature is supported. If the application wishes to use a
+	  `VkDevice` with any features described by `VkPhysicalDeviceXXXFeatures`,
+	  it **must** add an instance of the structure, with the desired feature members
+	  set to `VK_TRUE`, to the `pNext` chain of `VkDeviceCreateInfo` when creating
+	  the `VkDevice`.
+	  And that was missing in the code.
+	  Strangely, that functionality doesn't have a Valid-Usage ID assigned, so it
+	  isn't caught by the validation layer.
+	  This patch adds the structures in the physical devices to get them and later set
+	  them in the device creation.
+	  In order to link these features, videomaintenance1, and others to come, without
+	  knowing if Vulkan 1.3 features are chained in the device properties structure, a
+	  static and inlined function was added in gstvkphysicaldevice-private.h. It was
+	  added in a header file to avoid compiler warnings if it's not used because of
+	  old Vulkan headers.
+	  Also the value dump videomaintenance1 was moved to another function to pack
+	  there all these queried features.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/9489>
+
+2025-08-01 11:52:17 +0200  Víctor Manuel Jáquez Leal <vjaquez@igalia.com>
+
+	* sys/va/gstvaav1enc.c:
+	* sys/va/gstvah264enc.c:
+	* sys/va/gstvah265enc.c:
+	* sys/va/gstvavp8enc.c:
+	* sys/va/gstvavp9enc.c:
+	  vaXXXenc: fix potential race condition
+	  VA encoders, at reconfiguration, have to check if the rate-control was changed
+	  by the user, but since user parameters setting are in another thread, the
+	  comparison was racy.
+	  This patch locks the object to compare the current rate-control with the one set
+	  by the user.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/9484>
+
+2025-05-29 13:20:59 +0200  Víctor Manuel Jáquez Leal <vjaquez@igalia.com>
+
+	* gst-libs/gst/vulkan/gstvkdevice.c:
+	  vulkan: ycbcr conversion extension got promoted in 1.1.0
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/9482>
+
+2025-08-01 01:03:10 +0900  Seungha Yang <seungha@centricular.com>
+
+	* sys/d3d12/gstd3d12screencapturedevice.cpp:
+	  d3d12screencapturedevice: Avoid false device removal on monitor reconfiguration
+	  Post device-changed instead of device-removed/device-added when
+	  only HMONITOR or display position changed without actual device change.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/9481>
+
+2025-07-30 15:50:56 +0400  Marc-André Lureau <marcandre.lureau@redhat.com>
+
+	* gst-libs/gst/d3d12/meson.build:
+	* sys/d3d12/meson.build:
+	  meson: d3d12: Add support for MinGW DirectXMath package
+	  This is a similar issue that was found for d3d11:
+	  https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/6495
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/9473>
+
+2025-07-29 11:42:54 +0100  Philippe Normand <philn@igalia.com>
+
+	* sys/va/gstvavp9dec.c:
+	  vavp9dec: Always chain to parent class negotiate vmethod
+	  When the base videodecoder class re-attempts a negotiation after flush, the
+	  vabasedec `need_negotiation` flag isn't necessarily set to TRUE, because in that
+	  situation the input state hasn't changed.
+	  By always chaining up we are sure that buffer pool negotiation will always be
+	  attempted.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/9461>
+
+2025-07-29 11:42:44 +0100  Philippe Normand <philn@igalia.com>
+
+	* sys/va/gstvajpegdec.c:
+	  vajpegdec: Always chain to parent class negotiate vmethod
+	  When the base videodecoder class re-attempts a negotiation after flush, the
+	  vabasedec `need_negotiation` flag isn't necessarily set to TRUE, because in that
+	  situation the input state hasn't changed.
+	  By always chaining up we are sure that buffer pool negotiation will always be
+	  attempted.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/9461>
+
+2025-07-29 11:42:33 +0100  Philippe Normand <philn@igalia.com>
+
+	* sys/va/gstvaav1dec.c:
+	  vaav1dec: Always chain to parent class negotiate vmethod
+	  When the base videodecoder class re-attempts a negotiation after flush, the
+	  vabasedec `need_negotiation` flag isn't necessarily set to TRUE, because in that
+	  situation the input state hasn't changed.
+	  By always chaining up we are sure that buffer pool negotiation will always be
+	  attempted.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/9461>
+
+2025-07-28 12:52:22 +0100  Philippe Normand <philn@igalia.com>
+
+	* sys/va/gstvabasedec.c:
+	  vabasedec: Instrument negotiate function with debug statements
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/9461>
+
+2025-07-28 12:49:36 +0100  Philippe Normand <philn@igalia.com>
+
+	* sys/va/gstvabasedec.c:
+	  vabasedec: Always chain to parent class negotiate vmethod
+	  When the base videodecoder class re-attempts a negotiation after flush, the
+	  vabasedec `need_negotiation` flag isn't necessarily set to TRUE, because in that
+	  situation the input state hasn't changed.
+	  By always chaining up we are sure that buffer pool negotiation will always be
+	  attempted.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/9461>
+
+2025-07-28 12:45:25 +0100  Philippe Normand <philn@igalia.com>
+
+	* sys/va/gstvah264dec.c:
+	  vah264dec: Spelling fix in warning debug statement
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/9461>
+
+2025-07-28 12:44:48 +0100  Philippe Normand <philn@igalia.com>
+
+	* gst-libs/gst/codecs/gsth264decoder.c:
+	  h264decoder: Spelling fix in warning debug statement
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/9461>
+
+2025-07-24 18:16:51 +0200  Víctor Manuel Jáquez Leal <vjaquez@igalia.com>
+
+	* sys/va/gstvaav1enc.c:
+	* sys/va/gstvah264enc.c:
+	* sys/va/gstvah265enc.c:
+	* sys/va/gstvajpegenc.c:
+	* sys/va/gstvavp8enc.c:
+	* sys/va/gstvavp9enc.c:
+	  vaXXXenc: calculate latency with corrected framerate
+	  Fixes: #4558
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/9447>
+
+2025-06-29 22:52:37 +0900  Seungha Yang <seungha@centricular.com>
+
+	* sys/wasapi2/gstwasapi2ringbuffer.cpp:
+	  wasapi2: Fix various MinGW build warnings
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/9428>
+
+2025-06-29 20:45:51 +0900  Seungha Yang <seungha@centricular.com>
+
+	* sys/wasapi2/AsyncOperations.h:
+	* sys/wasapi2/gstwasapi2client.cpp:
+	* sys/wasapi2/gstwasapi2client.h:
+	* sys/wasapi2/gstwasapi2util.cpp:
+	* sys/wasapi2/meson.build:
+	  waapi2: Remove unused WinRT deps and implementations
+	  Removing unused WinRT API based implementations
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/9428>
+
+2025-06-29 01:46:44 +0900  Seungha Yang <seungha@centricular.com>
+
+	* sys/wasapi2/gstwasapi2object.cpp:
+	* sys/wasapi2/gstwasapi2object.h:
+	* sys/wasapi2/gstwasapi2ringbuffer.cpp:
+	* sys/wasapi2/gstwasapi2ringbuffer.h:
+	* sys/wasapi2/gstwasapi2sink.c:
+	* sys/wasapi2/gstwasapi2src.c:
+	* sys/wasapi2/meson.build:
+	  wasapi2: Port to IMMDevice based device selection
+	  Because of a couple of issues reported related to WinRT device
+	  enumeration, porting to IMMDevice device id based device selection.
+	  Fixes: https://gitlab.freedesktop.org/gstreamer/gstreamer/-/issues/4311
+	  Fixes: https://gitlab.freedesktop.org/gstreamer/gstreamer/-/issues/3936
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/9428>
+
+2025-06-27 21:36:53 +0900  Seungha Yang <seungha@centricular.com>
+
+	* sys/wasapi2/gstwasapi2activator.cpp:
+	* sys/wasapi2/gstwasapi2activator.h:
+	* sys/wasapi2/gstwasapi2client.cpp:
+	* sys/wasapi2/gstwasapi2device.c:
+	* sys/wasapi2/gstwasapi2device.cpp:
+	* sys/wasapi2/gstwasapi2device.h:
+	* sys/wasapi2/gstwasapi2enumerator.cpp:
+	* sys/wasapi2/gstwasapi2enumerator.h:
+	* sys/wasapi2/gstwasapi2util.cpp:
+	* sys/wasapi2/gstwasapi2util.h:
+	* sys/wasapi2/meson.build:
+	* sys/wasapi2/plugin.cpp:
+	  wasapi2: Implement IMMDeviceEnumerator based enumerator
+	  ... and merge wasapi2{capture,render}deviceprovider into single
+	  wasapi2deviceprovider since we can enumerate input/output audio
+	  devices at once using IMMDeviceEnumerator
+	  This is a preparation for complete porting to Win32 API
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/9428>
+
+2025-06-01 00:02:16 +0900  Seungha Yang <seungha@centricular.com>
+
+	* sys/d3d12/gstd3d12graphicscapture.cpp:
+	* sys/d3d12/gstd3d12graphicscapture.h:
+	* sys/d3d12/plugin.cpp:
+	  d3d12screencapturesrc: Fix OS handle leaks/random crash in WGC mode
+	  Multiple DispatcherQueues per thread seems to be causing OS handle leak
+	  and random crashes were observed. Instead of creating
+	  thread/DispatcherQueue per GstD3D12GraphicsCapture object,
+	  reuse only single thread and DispatcherQueue
+	  Fixes: https://gitlab.freedesktop.org/gstreamer/gstreamer/-/issues/4351
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/9424>
+
+2025-07-16 15:33:19 +0200  Tim-Philipp Müller <tim@centricular.com>
+
+	* meson.build:
+	  Back to development after 1.26.4
+
+=== release 1.26.4 ===
+
+2025-07-16 15:26:21 +0200  Tim-Philipp Müller <tim@centricular.com>
+
+	* NEWS:
+	* RELEASE:
+	* gst-plugins-bad.doap:
+	* meson.build:
+	  Release 1.26.4
+
+2025-07-09 02:52:27 -0400  Doug Nazar <nazard@nazar.ca>
+
+	* ext/avtp/gstavtpcrfbase.c:
+	* ext/avtp/gstavtpcrfbase.h:
+	  avtp: crf: Setup socket during state change to ensure we handle failure
+	  Previously the socket would be created in the thread, which take some
+	  time to start. As the tests were so short they would usually pass as
+	  they don't actually use the socket.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/9374>
+
+2025-07-09 02:51:11 -0400  Doug Nazar <nazard@nazar.ca>
+
+	* tests/check/elements/avtpcrfcheck.c:
+	* tests/check/elements/avtpcrfsync.c:
+	  avtp: crf: tests: Only run tests if packet socket is available
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/9374>
+
+2025-07-09 00:47:58 +0200  Mathieu Duponchelle <mathieu@centricular.com>
+
+	* gst/rtmp2/rtmp/rtmpclient.c:
+	  rtmp2src: don't send window acknowledgement size commands twice
+	  This causes servers such as AWS MediaLive to drop the connection, and
+	  the message flow chart as documented in the "spec" always has the
+	  server sending it first, and the client replying to it on reception of
+	  the Set Peer Bandwidth, which we do since 286a3829b637.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/9372>
+
+2025-07-09 00:44:36 +0200  Mathieu Duponchelle <mathieu@centricular.com>
+
+	* gst/rtmp2/gstrtmp2locationhandler.c:
+	  rtmp2src: fix playback of URIs without a playpath
+	  ffmpeg manages to play RTMP URLs in the form:
+	  ```
+	  protocol://servername:port/appname
+	  ```
+	  and does not require a second component to the path, adapt our code to
+	  allow using such URLs as `tcUrl`.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/9372>
+
+2025-07-09 12:21:31 +0200  Piotr Brzeziński <piotr@centricular.com>
+
+	* sys/applemedia/vtenc.c:
+	  vtenc: Fix negotiation failure with profile=main-422-10
+	  Previous version passed just enough data to the parser to detect
+	  main/main-10, but main-422-10 is one of the range extensions profiles.
+	  Those need a few more bits to be accurately detected, and since those
+	  were just uinitialized memory previously, we'd incorrectly end up with
+	  main or main-10 when the encoder was in fact giving us 4:2:2 10bit
+	  output.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/9371>
+
+2025-07-07 11:59:18 +0200  Hanna Weiß <hweiss@igalia.com>
+
+	* gst-libs/gst/vulkan/gstvkfullscreenquad.c:
+	  vulkan: Fix drawing too many triangles in fullscreenquad
+	  was using a index buffer for triangle list but drawn as strip
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/9370>
+
+2025-06-17 06:38:59 -0400  Doug Nazar <nazard@nazar.ca>
+
+	* ext/openh264/gstopenh264enc.cpp:
+	  openh264: Ensure src_pic is initialized before use
+	  valgrind was showing reads of uninitialized memory and the
+	  library examples all memset the structure before use.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/9362>
+
+2025-07-07 10:12:52 +1000  Matthew Waters <matthew@centricular.com>
+
+	* gst-libs/gst/vulkan/gstvkfullscreenquad.c:
+	  vulkanfullscreenquad: add locks for synchronisation
+	  Now all API can be accessed from any thread.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/9357>
+
+2025-05-31 03:35:27 -0400  Doug Nazar <nazard@nazar.ca>
+
+	* gst/transcode/gst-cpu-throttling-clock.c:
+	  cpu-throttling-clock: fix race between async callback and unscheduling
+	  It's possible that the callback is already scheduled to run on another
+	  thread when we unschedule it during dispose and we would then access
+	  a freed object.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/9347>
+
+2025-05-30 19:15:56 -0400  Doug Nazar <nazard@nazar.ca>
+
+	* tests/check/elements/h266parse.c:
+	  h266parse: test: Pass correct size argument to va_arg function
+	  sizeof(int) != sizeof (gsize)
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/9347>
+
+2025-05-30 15:23:03 -0400  Doug Nazar <nazard@nazar.ca>
+
+	* tests/check/libs/analyticsmeta.c:
+	  analytics: tests: Copy correct size of array to buffer
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/9347>
+
+2025-05-30 15:20:41 -0400  Doug Nazar <nazard@nazar.ca>
+
+	* sys/decklink/gstdecklink.cpp:
+	  decklink: Fix a memory leak
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/9347>
+
+2025-05-30 15:21:58 -0400  Doug Nazar <nazard@nazar.ca>
+
+	* tests/check/elements/webrtcbin.c:
+	  webrtc: tests: Fix a few memory leaks
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/9347>
+
+2025-05-30 15:20:02 -0400  Doug Nazar <nazard@nazar.ca>
+
+	* gst/camerabin2/gstcamerabin2.c:
+	  camerabin: Fix a memory leak
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/9347>
+
+2025-05-28 08:45:40 -0400  Doug Nazar <nazard@nazar.ca>
+
+	* gst/codecalpha/gstalphacombine.c:
+	  alphacombine: fix memory leaks
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/9343>
+
+2025-05-28 08:44:01 -0400  Doug Nazar <nazard@nazar.ca>
+
+	* gst/transcode/gst-cpu-throttling-clock.c:
+	  cpu-throttling-clock: free clock when finished
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/9343>
+
+2025-07-05 03:10:51 +0900  Seungha Yang <seungha@centricular.com>
+
+	* sys/d3d12/gstd3d12screencapturedevice.cpp:
+	  d3d12screencapture: Add support for monitor add/remove in device provider
+	  Update device list on WM_DISPLAYCHANGE event
+	  Fixes: https://gitlab.freedesktop.org/gstreamer/gstreamer/-/issues/4521
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/9333>
+
+2025-07-04 10:56:27 -0400  Nicolas Dufresne <nicolas.dufresne@collabora.com>
+
+	* gst/videoparsers/gstvp9parse.c:
+	  Revert "vp9parse: Always default to super-frame"
+	  This reverts commit fd1428d3ebf937d7656c3788df3ef3ff85fecc31.
+	  As reported in #4524, this changes cause regressions. The problem is due to a
+	  bug in how vp9parse interact with parsebin, presenting downstream negotiation of
+	  alignment to work. This revert to being stuck using frame alignment always,
+	  which fortunately works with libvpx, though less efficient.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/9331>
+
+2025-05-07 14:02:05 -0400  Nicolas Dufresne <nicolas.dufresne@collabora.com>
+
+	* gst/videoparsers/gstvp9parse.c:
+	  vp9parse: Only show the last frame of a super frame
+	  Only the last frame of a super frame should be displayed by default. When
+	  converting from super frame to frame, mark all frames as decode only except the
+	  last one. This fixes vp90-2-22-svc_1280x720_3.ivf conformance test with
+	  stateless decoders such as VA.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/9327>
+
+2025-05-07 13:48:04 -0400  Nicolas Dufresne <nicolas.dufresne@collabora.com>
+
+	* gst/videoparsers/gstvp9parse.c:
+	  vp9parse: Always default to super-frame
+	  Sort the list of structure before truncating so that we don't prefer
+	  "frame"" alignment over "super-frame" in some cases.
+	  Fixes vp90-2-22-svc_1280x720_3.ivf conformance test when using libvpx based
+	  decoder.
+	  Fixes #4371
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/9327>
+
+2025-05-07 10:29:10 -0400  Nicolas Dufresne <nicolas.dufresne@collabora.com>
+
+	* gst/videoparsers/gstvp9parse.c:
+	  vp9parse: Fix typo Aligment vs Alignment
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/9327>
+
+2025-07-02 22:38:41 +0300  Sebastian Dröge <sebastian@centricular.com>
+
+	* gst/tensordecoders/gstssdobjectdetector.c:
+	  ssdobjectdetector: Use correct tensor data index for the scores
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/9324>
+
+2025-06-27 10:06:34 -0400  Nicolas Dufresne <nicolas.dufresne@collabora.com>
+
+	* sys/v4l2codecs/gstv4l2codech265dec.c:
+	  v4l2codecs: h265dec: Fail when frame cropping is needed while using DMABuf
+	  It is not possible to do frame cropping when DMABuf caps feature is negotiated.
+	  The VideoInfo size is zero, resulting in empty destination buffers, and video
+	  convert library may not understand what the format actually is.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/9315>
+
+2025-06-27 10:00:37 -0400  Nicolas Dufresne <nicolas.dufresne@collabora.com>
+
+	* sys/v4l2codecs/gstv4l2codech265dec.c:
+	  v4l2codecs: h265dec: Avoid cropping for zero top/left alignments
+	  If the conformance window does not requires cropping the top or left of the
+	  window, we can use GstVideoMeta to crop in a zero-copy fashion. If a copy
+	  is needed, the frame copy can also handle it, and is a lot faster.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/9315>
+
+2025-06-27 09:49:00 -0400  Nicolas Dufresne <nicolas.dufresne@collabora.com>
+
+	* sys/v4l2codecs/gstv4l2codecav1dec.c:
+	* sys/v4l2codecs/gstv4l2codech264dec.c:
+	* sys/v4l2codecs/gstv4l2codech265dec.c:
+	* sys/v4l2codecs/gstv4l2codecmpeg2dec.c:
+	* sys/v4l2codecs/gstv4l2codecvp8dec.c:
+	* sys/v4l2codecs/gstv4l2codecvp9dec.c:
+	  v4l2codecs: dec: Remove has_videometa member
+	  Now that the code is properly located, this member is not needed
+	  anymore.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/9315>
+
+2025-06-27 09:37:06 -0400  Nicolas Dufresne <nicolas.dufresne@collabora.com>
+
+	* sys/v4l2codecs/gstv4l2codecav1dec.c:
+	* sys/v4l2codecs/gstv4l2codech264dec.c:
+	* sys/v4l2codecs/gstv4l2codech265dec.c:
+	* sys/v4l2codecs/gstv4l2codecmpeg2dec.c:
+	* sys/v4l2codecs/gstv4l2codecvp8dec.c:
+	* sys/v4l2codecs/gstv4l2codecvp9dec.c:
+	  v4l2codecs: dec: Move copy_frames logic inside decide_allocation
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/9315>
+
+2025-06-22 03:23:59 -0400  Doug Nazar <nazard@nazar.ca>
+
+	* ext/avtp/gstavtpvfdepaybase.c:
+	  avtp: Fix memory leak
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/9314>
+
+2025-06-22 03:22:27 -0400  Doug Nazar <nazard@nazar.ca>
+
+	* ext/srt/gstsrtsrc.c:
+	  srt: Fix warning about uninitialized memory
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/9314>
+
+2025-06-22 03:20:35 -0400  Doug Nazar <nazard@nazar.ca>
+
+	* gst-libs/gst/codecparsers/gstvc1parser.c:
+	  vc1parser: Fix warning about printing uninitialized variables
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/9314>
+
+2025-06-22 03:16:55 -0400  Doug Nazar <nazard@nazar.ca>
+
+	* gst/proxy/gstproxysrc.c:
+	  proxysrc: Fix order freeing pads
+	  Free pads from bottom of parent tree first else with GST_DEBUG
+	  enabled it would access freed memory printing object info.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/9314>
+
+2025-06-22 03:14:39 -0400  Doug Nazar <nazard@nazar.ca>
+
+	* tests/check/elements/avtpcvfpay.c:
+	  avtpcvfpay: tests: Initialize codec memory
+	  If GST_DEBUG was enabled we would print unintialized memory
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/9314>
+
+2025-06-25 09:30:15 -0600  David Monge <david.monge@ridgerun.com>
+
+	* gst/mpegtsmux/tsmux/tsmuxstream.c:
+	  mpegtsmux: fix double free caused by shared PMT descriptor
+	  The PMT descriptor was owned by the stream object but also added to
+	  the descriptors array without copying, leading to a double free and
+	  core dump during cleanup
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/9303>
+
+2025-06-26 21:29:34 +0100  Tim-Philipp Müller <tim@centricular.com>
+
+	* meson.build:
+	  Back to development after 1.26.3
+
+=== release 1.26.3 ===
+
+2025-06-26 21:25:24 +0100  Tim-Philipp Müller <tim@centricular.com>
+
+	* NEWS:
+	* RELEASE:
+	* gst-plugins-bad.doap:
+	* meson.build:
+	  Release 1.26.3
+
+2025-06-24 21:40:26 +0800  He Junyan <junyan.he@intel.com>
+
+	* gst-libs/gst/codecparsers/gsth266parser.c:
+	* gst-libs/gst/codecparsers/gsth266parser.h:
+	  h266parser: Fix overflow when parsing subpic_level_info
+	  1. non_subpic_layers_fraction, ref_level_idc and ref_level_fraction_minus1
+	  fields should not have the GST_H266_MAX_SUBLAYERS limitation.
+	  2. Should check max_sublayers_minus1, no more than GST_H266_MAX_SUBLAYERS-1
+	  Fixes ZDI-CAN-27381, CVE-2025-6663
+	  Closes: https://gitlab.freedesktop.org/gstreamer/gstreamer/-/issues/4503
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/9295>
+
+2025-06-25 16:24:44 +0200  Jan Alexander Steffens (heftig) <jan.steffens@ltnglobal.com>
+
+	* ext/srt/gstsrtsink.c:
+	* ext/srt/gstsrtsink.h:
+	  srtsink: Fix header buffer filtering
+	  Cleans up the code and fixes two issues:
+	  - If there are no streamheaders in the caps but we have `HEADER`
+	  buffers, it would run `gst_buffer_list_foreach` with `self->headers`
+	  being `NULL`.
+	  - The code forgot to unmap the buffer if it decided to ignore it.
+	  Fixes: 0a562a92d7ee38d8919d1b802add84d3c93b59eb
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/9286>
+
+2025-06-21 07:12:29 -0400  Doug Nazar <nazard@nazar.ca>
+
+	* ext/analyticsoverlay/gstobjectdetectionoverlay.c:
+	  analyticsoverlay: Fix memory leak
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/9271>
+
+2025-06-21 07:11:29 -0400  Doug Nazar <nazard@nazar.ca>
+
+	* tests/check/elements/dashsink.c:
+	  dashsink: test: Minor cleanups
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/9271>
+
+2025-06-21 07:10:54 -0400  Doug Nazar <nazard@nazar.ca>
+
+	* ext/dash/gstdashsink.c:
+	  dashsink: Fix memory leak
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/9271>
+
+2025-06-23 10:22:57 +1000  Matthew Waters <matthew@centricular.com>
+
+	* sys/decklink/gstdecklink.cpp:
+	* sys/decklink/gstdecklink.h:
+	* sys/decklink/gstdecklinkvideosink.cpp:
+	  decklink/clock: remove clock_offset
+	  It is completely unused and only ever initialized to 0.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/9269>
+
+2025-06-18 14:20:32 +1000  Matthew Waters <matthew@centricular.com>
+
+	* sys/decklink/gstdecklinkvideosink.cpp:
+	* sys/decklink/gstdecklinkvideosink.h:
+	  decklink: calculate internal using values closer to the current clock times
+	  In a previous version of the clock time conversion code, scheduled playback used
+	  to be started (from 0) when transitioning to PLAYING and stopped when
+	  transitioning PLAYING->PAUSED. This worked fine when converting running times
+	  using the internal clock.  However, now the decklink clock will produce values
+	  that are monotonically increasing and do not reset to 0 at the same moments as
+	  running time anymore. This means that the clock adjustments could attempt to
+	  convert a small running time based on a large clock time e.g. after pausing
+	  for many hours. As the adjustment code is a simple linear interpolation based on
+	  the current clock times (large) using the provided value (small), the small
+	  differences in the rate could result in very large differences in the
+	  output time.
+	  Fix by instead using both internal and external clock times based on the values
+	  that gst_clock_get_calibration() will return. By doing so, small changes in the
+	  rate calculations between the internal and external clock times will not result
+	  in potentially large differences in the output internal time from
+	  gst_clock_unadjust_with_calibration().
+	  Fixes https://gitlab.freedesktop.org/gstreamer/gstreamer/-/issues/4197
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/9269>
+
+2025-06-18 14:04:14 +0200  Edward Hervey <edward@centricular.com>
+
+	* gst/mpegtsdemux/tsdemux.c:
+	  tsdemux: Allow access unit parsing failures
+	  * Refactor the various Access Unit extraction calls into a single function
+	  * Allow the access unit parsing to fail, but emit a warning
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/9258>
+
+2025-06-16 18:38:30 +0530  Nirbheek Chauhan <nirbheek@centricular.com>
+
+	* sys/androidmedia/gstamc-codeclist.h:
+	* sys/androidmedia/gstamc.c:
+	* sys/androidmedia/gstamc.h:
+	* sys/androidmedia/jni/gstamc-codeclist-jni.c:
+	  amc: Overhaul hw-accelerated video codecs detection
+	  Android 10 (API 29) added support for isHardwareAccelerated() to
+	  MediaCodecInfo to detect whether a particular MediaCodec is backed by
+	  hardware or not. We can now use that to ensure that the video hw-codec
+	  is PRIMARY+1 on Android, since using a software codec for video is
+	  simply not feasible most of the time.
+	  If we're not able to detect isHardwareAccelerated(), perhaps because
+	  the Android API version is too old, we try to use the codec name as
+	  a fallback.
+	  Also rank PRIMARY+1 the c2.android c2.exynos and c2.amlogic audio
+	  codecs alongside OMX.google, because they are known-good.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/9257>
+
+2025-06-17 03:32:24 +0530  Nirbheek Chauhan <nirbheek@centricular.com>
+
+	* sys/androidmedia/gstamc.c:
+	  amc: Log under GST_FIXME for audio encoders
+	  We don't support audio encoders yet, so log that correctly.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/9257>
+
+2025-06-16 18:36:31 +0530  Nirbheek Chauhan <nirbheek@centricular.com>
+
+	* sys/androidmedia/gstamc.c:
+	  amc: Improve codec registration logging
+	  Most of the messages can be printed with INFO threshold since they are
+	  only printed on plugin registration.
+	  Fix printing of codec caps, since GST_PTR_FORMAT truncates the output
+	  in almost every case that I saw.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/9257>
+
+2025-06-16 18:34:39 +0530  Nirbheek Chauhan <nirbheek@centricular.com>
+
+	* sys/androidmedia/gstamc.c:
+	  amc: Print error messages when registering plugins
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/9257>
+
+2025-02-20 21:59:31 +0000  Ben Butterworth <24711048+ben-xD@users.noreply.github.com>
+
+	* gst/mpegtsdemux/tsdemux.c:
+	  mpegts: handle MPEG2-TS with KLV metadata safely by preventing out of bounds
+	  Fixes https://gitlab.freedesktop.org/gstreamer/gstreamer/-/issues/3896
+	  @slomo, as requested on https://gitlab.freedesktop.org/gstreamer/gstreamer/-/issues/3896#note_2780065
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/9251>
+
+2024-07-26 14:23:10 +1000  Matthew Waters <matthew@centricular.com>
+
+	* ext/webrtc/gstwebrtcbin.c:
+	  webrtcbin: disconnect signal ICE handlers on dispose
+	  It is entirely possible that the in progress may still provide some state
+	  updates until the ICE object is destroyed, these state updates should
+	  not really be done when webrtcbin is in the process of destroying itself
+	  and access freed data.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/9249>
+
+2025-06-13 12:35:17 +0200  Víctor Manuel Jáquez Leal <vjaquez@igalia.com>
+
+	* ext/vulkan/vkupload.c:
+	  vkupload: use gst_buffer_find_memory() to select memory
+	  We never implemented correctly the selection of memories in a buffer given the
+	  plane.
+	  This patch uses gst_buffer_find_memory() for that. The offset is checked via the
+	  video meta either in the input and output buffers, or the default offset given
+	  the format and size.
+	  This patch also requests the video meta option for the output buffers.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/9243>
+
+2025-06-13 11:28:35 +0200  Víctor Manuel Jáquez Leal <vjaquez@igalia.com>
+
+	* gst-libs/gst/vulkan/gstvkimagebufferpool.c:
+	  vkimagebufferpool: set video meta to buffers if requested
+	  This patch adds the possibility to attach video metas to allocated buffers if
+	  API users request that option.
+	  The main reason to add this meta is for the future usage of
+	  gst_buffer_find_memory(), where the requested offset determines the memory
+	  index.
+	  In the case of multi-memory Vulkan images the offset of every component is
+	  larger than the default offset determined by the format and frame size, because
+	  of the buffer minimum size and memory alignment determined by the used driver.
+	  Then, the offset is set in the buffer video meta.
+	  In the case of single memory Vulkan images, the default offset is set in the
+	  video meta.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/9243>
+
+2025-06-13 11:27:49 +0200  Víctor Manuel Jáquez Leal <vjaquez@igalia.com>
+
+	* gst-libs/gst/vulkan/gstvkimagebufferpool.c:
+	  vkimagebufferpool: remove unused variable
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/9243>
+
+2024-12-13 19:08:30 +1100  Jan Schmidt <jan@centricular.com>
+
+	* gst/mpegtsdemux/tsdemux.c:
+	  tsdemux: Send new-segment before GAP
+	  If adding a sparse stream and sending a gap event to bring it
+	  up to speed, make sure to send the new segment event first
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/9235>
+
+2025-06-10 22:17:46 +1000  Matthew Waters <matthew@centricular.com>
+
+	* sys/decklink/gstdecklinkvideosink.cpp:
+	  decklinkvideosink: show preroll frame correctly
+	  Fixes https://gitlab.freedesktop.org/gstreamer/gstreamer/-/issues/4254
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/9238>
+
+2025-06-16 13:39:55 +0200  Víctor Manuel Jáquez Leal <vjaquez@igalia.com>
+
+	* tests/check/elements/vkupload.c:
+	* tests/check/meson.build:
+	  test: vulkanupload unit test
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/9228>
+
+2025-06-13 14:36:25 +0200  Víctor Manuel Jáquez Leal <vjaquez@igalia.com>
+
+	* ext/vulkan/vkupload.c:
+	  vulkanupload: fix regression for uploading VulkanBuffer
+	  Merge request !5651 introduced a regression for uploading VulkanBuffer. It can
+	  be verified by
+	  gst-launch-1.0 videotestsrc ! video/x-raw, format=NV12 ! vulkanupload ! \
+	  video/x-raw\(memory:VulkanBuffer\) ! fakesink
+	  Nobody has complained about this regression, so we assume it's a very niche
+	  use-case.
+	  This patch solve the regression by instantiating a different buffer pool
+	  depending on the output cap features, and configuring it accordingly.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/9228>
+
+2025-06-10 12:53:05 +0100  Philippe Normand <philn@igalia.com>
+
+	* gst-libs/gst/transcoder/gsttranscoder.c:
+	  transcoder: Fix uritranscodebin reference handling
+	  Make sure the reference is not floating, because the get_pipeline function
+	  returns a transfer-full reference.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/9203>
+
+2025-06-06 16:24:19 +0200  Jakub Adam <jakub.adam@collabora.com>
+
+	* ext/soundtouch/meson.build:
+	  meson: fix building -bad tests with disabled soundtouch
+	  Fixes an error from Meson:
+	  ../subprojects/gst-plugins-bad/tests/validate/meson.build:16:93: ERROR:
+	  Unknown variable "soundtouch_dep"
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/9192>
+
+2025-05-12 11:31:32 +0100  Glyn Davies <glyn@solet.io>
+
+	* gst/mpegtsmux/tsmux/tsmuxstream.c:
+	  mpegtsmux: Corrections around Teletext handling
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/9183>
+
+2025-05-22 10:11:36 -0400  Julian Bouzas <julian.bouzas@collabora.com>
+
+	* ext/lcevcdecoder/gstlcevcdec.c:
+	  lcevcdec: Check for errors after receiving all enhanced and base pictures
+	  The LCEVC_ReceiveDecoderBase() and LCEVC_ReceiveDecoderPicture() APIs from the
+	  LCEVCdec SDK can return LCEVC_Error if the enhancement data is wrong. This
+	  change improves the lcevcdec element to check for those errors and stop the
+	  pipeline when that happens.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/9177>
+
+2025-06-04 17:56:39 +0900  Seungha Yang <seungha@centricular.com>
+
+	* sys/d3d11/gstd3d11decoder.cpp:
+	  d3d11decoder: Use interlace info in input caps
+	  ... instead of relying on only parsed values from bitstream.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/9174>
+
+2025-06-04 17:55:51 +0900  Seungha Yang <seungha@centricular.com>
+
+	* sys/d3d12/gstd3d12decoder.cpp:
+	  d3d12decoder: Use interlace info in input caps
+	  ... instead of relying on only parsed values from bitstream.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/9174>
+
+2025-06-04 03:49:19 +0900  Seungha Yang <seungha@centricular.com>
+
+	* sys/nvcodec/gstnvdecoder.cpp:
+	* sys/nvcodec/gstnvh265dec.cpp:
+	  nvdec: Use interlace info in input caps
+	  ... instead of relying on only parsed values from bitstream.
+	  Also parses HEVC specific interlace information
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/9174>
+
+2025-06-02 00:59:52 +0900  Seungha Yang <seungha@centricular.com>
+
+	* sys/d3d11/gstd3d11compositor.cpp:
+	  d3d11compositor: Fix negative position handling
+	  Negative positions should be cropped out
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/9161>
+
+2025-06-01 23:38:27 +0900  Seungha Yang <seungha@centricular.com>
+
+	* sys/d3d12/gstd3d12compositor.cpp:
+	  d3d12compositor: Fix negative position handling
+	  Negative positions should be cropped out
+	  Fixes: https://gitlab.freedesktop.org/gstreamer/gstreamer/-/issues/4249
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/9161>
+
+2025-06-01 22:55:53 +0900  Seungha Yang <seungha@centricular.com>
+
+	* sys/d3d12/gstd3d12compositor.cpp:
+	  d3d12compositor: Fix critical warnings
+	  compositor will record rendering commands using multiple threads
+	  (i.e., blending commands are recoded using thread pool, and
+	  background one is recorded on aggregate thread).
+	  And there can be temporary refcount increase (so not writable).
+	  Updates fence once all rendering commands have been submitted.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/9159>
+
+2025-06-01 22:50:30 +0900  Seungha Yang <seungha@centricular.com>
+
+	* gst-libs/gst/d3d12/gstd3d12converter-unpack.cpp:
+	  d3d12converter: Fix fallback upload process
+	  Fixing typo
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/9159>
+
+2025-05-30 12:41:06 +0300  Sebastian Dröge <sebastian@centricular.com>
+
+	* gst/bayer/gstrgb2bayer.c:
+	  rgb2bayer: Use gst_structure_has_name() instead of g_str_equal() for simplicity
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/9150>
+
+2025-05-30 12:40:42 +0300  Sebastian Dröge <sebastian@centricular.com>
+
+	* gst/bayer/gstbayer2rgb.c:
+	  bayer2rgb: Use gst_structure_has_name() instead of strcmp() for clarity
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/9150>
+
+2025-05-30 12:33:09 +0300  Sebastian Dröge <sebastian@centricular.com>
+
+	* gst/bayer/gstbayer2rgb.c:
+	  bayer2rgb: Fix RGB stride calculation
+	  This fixes a regression introduced in 4c92d4096e9.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/9150>
+
+2025-05-30 00:03:12 +0100  Tim-Philipp Müller <tim@centricular.com>
+
+	* meson.build:
+	  Back to development after 1.26.2
+
 === release 1.26.2 ===
 
 2025-05-29 23:56:43 +0100  Tim-Philipp Müller <tim@centricular.com>

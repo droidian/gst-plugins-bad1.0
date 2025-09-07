@@ -1,3 +1,38 @@
+gst-plugins-bad1.0 (1.26.5-2) unstable; urgency=medium
+
+  * trixie has been released, re-upload to unstable
+
+ -- Marc Leeman <marc.leeman@gmail.com>  Mon, 11 Aug 2025 09:27:09 +0200
+
+gst-plugins-bad1.0 (1.26.5-1) experimental; urgency=medium
+
+  * New upstream version 1.26.5
+
+ -- Marc Leeman <marc.leeman@gmail.com>  Fri, 08 Aug 2025 09:07:45 +0200
+
+gst-plugins-bad1.0 (1.26.4-1) experimental; urgency=medium
+
+  * d/watch: pin to 1.26.x
+  * New upstream version 1.26.4
+
+ -- Marc Leeman <marc.leeman@gmail.com>  Wed, 16 Jul 2025 20:01:00 +0200
+
+gst-plugins-bad1.0 (1.26.3-1) experimental; urgency=medium
+
+  * New upstream version 1.26.3
+  * d/copyright: superfluous-file-pattern
+  * d/copyright: correct SPDX format
+  * d/copyright: missing-license-paragraph-in-dep5-copyright
+  * d/patches: update failing tests
+
+ -- Marc Leeman <marc.leeman@gmail.com>  Fri, 27 Jun 2025 12:21:28 +0200
+
+gst-plugins-bad1.0 (1.26.2-2) unstable; urgency=medium
+
+  * Revert "d/rules: gstcuda missing on arm" (Closes: #1107628)
+
+ -- Marc Leeman <marc.leeman@gmail.com>  Wed, 11 Jun 2025 13:21:39 +0200
+
 gst-plugins-bad1.0 (1.26.2-1) unstable; urgency=medium
 
   * d/copyright: start converting to dep-5
