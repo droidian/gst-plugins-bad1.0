@@ -117,7 +117,7 @@ gst_tensor_meta_get_info (void)
  * gst_buffer_add_tensor_meta:
  * @buffer: A writable #GstBuffer
  *
- * Adds a #GstTensorMeta to a buffer or returns the existing one
+ * Adds a #GstTensorMeta to a buffer
  *
  * Returns: (transfer none): The new #GstTensorMeta
  *
@@ -127,12 +127,6 @@ gst_tensor_meta_get_info (void)
 GstTensorMeta *
 gst_buffer_add_tensor_meta (GstBuffer * buffer)
 {
-  GstTensorMeta *tmeta;
-
-  tmeta = gst_buffer_get_tensor_meta (buffer);
-  if (tmeta)
-    return tmeta;
-
   return (GstTensorMeta *) gst_buffer_add_meta (buffer,
       gst_tensor_meta_get_info (), NULL);
 }
@@ -210,35 +204,35 @@ gst_tensor_meta_get_by_id (GstTensorMeta * tmeta, GQuark id)
  * gst_tensor_meta_get_typed_tensor:
  * @tmeta: A #GstTensorMeta
  * @tensor_id: A #GQuark identifying the tensor-encoding
+ * @data_type: The data type of the tensor
  * @order: The order of the tensor to read from the memory
  * @num_dims: The number of dimensions that the tensor can have
- * @data_type: The data type of the tensor
- * @data: #GstBuffer holding tensor data
+ * @dims: (array length=num_dims)(nullable): An optional array of dimensions, where G_MAXSIZE means ANY.
  *
- * Get the first tensor from the #GstTensorMeta identified by @tensor_id, mathcing
- * the reading order, dimensions and the data type.
- * Validate whether the #GstBuffer has enough size to hold the tensor data.
+ * Get the first tensor from the #GstTensorMeta identified by
+ * @tensor_id, matching the reading order, dimensions and the data
+ * type and optionally the dimensions.  Validate whether the
+ * #GstBuffer has enough size to hold the tensor data.
  *
- * Return: (nullable) (transfer none): a GstTensor with id matching @tensor_id,
- * reading order from the memory matching @order, dimensions matching @num_dims,
- * data type matching @data_type. The #GstBuffer mathcing @data should
- * have enough size to hold the tensor data.
- * Otherwise NULL will be returned.
+ * Return: (nullable) (transfer none): a matching #GstTensor,
+ * otherwise NULL
  *
  * Since: 1.28
  */
 const GstTensor *
 gst_tensor_meta_get_typed_tensor (GstTensorMeta * tmeta,
-    GQuark tensor_id, GstTensorDimOrder order, gsize num_dims,
-    GstTensorDataType data_type, GstBuffer * data)
+    GQuark tensor_id, GstTensorDataType data_type, GstTensorDimOrder order,
+    gsize num_dims, const gsize * dims)
 {
   const GstTensor *tensor;
 
   tensor = gst_tensor_meta_get_by_id (tmeta, tensor_id);
 
-  if (!gst_tensor_check_type (tensor, order, num_dims, data_type, data)) {
+  if (tensor == NULL)
     return NULL;
-  }
+
+  if (!gst_tensor_check_type (tensor, data_type, order, num_dims, dims))
+    return NULL;
 
   return tensor;
 }

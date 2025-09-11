@@ -25,8 +25,9 @@
 
 #include <gst/video/video.h>
 #include <gst/vulkan/vulkan.h>
-#include "gst/vulkan/gstvkdecoder-private.h"
 
+#include "gst/vulkan/gstvkdecoder-private.h"
+#include "gst/vulkan/gstvkphysicaldevice-private.h"
 #include "gstvulkanelements.h"
 
 GST_DEBUG_CATEGORY_STATIC (gst_vulkan_h265_decoder_debug);
@@ -127,6 +128,8 @@ struct _GstVulkanH265Decoder
   VkChromaLocation xloc, yloc;
 
   GstVideoCodecState *output_state;
+  GstVideoCodecState *input_state;
+
   VPS std_vps;
   SPS std_sps;
   PPS std_pps;
@@ -157,8 +160,8 @@ GST_STATIC_PAD_TEMPLATE ("src", GST_PAD_SRC, GST_PAD_ALWAYS,
 static gpointer
 _register_debug_category (gpointer data)
 {
-  GST_DEBUG_CATEGORY_INIT (gst_vulkan_h265_decoder_debug,
-      "gst_vulkan_h265_decoder_debug", 0, "Vulkan H.265 decoder");
+  GST_DEBUG_CATEGORY_INIT (gst_vulkan_h265_decoder_debug, "vulkanh265dec", 0,
+      "Vulkan H.265 decoder");
 
   return NULL;
 }
@@ -310,8 +313,8 @@ gst_vulkan_h265_decoder_stop (GstVideoDecoder * decoder)
   if (self->decoder)
     gst_vulkan_decoder_stop (self->decoder);
 
-  if (self->output_state)
-    gst_video_codec_state_unref (self->output_state);
+  g_clear_pointer (&self->output_state, gst_video_codec_state_unref);
+  g_clear_pointer (&self->input_state, gst_video_codec_state_unref);
 
   return GST_VIDEO_DECODER_CLASS (parent_class)->stop (decoder);
 }
@@ -320,13 +323,15 @@ static gboolean
 gst_vulkan_h265_decoder_negotiate (GstVideoDecoder * decoder)
 {
   GstVulkanH265Decoder *self = GST_VULKAN_H265_DECODER (decoder);
-  GstH265Decoder *h265dec = GST_H265_DECODER (decoder);
   VkVideoFormatPropertiesKHR format_prop;
   GstVideoFormat format;
 
   /* Ignore downstream renegotiation request. */
-  if (!self->need_negotiation)
-    return TRUE;
+  if (!self->need_negotiation) {
+    GST_DEBUG_OBJECT (decoder,
+        "Input state hasn't changed, no need to reconfigure downstream caps");
+    goto bail;
+  }
 
   if (!gst_vulkan_decoder_out_format (self->decoder, &format_prop))
     return FALSE;
@@ -339,7 +344,7 @@ gst_vulkan_h265_decoder_negotiate (GstVideoDecoder * decoder)
   format = gst_vulkan_format_to_video_format (format_prop.format);
   self->output_state = gst_video_decoder_set_interlaced_output_state (decoder,
       format, GST_VIDEO_INTERLACE_MODE_PROGRESSIVE, self->width, self->height,
-      h265dec->input_state);
+      self->input_state);
 
   self->output_state->caps = gst_video_info_to_caps (&self->output_state->info);
   gst_caps_set_features_simple (self->output_state->caps,
@@ -349,6 +354,7 @@ gst_vulkan_h265_decoder_negotiate (GstVideoDecoder * decoder)
   GST_INFO_OBJECT (self, "Negotiated caps %" GST_PTR_FORMAT,
       self->output_state->caps);
 
+bail:
   return GST_VIDEO_DECODER_CLASS (parent_class)->negotiate (decoder);
 }
 
@@ -409,7 +415,7 @@ gst_vulkan_h265_decoder_decide_allocation (GstVideoDecoder * decoder,
 
   gst_vulkan_image_buffer_pool_config_set_allocation_params (config, usage,
       VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, VK_IMAGE_LAYOUT_VIDEO_DECODE_DST_KHR,
-      VK_ACCESS_TRANSFER_WRITE_BIT);
+      VK_ACCESS_NONE_KHR);
   gst_vulkan_image_buffer_pool_config_set_decode_caps (config, profile_caps);
 
   gst_caps_unref (profile_caps);
@@ -576,6 +582,9 @@ gst_vulkan_h265_decoder_new_sequence (GstH265Decoder * decoder,
   self->y = y;
   self->width = width;
   self->height = height;
+
+  g_clear_pointer (&self->input_state, gst_video_codec_state_unref);
+  self->input_state = gst_video_codec_state_ref (decoder->input_state);
 
   /* Ycbcr sampler */
   {
@@ -1604,6 +1613,13 @@ gst_vulkan_h265_decoder_end_picture (GstH265Decoder * decoder,
   GstVulkanH265Decoder *self = GST_VULKAN_H265_DECODER (decoder);
   GstVulkanH265Picture *pic;
   GError *error = NULL;
+  VkVideoDecodeH265InlineSessionParametersInfoKHR inline_params = {
+    .sType =
+        VK_STRUCTURE_TYPE_VIDEO_DECODE_H265_INLINE_SESSION_PARAMETERS_INFO_KHR,
+    .pStdSPS = &self->std_sps.sps,
+    .pStdPPS = &self->std_pps.pps,
+    .pStdVPS = &self->std_vps.vps,
+  };
 
   GST_TRACE_OBJECT (self, "End picture");
 
@@ -1616,6 +1632,11 @@ gst_vulkan_h265_decoder_end_picture (GstH265Decoder * decoder,
   pic->vk_h265pic.sliceSegmentCount = pic->base.slice_offs->len - 1;
   pic->vk_h265pic.pSliceSegmentOffsets =
       (const guint32 *) pic->base.slice_offs->data;
+
+  if ((self->
+          decoder->features & GST_VULKAN_DECODER_FEATURES_VIDEO_MAINTEINANCE2)
+      != 0)
+    vk_link_struct (&pic->base.decode_info, &inline_params);
 
   GST_LOG_OBJECT (self, "Decoding frame, %d bytes %d slices",
       pic->vk_h265pic.pSliceSegmentOffsets[pic->vk_h265pic.sliceSegmentCount],
@@ -1637,13 +1658,18 @@ gst_vulkan_h265_decoder_output_picture (GstH265Decoder * decoder,
 {
   GstVideoDecoder *vdec = GST_VIDEO_DECODER (decoder);
   GstVulkanH265Decoder *self = GST_VULKAN_H265_DECODER (decoder);
+  GstVideoCodecState *discont_state =
+      GST_CODEC_PICTURE (picture)->discont_state;
 
   GST_TRACE_OBJECT (self, "Output picture");
 
   GST_LOG_OBJECT (self,
       "Outputting picture %p (poc %d)", picture, picture->pic_order_cnt);
 
-  if (GST_CODEC_PICTURE (picture)->discont_state) {
+  if (discont_state) {
+    g_clear_pointer (&self->input_state, gst_video_codec_state_unref);
+    self->input_state = gst_video_codec_state_ref (discont_state);
+
     self->need_negotiation = TRUE;
     if (!gst_video_decoder_negotiate (vdec)) {
       gst_h265_picture_unref (picture);

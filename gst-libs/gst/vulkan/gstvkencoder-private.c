@@ -26,9 +26,6 @@
 
 #include "gstvkvideo-private.h"
 
-extern const VkExtensionProperties vk_codec_extensions[3];
-extern const uint32_t _vk_codec_supported_extensions[4];
-
 typedef struct _GstVulkanEncoderPrivate GstVulkanEncoderPrivate;
 
 struct _GstVulkanEncoderPrivate
@@ -82,6 +79,7 @@ G_DEFINE_TYPE_WITH_CODE (GstVulkanEncoder, gst_vulkan_encoder,
 const uint32_t _vk_codec_supported_extensions[] = {
   [GST_VK_VIDEO_EXTENSION_ENCODE_H264] = VK_MAKE_VIDEO_STD_VERSION (0, 9, 11),
   [GST_VK_VIDEO_EXTENSION_ENCODE_H265] = VK_MAKE_VIDEO_STD_VERSION (0, 9, 12),
+  [GST_VK_VIDEO_EXTENSION_ENCODE_AV1] = VK_MAKE_VIDEO_STD_VERSION (0, 9, 1),
 };
 
 static gboolean
@@ -652,6 +650,20 @@ gst_vulkan_encoder_start (GstVulkanEncoder * self,
       };
       codec_idx = GST_VK_VIDEO_EXTENSION_ENCODE_H265;
       break;
+    case VK_VIDEO_CODEC_OPERATION_ENCODE_AV1_BIT_KHR:
+      if (!gst_vulkan_video_profile_is_valid (profile, self->codec)) {
+        g_set_error (error, GST_VULKAN_ERROR, VK_ERROR_INITIALIZATION_FAILED,
+            "Invalid profile");
+        return FALSE;
+      }
+      priv->caps.encoder.codec.av1 = (VkVideoEncodeAV1CapabilitiesKHR) {
+        /* *INDENT-OFF* */
+        .sType = VK_STRUCTURE_TYPE_VIDEO_ENCODE_AV1_CAPABILITIES_KHR,
+        /* *INDENT-ON* */
+      };
+      codec_idx = GST_VK_VIDEO_EXTENSION_ENCODE_AV1;
+
+      break;
     default:
       g_set_error (error, GST_VULKAN_ERROR, VK_ERROR_INITIALIZATION_FAILED,
           "Invalid codec");
@@ -922,7 +934,6 @@ gst_vulkan_encoder_video_session_parameters_overrides (GstVulkanEncoder * self,
   gboolean write;
 
   g_return_val_if_fail (GST_IS_VULKAN_ENCODER (self), FALSE);
-  g_return_val_if_fail (params != NULL && feedback != NULL, FALSE);
 
   priv = gst_vulkan_encoder_get_instance_private (self);
   if (!priv->started)
@@ -930,6 +941,7 @@ gst_vulkan_encoder_video_session_parameters_overrides (GstVulkanEncoder * self,
 
   switch (self->codec) {
     case VK_VIDEO_CODEC_OPERATION_ENCODE_H264_BIT_KHR:
+      g_return_val_if_fail (params != NULL && feedback != NULL, FALSE);
       if (params->h264.sType !=
           VK_STRUCTURE_TYPE_VIDEO_ENCODE_H264_SESSION_PARAMETERS_GET_INFO_KHR) {
         gst_vulkan_error_to_g_error (GST_VULKAN_ERROR, error,
@@ -943,6 +955,7 @@ gst_vulkan_encoder_video_session_parameters_overrides (GstVulkanEncoder * self,
       }
       break;
     case VK_VIDEO_CODEC_OPERATION_ENCODE_H265_BIT_KHR:
+      g_return_val_if_fail (params != NULL && feedback != NULL, FALSE);
       if (params->h265.sType !=
           VK_STRUCTURE_TYPE_VIDEO_ENCODE_H265_SESSION_PARAMETERS_GET_INFO_KHR) {
         gst_vulkan_error_to_g_error (GST_VULKAN_ERROR, error,
@@ -955,6 +968,10 @@ gst_vulkan_encoder_video_session_parameters_overrides (GstVulkanEncoder * self,
         feedback->h265.sType =
             VK_STRUCTURE_TYPE_VIDEO_ENCODE_H265_SESSION_PARAMETERS_FEEDBACK_INFO_KHR;
       }
+      break;
+    case VK_VIDEO_CODEC_OPERATION_ENCODE_AV1_BIT_KHR:
+      g_return_val_if_fail (params == NULL && feedback == NULL, FALSE);
+      write = TRUE;
       break;
     default:
       return FALSE;
@@ -1367,6 +1384,19 @@ bail:
   }
 }
 
+static const struct
+{
+  VkVideoCodecOperationFlagsKHR codec;
+  const char *extension;
+} _vk_encoder_extension_map[] = {
+  {VK_VIDEO_CODEC_OPERATION_ENCODE_H264_BIT_KHR,
+      VK_KHR_VIDEO_ENCODE_H264_EXTENSION_NAME},
+  {VK_VIDEO_CODEC_OPERATION_ENCODE_H265_BIT_KHR,
+      VK_KHR_VIDEO_ENCODE_H265_EXTENSION_NAME},
+  {VK_VIDEO_CODEC_OPERATION_ENCODE_AV1_BIT_KHR,
+      VK_KHR_VIDEO_ENCODE_AV1_EXTENSION_NAME},
+};
+
 /**
  * gst_vulkan_create_encoder_from_queue:
  * @queue: a #GstVulkanQueue
@@ -1375,15 +1405,14 @@ bail:
  * Creates a #GstVulkanEncoder object if @codec encoding is supported by @queue
  *
  * Returns: (transfer full) (nullable): the #GstVulkanEncoder object
- *
  */
 GstVulkanEncoder *
 gst_vulkan_encoder_create_from_queue (GstVulkanQueue * queue, guint codec)
 {
   GstVulkanPhysicalDevice *device;
   GstVulkanEncoder *encoder;
-  guint flags, expected_flag, supported_video_ops;
-  const char *extension;
+  guint i, flags, expected_flag, supported_video_ops;
+  const char *extension = NULL;
   static gsize cat_gonce = 0;
 
   g_return_val_if_fail (GST_IS_VULKAN_QUEUE (queue), NULL);
@@ -1399,27 +1428,26 @@ gst_vulkan_encoder_create_from_queue (GstVulkanQueue * queue, guint codec)
     g_once_init_leave (&cat_gonce, TRUE);
   }
 
-  if (device->properties.apiVersion < VK_MAKE_VERSION (1, 3, 275)) {
+  /* XXX: sync with the meson version for vulkan video enabling */
+  if (!gst_vulkan_physical_device_check_api_version (device, 1, 4, 306)) {
     GST_WARNING_OBJECT (queue,
-        "API version %d.%d.%d doesn't support video encode extensions",
+        "Driver version [%d.%d.%d] doesn't support required video extensions",
         VK_VERSION_MAJOR (device->properties.apiVersion),
         VK_VERSION_MINOR (device->properties.apiVersion),
         VK_VERSION_PATCH (device->properties.apiVersion));
     return NULL;
   }
 
-  switch (codec) {
-    case VK_VIDEO_CODEC_OPERATION_ENCODE_H264_BIT_KHR:
-      extension = VK_KHR_VIDEO_ENCODE_H264_EXTENSION_NAME;
+  for (i = 0; i < G_N_ELEMENTS (_vk_encoder_extension_map); i++) {
+    if (_vk_encoder_extension_map[i].codec == codec) {
+      extension = _vk_encoder_extension_map[i].extension;
       break;
-    case VK_VIDEO_CODEC_OPERATION_ENCODE_H265_BIT_KHR:
-      extension = VK_KHR_VIDEO_ENCODE_H265_EXTENSION_NAME;
-      break;
-    default:
-      GST_WARNING_OBJECT (queue, "Unsupported codec");
-      return NULL;
+    }
   }
-
+  if (!extension) {
+    GST_WARNING_OBJECT (queue, "Unsupported codec %u", codec);
+    return NULL;
+  }
   if ((flags & expected_flag) != expected_flag) {
     GST_WARNING_OBJECT (queue, "Queue doesn't support encoding");
     return NULL;
@@ -1429,11 +1457,7 @@ gst_vulkan_encoder_create_from_queue (GstVulkanQueue * queue, guint codec)
     return NULL;
   }
 
-  if (!(gst_vulkan_device_is_extension_enabled (queue->device,
-              VK_KHR_VIDEO_QUEUE_EXTENSION_NAME)
-          && gst_vulkan_device_is_extension_enabled (queue->device,
-              VK_KHR_VIDEO_ENCODE_QUEUE_EXTENSION_NAME)
-          && gst_vulkan_device_is_extension_enabled (queue->device, extension)))
+  if (!gst_vulkan_device_is_extension_enabled (queue->device, extension))
     return NULL;
 
   encoder = g_object_new (GST_TYPE_VULKAN_ENCODER, NULL);

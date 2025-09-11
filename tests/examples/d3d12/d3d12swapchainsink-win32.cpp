@@ -40,6 +40,7 @@ using namespace Microsoft::WRL;
 
 static GMainLoop *loop_ = nullptr;
 static HWND hwnd_ = nullptr;
+static gchar *snapshot_location = nullptr;
 #define VIEW_WIDTH 640
 #define VIEW_HEIGHT 480
 #define REMAP_SIZE 1024
@@ -232,6 +233,7 @@ keyboard_cb (gchar input, gboolean is_ascii, AppData * app_data)
 {
   static gboolean set_remap = FALSE;
   static GstState state = GST_STATE_PLAYING;
+  static gboolean force_aspect_ratio = TRUE;
 
   if (is_ascii) {
     switch (input) {
@@ -240,9 +242,16 @@ keyboard_cb (gchar input, gboolean is_ascii, AppData * app_data)
           state = GST_STATE_PLAYING;
         else
           state = GST_STATE_PAUSED;
-        gst_println ("Change state to %s", gst_element_state_get_name (state));
+        gst_println ("Change state to %s", gst_state_get_name (state));
 
         gst_element_set_state (app_data->pipeline, state);
+        break;
+      case 'f':
+      case 'F':
+        force_aspect_ratio = force_aspect_ratio ? FALSE : TRUE;
+        g_object_set (app_data->sink,
+            "force-aspect-ratio", force_aspect_ratio, nullptr);
+        gst_println ("Change force-aspect-ratio to %d", force_aspect_ratio);
         break;
       case 'm':
       case 'M':
@@ -251,6 +260,8 @@ keyboard_cb (gchar input, gboolean is_ascii, AppData * app_data)
         if (set_remap) {
           ID3D12Resource *remap[2];
           D3D12_VIEWPORT viewport[2];
+          guint64 bg_colors[2] = { G_GUINT64_CONSTANT(0xffff000000000000),
+              G_GUINT64_CONSTANT(0xffff000000000000) };
 
           /* top-left, draw original image */
           remap[0] = nullptr;
@@ -266,16 +277,46 @@ keyboard_cb (gchar input, gboolean is_ascii, AppData * app_data)
           viewport[1].Width = 0.5;
           viewport[1].Height = 0.5;
 
-          g_signal_emit_by_name (app_data->sink, "uv-remap", 2, remap, viewport);
+          g_signal_emit_by_name (app_data->sink, "uv-remap", 2, remap, viewport,
+              bg_colors);
         } else {
           /* Clear remap */
           g_signal_emit_by_name (app_data->sink,
-              "uv-remap", 0, nullptr, nullptr);
+              "uv-remap", 0, nullptr, nullptr, nullptr);
         }
 
         /* Redraw to update view */
         if (state == GST_STATE_PAUSED)
           g_signal_emit_by_name (app_data->sink, "redraw");
+        break;
+      case 'c':
+      case 'C':
+        if (snapshot_location) {
+          GstSample *sample = nullptr;
+          GstSample *out_sample = nullptr;
+          gboolean remove_borders = TRUE;
+          g_signal_emit_by_name (app_data->sink, "last-rendered-sample",
+              remove_borders, &sample);
+          if (sample) {
+            auto caps = gst_caps_new_simple ("image/jpeg", nullptr);
+            out_sample = gst_video_convert_sample (sample, caps, 10 * GST_SECOND,
+                nullptr);
+            gst_caps_unref (caps);
+            gst_sample_unref (sample);
+          }
+
+          if (out_sample) {
+            auto buf = gst_sample_get_buffer (out_sample);
+            GstMapInfo map;
+            gst_buffer_map (buf, &map, GST_MAP_READ);
+            gst_println ("Writing snapshot to %s", snapshot_location);
+            g_file_set_contents (snapshot_location, (gchar *) map.data,
+                map.size, nullptr);
+
+            gst_buffer_unmap (buf, &map);
+            gst_sample_unref (out_sample);
+          }
+        }
         break;
       case 'q':
         g_main_loop_quit (loop_);
@@ -461,6 +502,7 @@ print_keyboard_help (void)
   } key_controls[] = {
     {"m", "Toggle remap on/off"},
     {"space", "Toggle pause/play"},
+    {"c", "Capture snapshot"},
     {"q", "Quit"},
   };
 
@@ -492,6 +534,8 @@ main (int argc, char ** argv)
   gchar *uri = nullptr;
   GOptionEntry options[] = {
     {"uri", 0, 0, G_OPTION_ARG_STRING, &uri, "URI to play"},
+    {"snapshot-location", 0, 0, G_OPTION_ARG_STRING, &snapshot_location,
+        "JPEG file path for saving the snapshot image"},
     {nullptr}
   };
 

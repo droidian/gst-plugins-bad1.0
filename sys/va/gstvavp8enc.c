@@ -577,7 +577,7 @@ gst_va_vp8_enc_reconfig (GstVaBaseEnc * base)
   GstVideoCodecState *output_state;
   GstVideoFormat format, reconf_format = GST_VIDEO_FORMAT_UNKNOWN;
   const GstVideoFormatInfo *format_info;
-  gboolean do_renegotiation = TRUE, do_reopen, need_negotiation;
+  gboolean do_renegotiation = TRUE, do_reopen, need_negotiation, rc_same;
   guint max_ref_frames, max_surfaces = 0, codedbuf_size, latency_num;
   gint width, height;
   GstClockTime latency;
@@ -605,9 +605,13 @@ gst_va_vp8_enc_reconfig (GstVaBaseEnc * base)
     reconf_format = GST_VIDEO_INFO_FORMAT (&vi);
   }
 
+  GST_OBJECT_LOCK (self);
+  rc_same = (self->prop.rc_ctrl == self->rc.rc_ctrl_mode);
+  GST_OBJECT_UNLOCK (self);
+
   /* First check */
   do_reopen = !(format == reconf_format && width == base->width
-      && height == base->height && self->prop.rc_ctrl == self->rc.rc_ctrl_mode);
+      && height == base->height && rc_same);
 
   if (do_reopen && gst_va_encoder_is_open (base->encoder))
     gst_va_encoder_close (base->encoder);
@@ -655,8 +659,8 @@ gst_va_vp8_enc_reconfig (GstVaBaseEnc * base)
 
   /* Set the latency */
   latency = gst_util_uint64_scale (latency_num,
-      GST_VIDEO_INFO_FPS_D (&base->input_state->info) * GST_SECOND,
-      GST_VIDEO_INFO_FPS_N (&base->input_state->info));
+      GST_VIDEO_INFO_FPS_D (&base->in_info) * GST_SECOND,
+      GST_VIDEO_INFO_FPS_N (&base->in_info));
   gst_video_encoder_set_latency (venc, latency, latency);
 
   max_ref_frames = GST_VP8_MAX_REF_FRAMES;

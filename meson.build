@@ -1,5 +1,5 @@
 project('gst-plugins-bad', 'c', 'cpp',
-  version : '1.27.1',
+  version : '1.27.2',
   meson_version : '>= 1.4',
   default_options : [ 'warning_level=1',
                       'buildtype=debugoptimized' ])
@@ -396,7 +396,7 @@ if gstgl_dep.found()
 endif
 
 libm = cc.find_library('m', required : false)
-gio_dep = dependency('gio-2.0', version: glib_req)
+gio_dep = dependency('gio-2.0', version: glib_req, default_options: {'sysprof': 'disabled'})
 gmodule_dep = dependency('gmodule-no-export-2.0')
 # gio-unix-2.0 is used by sys/bluez
 
@@ -484,8 +484,7 @@ have_orcc = false
 orcc_args = []
 orc_targets = []
 # Used by various libraries/elements that use Orc code
-orc_dep = dependency('orc-0.4', version : orc_req, required : get_option('orc'),
-    fallback : ['orc', 'orc_dep'])
+orc_dep = dependency('orc-0.4', version : orc_req, required : get_option('orc'), allow_fallback: true)
 orcc = find_program('orcc', required : get_option('orc'))
 if orc_dep.found() and orcc.found()
   have_orcc = true
@@ -637,7 +636,7 @@ endif
 
 configure_file(output : 'config.h', configuration : cdata)
 
-meson.add_dist_script('scripts/gen-changelog.py', meson.project_name(), '1.24.0', meson.project_version())
+meson.add_dist_script('scripts/gen-changelog.py', meson.project_name(), '1.26.0', meson.project_version())
 
 subdir('docs')
 

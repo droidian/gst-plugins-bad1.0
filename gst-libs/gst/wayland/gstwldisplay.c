@@ -63,6 +63,7 @@ typedef struct _GstWlDisplayPrivate
   GArray *dmabuf_modifiers;
 
   gboolean color_parametric_creator_supported;
+  gboolean color_mastering_display_supported;
   GArray *color_transfer_functions;
   GArray *color_primaries;
   GArray *color_alpha_modes;
@@ -285,9 +286,17 @@ color_supported_feature (void *data,
   GstWlDisplay *self = data;
   GstWlDisplayPrivate *priv = gst_wl_display_get_instance_private (self);
 
-  if (feature == WP_COLOR_MANAGER_V1_FEATURE_PARAMETRIC) {
-    GST_INFO_OBJECT (self, "New_parametric_creator supported");
-    priv->color_parametric_creator_supported = TRUE;
+  switch (feature) {
+    case WP_COLOR_MANAGER_V1_FEATURE_PARAMETRIC:
+      GST_INFO_OBJECT (self, "New_parametric_creator supported");
+      priv->color_parametric_creator_supported = TRUE;
+      break;
+    case WP_COLOR_MANAGER_V1_FEATURE_SET_MASTERING_DISPLAY_PRIMARIES:
+      GST_INFO_OBJECT (self, "Mastering Display supported");
+      priv->color_mastering_display_supported = TRUE;
+      break;
+    default:
+      break;
   }
 }
 
@@ -500,8 +509,12 @@ gst_wl_display_thread_run (gpointer data)
   /* main loop */
   while (1) {
     g_rec_mutex_lock (&priv->sync_mutex);
-    while (wl_display_prepare_read_queue (priv->display, priv->queue) != 0)
-      wl_display_dispatch_queue_pending (priv->display, priv->queue);
+    while (wl_display_prepare_read_queue (priv->display, priv->queue) != 0) {
+      if (wl_display_dispatch_queue_pending (priv->display, priv->queue) == -1) {
+        g_rec_mutex_unlock (&priv->sync_mutex);
+        goto error;
+      }
+    }
     g_rec_mutex_unlock (&priv->sync_mutex);
     wl_display_flush (priv->display);
 
@@ -517,7 +530,10 @@ gst_wl_display_thread_run (gpointer data)
       goto error;
 
     g_rec_mutex_lock (&priv->sync_mutex);
-    wl_display_dispatch_queue_pending (priv->display, priv->queue);
+    if (wl_display_dispatch_queue_pending (priv->display, priv->queue) == -1) {
+      g_rec_mutex_unlock (&priv->sync_mutex);
+      goto error;
+    }
     g_rec_mutex_unlock (&priv->sync_mutex);
   }
 
@@ -944,6 +960,23 @@ gst_wl_display_is_color_parametric_creator_supported (GstWlDisplay * self)
   GstWlDisplayPrivate *priv = gst_wl_display_get_instance_private (self);
 
   return priv->color_parametric_creator_supported;
+}
+
+/**
+ * gst_wl_display_is_color_mastering_display_supported:
+ * @self: A #GstWlDisplay
+ *
+ * Returns: %TRUE if the compositor supports mastering display primaries
+ *          image descriptions
+ *
+ * Since: 1.28
+ */
+gboolean
+gst_wl_display_is_color_mastering_display_supported (GstWlDisplay * self)
+{
+  GstWlDisplayPrivate *priv = gst_wl_display_get_instance_private (self);
+
+  return priv->color_mastering_display_supported;
 }
 
 /**

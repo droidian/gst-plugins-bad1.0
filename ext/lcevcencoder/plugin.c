@@ -24,6 +24,7 @@
 #include <gst/gst.h>
 
 #include "gstlcevch264enc.h"
+#include "gstlcevch265enc.h"
 
 static gboolean
 plugin_init (GstPlugin * plugin)
@@ -31,6 +32,7 @@ plugin_init (GstPlugin * plugin)
   gboolean ret = FALSE;
 
   ret |= GST_ELEMENT_REGISTER (lcevch264enc, plugin);
+  ret |= GST_ELEMENT_REGISTER (lcevch265enc, plugin);
 
   return ret;
 }

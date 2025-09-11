@@ -30,6 +30,10 @@
 #include "gsttfliteedgetpuinference.h"
 #endif
 
+#ifdef TFLITE_VSI
+#include "gsttflitevsiinference.h"
+#endif
+
 static gboolean
 plugin_init (GstPlugin * plugin)
 {
@@ -37,6 +41,10 @@ plugin_init (GstPlugin * plugin)
 
 #ifdef EDGETPU
   ret |= GST_ELEMENT_REGISTER (tflite_edgetpu_inference, plugin);
+#endif
+
+#ifdef TFLITE_VSI
+  ret |= GST_ELEMENT_REGISTER (tflite_vsi_inference, plugin);
 #endif
 
   return ret;

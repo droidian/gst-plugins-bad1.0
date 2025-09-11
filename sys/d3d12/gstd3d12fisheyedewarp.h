@@ -20,25 +20,13 @@
 #pragma once
 
 #include <gst/gst.h>
-#include "gstwasapi2util.h"
+#include "gstd3d12basefilter.h"
 
 G_BEGIN_DECLS
 
-#define GST_TYPE_WASAPI2_OBJECT (gst_wasapi2_object_get_type ())
-G_DECLARE_FINAL_TYPE (GstWasapi2Object, gst_wasapi2_object,
-    GST, WASAPI2_OBJECT, GstObject);
-
-GstWasapi2Object * gst_wasapi2_object_new (GstWasapi2EndpointClass device_class,
-                                           const gchar * device_id,
-                                           guint target_pid);
-
-GstCaps *          gst_wasapi2_object_get_caps (GstWasapi2Object * object);
-
-IAudioClient *     gst_wasapi2_object_get_handle (GstWasapi2Object * object);
-
-gboolean           gst_wasapi2_object_is_endpoint_muted (GstWasapi2Object * object);
-
-gboolean           gst_wasapi2_object_auto_routing_supported (GstWasapi2Object * object);
+#define GST_TYPE_D3D12_FISHEYE_DEWARP (gst_d3d12_fisheye_dewarp_get_type())
+G_DECLARE_FINAL_TYPE (GstD3D12FisheyeDewarp, gst_d3d12_fisheye_dewarp,
+    GST, D3D12_FISHEYE_DEWARP, GstD3D12BaseFilter)
 
 G_END_DECLS
 

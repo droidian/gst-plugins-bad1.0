@@ -163,6 +163,10 @@ static GstCaps *gst_h266_parse_get_caps (GstBaseParse * parse,
     GstCaps * filter);
 
 static void
+gst_h266_parse_process_sei_user_data (GstH266Parse * h266parse,
+    GstH266RegisteredUserData * rud);
+
+static void
 gst_h266_parse_class_init (GstH266ParseClass * klass)
 {
   GObjectClass *gobject_class = (GObjectClass *) klass;
@@ -272,6 +276,7 @@ gst_h266_parse_reset_stream_info (GstH266Parse * h266parse)
   h266parse->parsed_colorimetry.matrix = GST_VIDEO_COLOR_MATRIX_UNKNOWN;
   h266parse->parsed_colorimetry.transfer = GST_VIDEO_TRANSFER_UNKNOWN;
   h266parse->parsed_colorimetry.primaries = GST_VIDEO_COLOR_PRIMARIES_UNKNOWN;
+  h266parse->lcevc = FALSE;
   h266parse->have_pps = FALSE;
   h266parse->have_sps = FALSE;
   h266parse->have_vps = FALSE;
@@ -617,6 +622,10 @@ gst_h266_parse_process_sei (GstH266Parse * h266parse, GstH266NalUnit * nalu)
         break;
       case GST_H266_SEI_SUBPIC_LEVEL_INFO:
         /* FIXME */
+        break;
+      case GST_H266_SEI_REGISTERED_USER_DATA:
+        gst_h266_parse_process_sei_user_data (h266parse,
+            &sei.payload.registered_user_data);
         break;
       default:
         break;
@@ -2091,7 +2100,7 @@ gst_h266_parse_ensure_compatible_profiles (GstH266Parse * h266parse,
         g_value_unset (&value);
       }
 
-      gst_caps_set_value (caps, "profile", &compat_profiles);
+      gst_caps_set_value (compat_caps, "profile", &compat_profiles);
       g_value_unset (&compat_profiles);
       g_array_unref (profiles);
     }
@@ -2547,6 +2556,11 @@ gst_h266_parse_update_src_caps (GstH266Parse * h266parse, GstCaps * caps)
       GST_WARNING_OBJECT (h266parse,
           "Couldn't set content light level to caps");
     }
+
+    if (h266parse->user_data.lcevc_enhancement_data || h266parse->lcevc)
+      gst_caps_set_simple (caps, "lcevc", G_TYPE_BOOLEAN, TRUE, NULL);
+    else
+      gst_caps_set_simple (caps, "lcevc", G_TYPE_BOOLEAN, FALSE, NULL);
 
     src_caps = gst_pad_get_current_caps (GST_BASE_PARSE_SRC_PAD (h266parse));
 
@@ -3143,6 +3157,7 @@ gst_h266_parse_set_caps (GstBaseParse * parse, GstCaps * caps)
       &h266parse->fps_den);
   gst_structure_get_fraction (str, "pixel-aspect-ratio",
       &h266parse->upstream_par_n, &h266parse->upstream_par_d);
+  gst_structure_get_boolean (str, "lcevc", &h266parse->lcevc);
 
   /* get upstream format and align from caps */
   gst_h266_parse_format_from_caps (h266parse, caps, &format, &align);
@@ -3219,10 +3234,7 @@ gst_h266_parse_set_caps (GstBaseParse * parse, GstCaps * caps)
     h266parse->nal_length_size = 4;
   }
 
-  if (format == h266parse->format && align == h266parse->align) {
-    /* we did parse codec-data and might supplement src caps */
-    gst_h266_parse_update_src_caps (h266parse, caps);
-  } else if (format == GST_H266_PARSE_FORMAT_VVC1
+  if (format == GST_H266_PARSE_FORMAT_VVC1
       || format == GST_H266_PARSE_FORMAT_VVI1) {
     /* if input != output, and input is vvc, must split before anything else */
     /* arrange to insert codec-data in-stream if needed.
@@ -3272,6 +3284,7 @@ remove_fields (GstCaps * caps, gboolean all)
       gst_structure_remove_field (s, "stream-format");
     }
     gst_structure_remove_field (s, "parsed");
+    gst_structure_remove_field (s, "lcevc");
   }
 }
 
@@ -3317,6 +3330,36 @@ gst_h266_parse_get_caps (GstBaseParse * parse, GstCaps * filter)
 
   gst_caps_unref (peercaps);
   return res;
+}
+
+static void
+gst_h266_parse_process_sei_user_data (GstH266Parse * h266parse,
+    GstH266RegisteredUserData * rud)
+{
+  guint16 provider_code;
+  GstByteReader br;
+  GstVideoParseUtilsField field = GST_VIDEO_PARSE_UTILS_FIELD_1;
+
+  /* only US and UK country codes are currently supported */
+  switch (rud->country_code) {
+    case ITU_T_T35_COUNTRY_CODE_UK:
+    case ITU_T_T35_COUNTRY_CODE_US:
+      break;
+    default:
+      GST_LOG_OBJECT (h266parse, "Unsupported country code %d",
+          rud->country_code);
+      return;
+  }
+
+  if (rud->data == NULL || rud->size < 2)
+    return;
+
+  gst_byte_reader_init (&br, rud->data, rud->size);
+
+  provider_code = gst_byte_reader_get_uint16_be_unchecked (&br);
+
+  gst_video_parse_user_data ((GstElement *) h266parse, &h266parse->user_data,
+      &br, field, provider_code);
 }
 
 static void

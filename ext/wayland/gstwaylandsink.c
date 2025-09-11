@@ -209,6 +209,9 @@ gst_wayland_sink_class_init (GstWaylandSinkClass * klass)
   * Since: 1.22
   */
   gst_video_overlay_install_properties (gobject_class, PROP_LAST);
+
+  GST_DEBUG_CATEGORY_INIT (gstwayland_debug, "waylandsink", 0,
+      " wayland video sink");
 }
 
 static void
@@ -755,6 +758,11 @@ gst_wayland_sink_set_caps (GstBaseSink * bsink, GstCaps * caps)
       gst_video_info_dma_drm_init (&self->drm_info);
   }
 
+  self->have_mastering_info =
+      gst_video_mastering_display_info_from_caps (&self->minfo, caps);
+  self->have_light_info =
+      gst_video_content_light_level_from_caps (&self->linfo, caps);
+
   self->video_info_changed = TRUE;
   self->skip_dumb_buffer_copy = FALSE;
 
@@ -863,14 +871,23 @@ render_last_buffer (GstWaylandSink * self, gboolean redraw)
 {
   GstWlBuffer *wlbuffer;
   const GstVideoInfo *info = NULL;
+  const GstVideoMasteringDisplayInfo *minfo = NULL;
+  const GstVideoContentLightLevel *linfo = NULL;
 
   wlbuffer = gst_buffer_get_wl_buffer (self->display, self->last_buffer);
 
   if (G_UNLIKELY (self->video_info_changed && !redraw)) {
     info = &self->video_info;
+
+    if (self->have_mastering_info)
+      minfo = &self->minfo;
+
+    if (self->have_light_info)
+      linfo = &self->linfo;
+
     self->video_info_changed = FALSE;
   }
-  return gst_wl_window_render (self->window, wlbuffer, info);
+  return gst_wl_window_render_hdr (self->window, wlbuffer, info, minfo, linfo);
 }
 
 static void
@@ -1238,9 +1255,6 @@ gst_wayland_sink_expose (GstVideoOverlay * overlay)
 static gboolean
 plugin_init (GstPlugin * plugin)
 {
-  GST_DEBUG_CATEGORY_INIT (gstwayland_debug, "waylandsink", 0,
-      " wayland video sink");
-
   return GST_ELEMENT_REGISTER (waylandsink, plugin);
 }
 
