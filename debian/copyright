@@ -1052,11 +1052,6 @@ Files: ext/resindvd/rsnparsetter.c
 Copyright: 2008, Jan Schmidt <thaytan@noraisin.net>
 License: LGPL-2+
 
-Files: gst/inter/gstintertest.c
-Copyright: 2010, Entropy Wave Inc
-  2011, David Schleef <ds@schleef.org>
-License: BSD-2-clause
-
 Files: gst/audiovisualizers/gstdrawhelpers.h
 Copyright: <2011> Stefan Sauer <ensonic@users.sf.net>
 License: GPL-2+
