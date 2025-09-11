@@ -25,6 +25,9 @@
 
 G_BEGIN_DECLS
 
+typedef struct _GstVulkanVideoProfile GstVulkanVideoProfile;
+typedef struct _GstVulkanVideoCapabilities GstVulkanVideoCapabilities;
+
 /**
  * GstVulkanVideoProfile:
  * @profile: the generic vulkan video profile
@@ -35,7 +38,6 @@ G_BEGIN_DECLS
 struct _GstVulkanVideoProfile
 {
   /*< private >*/
-#if GST_VULKAN_HAVE_VIDEO_EXTENSIONS
   VkVideoProfileInfoKHR profile;
   union {
     VkVideoDecodeUsageInfoKHR decode;
@@ -52,6 +54,12 @@ struct _GstVulkanVideoProfile
     VkVideoDecodeH264ProfileInfoKHR h264dec;
     VkVideoDecodeH265ProfileInfoKHR h265dec;
     /**
+     * GstVulkanVideoProfile.usage.codec.vp9dec:
+     *
+     * Since: 1.28
+     **/
+    VkVideoDecodeVP9ProfileInfoKHR vp9dec;
+    /**
      * GstVulkanVideoProfile.usage.codec.h264enc:
      *
      * Since: 1.26
@@ -63,8 +71,13 @@ struct _GstVulkanVideoProfile
      * Since: 1.26
      **/
     VkVideoEncodeH265ProfileInfoKHR h265enc;
+    /**
+     * GstVulkanVideoProfile.usage.codec.av1enc:
+     *
+     * Since: 1.28
+     **/
+    VkVideoEncodeAV1ProfileInfoKHR av1enc;
   } codec;
-#endif
   gpointer _reserved[GST_PADDING];
 };
 
@@ -76,7 +89,6 @@ struct _GstVulkanVideoProfile
 struct _GstVulkanVideoCapabilities
 {
   /*< private >*/
-#if GST_VULKAN_HAVE_VIDEO_EXTENSIONS
   VkVideoCapabilitiesKHR caps;
   union
   {
@@ -89,6 +101,12 @@ struct _GstVulkanVideoCapabilities
         /*< private >*/
         VkVideoDecodeH264CapabilitiesKHR h264;
         VkVideoDecodeH265CapabilitiesKHR h265;
+        /**
+         * GstVulkanVideoCapabilities.caps.codec.vp9:
+         *
+         * Since: 1.28
+         **/
+        VkVideoDecodeVP9CapabilitiesKHR vp9;
       } codec;
     } decoder;
     struct
@@ -100,10 +118,16 @@ struct _GstVulkanVideoCapabilities
         /*< private >*/
         VkVideoEncodeH264CapabilitiesKHR h264;
         VkVideoEncodeH265CapabilitiesKHR h265;
+        /**
+         * _GstVulkanVideoCapabilities.encoder.codec.av1:
+         *
+         * Since: 1.28
+         **/
+        VkVideoEncodeAV1CapabilitiesKHR av1;
+
       } codec;
     } encoder;
   };
-#endif
   /*< private >*/
   gpointer _reserved[GST_PADDING];
 };

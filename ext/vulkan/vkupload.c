@@ -795,7 +795,7 @@ _raw_to_image_perform (gpointer impl, GstBuffer * inbuf, GstBuffer ** outbuf)
         goto unlock_error;
       }
 
-      if (!_copy_frames (&raw->in_info, inbuf, *outbuf)) {
+      if (!_copy_frames (&raw->in_info, inbuf, in_vk_copy)) {
         GST_ERROR_OBJECT (raw->upload, "Failed to copy to Vulkan buffer");
         goto unlock_error;
       }
@@ -1150,8 +1150,8 @@ gst_vulkan_upload_change_state (GstElement * element, GstStateChange transition)
   GstStateChangeReturn ret = GST_STATE_CHANGE_SUCCESS;
 
   GST_DEBUG ("changing state: %s => %s",
-      gst_element_state_get_name (GST_STATE_TRANSITION_CURRENT (transition)),
-      gst_element_state_get_name (GST_STATE_TRANSITION_NEXT (transition)));
+      gst_state_get_name (GST_STATE_TRANSITION_CURRENT (transition)),
+      gst_state_get_name (GST_STATE_TRANSITION_NEXT (transition)));
 
   switch (transition) {
     case GST_STATE_CHANGE_NULL_TO_READY:

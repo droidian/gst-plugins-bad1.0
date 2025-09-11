@@ -26,6 +26,10 @@
 #include <gst/check/gstcheck.h>
 #include <gst/vulkan/vulkan.h>
 
+#if GST_VULKAN_HAVE_VIDEO_EXTENSIONS
+#include "gst/vulkan/gstvkvideoutils-private.h"
+#endif
+
 static GstVulkanInstance *instance;
 static GstVulkanDevice *device;
 static GstVulkanQueue *queue = NULL;
@@ -78,9 +82,11 @@ create_buffer_pool (const char *format, VkImageUsageFlags usage,
   gst_buffer_pool_config_set_params (config, caps, 1024, 1, 0);
   gst_caps_unref (caps);
 
-  gst_vulkan_image_buffer_pool_config_set_allocation_params (config,
-      usage, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, initial_layout,
-      initial_access);
+  if (usage != 0) {
+    gst_vulkan_image_buffer_pool_config_set_allocation_params (config,
+        usage, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, initial_layout,
+        initial_access);
+  }
 
   if (dec_caps)
     gst_vulkan_image_buffer_pool_config_set_decode_caps (config, dec_caps);
@@ -206,7 +212,7 @@ GST_START_TEST (test_decoding_image)
 }
 
 GST_END_TEST;
-#endif
+#endif /* GST_VULKAN_HAVE_VIDEO_EXTENSIONS */
 
 static Suite *
 vkimagebufferpool_suite (void)
@@ -218,7 +224,6 @@ vkimagebufferpool_suite (void)
   suite_add_tcase (s, tc_basic);
   tcase_add_checked_fixture (tc_basic, setup, teardown);
 
-  /* FIXME: CI doesn't have a software vulkan renderer (and none exists currently) */
   instance = gst_vulkan_instance_new ();
   have_instance = gst_vulkan_instance_open (instance, NULL);
   gst_object_unref (instance);

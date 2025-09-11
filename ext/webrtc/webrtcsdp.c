@@ -214,6 +214,25 @@ _media_get_ice_ufrag (const GstSDPMessage * msg, guint media_idx)
   return ice_ufrag;
 }
 
+/* https://datatracker.ietf.org/doc/html/rfc5245#section-15.4 */
+static gboolean
+_validate_ice_attr (const gchar * attr, guint min_length)
+{
+  guint len = strlen (attr);
+
+  if (len < min_length)
+    return FALSE;
+
+  if (len > 256)
+    return FALSE;
+
+  for (guint i = 0; i < len; i++) {
+    if (!g_ascii_isalnum (attr[i]) && attr[i] != '+' && attr[i] != '/')
+      return FALSE;
+  }
+  return TRUE;
+}
+
 const gchar *
 _media_get_ice_pwd (const GstSDPMessage * msg, guint media_idx)
 {
@@ -302,6 +321,8 @@ validate_sdp (GstWebRTCSignalingState state, SDPSource source,
     const GstSDPMedia *media = gst_sdp_message_get_media (sdp->sdp, i);
     const gchar *mid;
     gboolean media_in_bundle = FALSE;
+    const gchar *ice_ufrag;
+    const gchar *ice_pwd;
 
     if (_media_has_mid (media, i)) {
       mid = gst_sdp_media_get_attribute_val (media, "mid");
@@ -309,39 +330,52 @@ validate_sdp (GstWebRTCSignalingState state, SDPSource source,
           is_bundle && g_strv_contains ((const gchar **) group_members, mid);
     }
 
-    if (!_media_get_ice_ufrag (sdp->sdp, i)) {
+    ice_ufrag = _media_get_ice_ufrag (sdp->sdp, i);
+    if (!ice_ufrag) {
       g_set_error (error, GST_WEBRTC_ERROR, GST_WEBRTC_ERROR_SDP_SYNTAX_ERROR,
           "media %u is missing or contains an empty \'ice-ufrag\' attribute",
           i);
       goto fail;
     }
-    if (!_media_get_ice_pwd (sdp->sdp, i)) {
+    if (!_validate_ice_attr (ice_ufrag, 4)) {
+      g_set_error (error, GST_WEBRTC_ERROR, GST_WEBRTC_ERROR_SDP_SYNTAX_ERROR,
+          "media %u has an invalid \'ice-ufrag\' attribute", i);
+      goto fail;
+    }
+    ice_pwd = _media_get_ice_pwd (sdp->sdp, i);
+    if (!ice_pwd) {
       g_set_error (error, GST_WEBRTC_ERROR, GST_WEBRTC_ERROR_SDP_SYNTAX_ERROR,
           "media %u is missing or contains an empty \'ice-pwd\' attribute", i);
       goto fail;
     }
+    if (!_validate_ice_attr (ice_pwd, 22)) {
+      g_set_error (error, GST_WEBRTC_ERROR, GST_WEBRTC_ERROR_SDP_SYNTAX_ERROR,
+          "media %u has an invalid \'ice-pwd\' attribute", i);
+      goto fail;
+    }
+
     if (!has_session_setup && !_media_has_setup (media, i, error))
       goto fail;
-    /* check parameters in bundle are the same */
+    /* Validate ICE ufrag and pwd attributes. According to RFC 8839 section 5.4:
+     * If two data streams have identical "ice-ufrag"s, they MUST have
+     * identical "ice-pwd"s.
+     */
     if (media_in_bundle) {
       const gchar *ice_ufrag =
           gst_sdp_media_get_attribute_val (media, "ice-ufrag");
       const gchar *ice_pwd = gst_sdp_media_get_attribute_val (media, "ice-pwd");
       if (!bundle_ice_ufrag)
         bundle_ice_ufrag = ice_ufrag;
-      else if (g_strcmp0 (bundle_ice_ufrag, ice_ufrag) != 0) {
-        g_set_error (error, GST_WEBRTC_ERROR, GST_WEBRTC_ERROR_SDP_SYNTAX_ERROR,
-            "media %u has different ice-ufrag values in bundle. "
-            "%s != %s", i, bundle_ice_ufrag, ice_ufrag);
-        goto fail;
-      }
-      if (!bundle_ice_pwd) {
-        bundle_ice_pwd = ice_pwd;
-      } else if (g_strcmp0 (bundle_ice_pwd, ice_pwd) != 0) {
-        g_set_error (error, GST_WEBRTC_ERROR, GST_WEBRTC_ERROR_SDP_SYNTAX_ERROR,
-            "media %u has different ice-pwd values in bundle. "
-            "%s != %s", i, bundle_ice_pwd, ice_pwd);
-        goto fail;
+      else if (g_strcmp0 (bundle_ice_ufrag, ice_ufrag) == 0) {
+        if (!bundle_ice_pwd) {
+          bundle_ice_pwd = ice_pwd;
+        } else if (g_strcmp0 (bundle_ice_pwd, ice_pwd) != 0) {
+          g_set_error (error, GST_WEBRTC_ERROR,
+              GST_WEBRTC_ERROR_SDP_SYNTAX_ERROR,
+              "media %u shares ice-ufrag with another bundled media but has different ice-pwd values. "
+              "%s != %s", i, bundle_ice_pwd, ice_pwd);
+          goto fail;
+        }
       }
     }
   }

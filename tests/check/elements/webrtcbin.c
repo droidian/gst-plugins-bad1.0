@@ -375,8 +375,8 @@ _bus_watch (GstBus * bus, GstMessage * msg, struct test_webrtc *t)
         {
           gchar *dump_name =
               g_strconcat (GST_OBJECT_NAME (msg->src), "-state_changed-",
-              gst_element_state_get_name (old), "_",
-              gst_element_state_get_name (new), NULL);
+              gst_state_get_name (old), "_",
+              gst_state_get_name (new), NULL);
           GST_DEBUG_BIN_TO_DOT_FILE_WITH_TS (GST_BIN (msg->src),
               GST_DEBUG_GRAPH_SHOW_ALL, dump_name);
           g_free (dump_name);
@@ -1800,6 +1800,23 @@ validate_candidate_stats (const GstStructure * s, const GstStructure * stats)
 }
 
 static void
+validate_transport_stats (const GstStructure * s, const GstStructure * stats)
+{
+  gchar *selected_candidate_pair_id;
+  GstWebRTCDTLSTransportState state;
+  GstWebRTCDTLSRole dtls_role;
+
+  fail_unless (gst_structure_get (s, "selected-candidate-pair-id",
+          G_TYPE_STRING, &selected_candidate_pair_id, NULL));
+  fail_unless (gst_structure_get (s, "dtls-state",
+          GST_TYPE_WEBRTC_DTLS_TRANSPORT_STATE, &state, NULL));
+  fail_unless (gst_structure_get (s, "dtls-role", GST_TYPE_WEBRTC_DTLS_ROLE,
+          &dtls_role, NULL));
+
+  g_free (selected_candidate_pair_id);
+}
+
+static void
 validate_peer_connection_stats (const GstStructure * s)
 {
   guint opened, closed;
@@ -1862,6 +1879,7 @@ validate_stats_foreach (const GstIdStr * fieldname, const GValue * value,
   } else if (type == GST_WEBRTC_STATS_DATA_CHANNEL) {
   } else if (type == GST_WEBRTC_STATS_STREAM) {
   } else if (type == GST_WEBRTC_STATS_TRANSPORT) {
+    validate_transport_stats (s, stats);
   } else if (type == GST_WEBRTC_STATS_CANDIDATE_PAIR) {
   } else if (type == GST_WEBRTC_STATS_LOCAL_CANDIDATE) {
     validate_candidate_stats (s, stats);
@@ -6834,6 +6852,160 @@ GST_START_TEST (test_video_rtx_no_duplicate_payloads)
 
 GST_END_TEST;
 
+/* Using different ice-ufrag in bundled medias is allowed as long as they don't share the same ice-pwd.  */
+GST_START_TEST (test_bundle_with_different_ice_credentials)
+{
+  GstPromise *promise;
+  struct test_webrtc *t = test_webrtc_new ();
+  const gchar *sdp_str = "v=0\r\n\
+o=- 4962303333179871722 1 IN IP4 0.0.0.0\r\n\
+s=-\r\n\
+t=0 0\r\n\
+a=ice-options:trickle\r\n\
+a=group:BUNDLE a1 v1\r\n\
+m=audio 10100 UDP/TLS/RTP/SAVPF 96\r\n\
+c=IN IP4 0.0.0.0\r\n\
+a=mid:a1\r\n\
+a=sendrecv\r\n\
+a=rtpmap:96 opus/48000/2\r\n\
+a=extmap:1 urn:ietf:params:rtp-hdrext:sdes:mid\r\n\
+a=extmap:2 urn:ietf:params:rtp-hdrext:ssrc-audio-level\r\n\
+a=msid:47017fee-b6c1-4162-929c-a25110252400 f83006c5-a0ff-4e0a-9ed9-d3e6747be7d9\r\n\
+a=ice-ufrag:ETEn\r\n\
+a=ice-pwd:OtSK0WpNtpUjkY4+86js7ZQl\r\n\
+a=fingerprint:sha-256 19:E2:1C:3B:4B:9F:81:E6:B8:5C:F4:A5:A8:D8:73:04:BB:05:2F:70:9F:04:A9:0E:05:E9:26:33:E8:70:88:A2\r\n\
+a=setup:actpass\r\n\
+a=rtcp-mux\r\n\
+a=rtcp-rsize\r\n\
+m=video 10102 UDP/TLS/RTP/SAVPF 100\r\n\
+c=IN IP4 0.0.0.0\r\n\
+a=mid:v1\r\n\
+a=sendrecv\r\n\
+a=rtpmap:100 VP8/90000\r\n\
+a=extmap:1 urn:ietf:params:rtp-hdrext:sdes:mid\r\n\
+a=msid:47017fee-b6c1-4162-929c-a25110252400 f30bdb4a-5db8-49b5-bcdc-e0c9a23172e0\r\n\
+a=ice-ufrag:BGKk\r\n\
+a=ice-pwd:mqyWsAjvtKwTGnvhPztQ9mIf\r\n\
+a=fingerprint:sha-256 19:E2:1C:3B:4B:9F:81:E6:B8:5C:F4:A5:A8:D8:73:04:BB:05:2F:70:9F:04:A9:0E:05:E9:26:33:E8:70:88:A2\r\n\
+a=setup:actpass\r\n\
+a=rtcp-mux\r\n\
+a=rtcp-rsize\r\n";
+  GstSDPMessage *sdp;
+  const GstStructure *reply;
+
+  t->on_negotiation_needed = NULL;
+  t->on_offer_created = NULL;
+  t->on_answer_created = NULL;
+
+  gst_sdp_message_new_from_text (sdp_str, &sdp);
+  GstWebRTCSessionDescription *desc =
+      gst_webrtc_session_description_new (GST_WEBRTC_SDP_TYPE_OFFER,
+      sdp);
+  gst_element_set_state (t->webrtc1, GST_STATE_READY);
+
+  promise = gst_promise_new ();
+  g_signal_emit_by_name (t->webrtc1, "set-remote-description", desc, promise);
+  gst_promise_wait (promise);
+  gst_promise_unref (promise);
+  gst_webrtc_session_description_free (desc);
+
+  promise = gst_promise_new ();
+  g_signal_emit_by_name (t->webrtc1, "create-answer", NULL, promise);
+  gst_promise_wait (promise);
+  reply = gst_promise_get_reply (promise);
+  fail_if (gst_structure_has_field (reply, "error"));
+  gst_promise_unref (promise);
+
+  test_webrtc_free (t);
+}
+
+GST_END_TEST;
+
+static void
+validate_ice_attr (struct test_webrtc *t, GstElement * element,
+    const gchar * sdp_str, const gchar * expected_error_message)
+{
+  GstPromise *promise;
+  GstSDPMessage *sdp;
+  const GstStructure *reply;
+  GstWebRTCSessionDescription *desc;
+  GError *error = NULL;
+
+  gst_sdp_message_new_from_text (sdp_str, &sdp);
+  desc = gst_webrtc_session_description_new (GST_WEBRTC_SDP_TYPE_OFFER, sdp);
+  promise = gst_promise_new ();
+  g_signal_emit_by_name (t->webrtc1, "set-remote-description", desc, promise);
+  gst_promise_wait (promise);
+  reply = gst_promise_get_reply (promise);
+  if (expected_error_message) {
+    fail_unless (gst_structure_get (reply, "error", G_TYPE_ERROR, &error,
+            NULL));
+    fail_unless (g_error_matches (error, GST_WEBRTC_ERROR,
+            GST_WEBRTC_ERROR_SDP_SYNTAX_ERROR));
+    fail_unless_equals_string (error->message, expected_error_message);
+    g_clear_error (&error);
+  } else {
+    fail_if (reply != NULL);
+  }
+  gst_promise_unref (promise);
+  gst_webrtc_session_description_free (desc);
+}
+
+GST_START_TEST (test_invalid_ice_attrs)
+{
+  struct test_webrtc *t = test_webrtc_new ();
+  const gchar *sdp_preamble = "v=0\r\n\
+o=- 0 3 IN IP4 127.0.0.1\r\n\
+s=-\r\n\
+t=0 0\r\n\
+a=fingerprint:sha-256 A7:24:72:CA:6E:02:55:39:BA:66:DF:6E:CC:4C:D8:B0:1A:BF:1A:56:65:7D:F4:03:AD:7E:77:43:2A:29:EC:93\r\n\
+m=video 1 RTP/SAVPF 100\r\n\
+c=IN IP4 0.0.0.0\r\n\
+a=rtcp-mux\r\n\
+a=sendonly\r\n\
+a=mid:video\r\n\
+a=rtpmap:100 VP8\r\n\
+a=setup:actpass\r\n";
+  const gchar *valid_ufrag = "a=ice-ufrag:ETEn\r\n";
+  const gchar *valid_pwd = "a=ice-pwd:OtSK0WpNtpUjkY4+86js7Z/l\r\n";
+  const gchar *invalid_ufrag = "a=ice-ufrag:ETEn$\r\n";
+  const gchar *invalid_pwd = "a=ice-pwd:OtSK0WpNtpUjk$Y4+86js7Z/l\r\n";
+  const gchar *too_short_ufrag = "a=ice-ufrag:foo\r\n";
+  const gchar *too_short_pwd = "a=ice-pwd:thisistooshort\r\n";
+  const gchar *invalid_ufrag_error_message =
+      "media 0 has an invalid \'ice-ufrag\' attribute";
+  const gchar *invalid_pwd_error_message =
+      "media 0 has an invalid \'ice-pwd\' attribute";
+  gchar *sdp_str;
+
+  t->on_negotiation_needed = NULL;
+  t->on_offer_created = NULL;
+  t->on_answer_created = NULL;
+  gst_element_set_state (t->webrtc1, GST_STATE_READY);
+
+  sdp_str = g_strconcat (sdp_preamble, invalid_ufrag, valid_pwd, NULL);
+  validate_ice_attr (t, t->webrtc1, sdp_str, invalid_ufrag_error_message);
+  g_free (sdp_str);
+
+  sdp_str = g_strconcat (sdp_preamble, valid_ufrag, invalid_pwd, NULL);
+  validate_ice_attr (t, t->webrtc1, sdp_str, invalid_pwd_error_message);
+  g_free (sdp_str);
+
+  sdp_str = g_strconcat (sdp_preamble, too_short_ufrag, valid_pwd, NULL);
+  validate_ice_attr (t, t->webrtc1, sdp_str, invalid_ufrag_error_message);
+  g_free (sdp_str);
+
+  sdp_str = g_strconcat (sdp_preamble, valid_ufrag, too_short_pwd, NULL);
+  validate_ice_attr (t, t->webrtc1, sdp_str, invalid_pwd_error_message);
+  g_free (sdp_str);
+
+  sdp_str = g_strconcat (sdp_preamble, valid_ufrag, valid_pwd, NULL);
+  validate_ice_attr (t, t->webrtc1, sdp_str, NULL);
+  g_free (sdp_str);
+
+  test_webrtc_free (t);
+} GST_END_TEST;
+
 static Suite *
 webrtcbin_suite (void)
 {
@@ -6939,6 +7111,8 @@ webrtcbin_suite (void)
     }
     tcase_add_test (tc, test_offer_rollback);
     tcase_add_test (tc, test_video_rtx_no_duplicate_payloads);
+    tcase_add_test (tc, test_bundle_with_different_ice_credentials);
+    tcase_add_test (tc, test_invalid_ice_attrs);
   } else {
     GST_WARNING ("Some required elements were not found. "
         "All media tests are disabled. nicesrc %p, nicesink %p, "

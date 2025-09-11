@@ -25,8 +25,54 @@
 
 G_BEGIN_DECLS
 
-const
-VkPhysicalDeviceFeatures2 * gst_vulkan_physical_device_get_features         (GstVulkanPhysicalDevice * device);
+const VkPhysicalDeviceFeatures2 *
+                            gst_vulkan_physical_device_get_features         (GstVulkanPhysicalDevice * device);
+
+gboolean                    gst_vulkan_physical_device_has_feature_sampler_ycbrc_conversion
+                                                                            (GstVulkanPhysicalDevice * device);
+
+gboolean                    gst_vulkan_physical_device_has_feature_synchronization2
+                                                                            (GstVulkanPhysicalDevice * device);
+
+gboolean                    gst_vulkan_physical_device_has_feature_timeline_sempahore
+                                                                            (GstVulkanPhysicalDevice * device);
+
+gboolean                    gst_vulkan_physical_device_has_feature_video_maintenance1
+                                                                            (GstVulkanPhysicalDevice * device);
+
+gboolean                    gst_vulkan_physical_device_has_feature_video_maintenance2
+                                                                            (GstVulkanPhysicalDevice * device);
+
+gboolean                    gst_vulkan_physical_device_has_feature_video_decode_vp9
+                                                                            (GstVulkanPhysicalDevice * device);
+
+gboolean                    gst_vulkan_physical_device_has_feature_video_encode_av1
+                                                                            (GstVulkanPhysicalDevice * device);
+
+static inline void
+vk_link_struct (gpointer chain, gconstpointer in)
+{
+  VkBaseOutStructure *out = chain;
+
+  while (out->pNext)
+    out = out->pNext;
+
+  out->pNext = (void *) in;
+}
+
+static inline gconstpointer
+vk_find_struct (gconstpointer chain, VkStructureType stype)
+{
+  const VkBaseInStructure *in = chain;
+
+  while (in) {
+    if (in->sType == stype)
+      return in;
+    in = in->pNext;
+  }
+
+  return NULL;
+}
 
 G_END_DECLS
 
