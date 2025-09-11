@@ -1,3 +1,12 @@
+gst-plugins-bad1.0 (1.27.2-1) experimental; urgency=medium
+
+  * New upstream version 1.27.2
+  * d/control: bump minimal version after new symbols
+  * d/control: libvulkan-dev minimal 1.4.317
+  * d/copyright: superfluous-file-pattern gst/inter/gstintertest.c
+
+ -- Marc Leeman <marc.leeman@gmail.com>  Thu, 11 Sep 2025 12:42:50 +0200
+
 gst-plugins-bad1.0 (1.27.1-1) experimental; urgency=medium
 
   * Revert "d/watch: pin to 1.26.x"
