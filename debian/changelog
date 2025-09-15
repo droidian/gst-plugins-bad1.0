@@ -1,3 +1,9 @@
+gst-plugins-bad1.0 (1.26.6-1) unstable; urgency=medium
+
+  * New upstream version 1.26.6
+
+ -- Marc Leeman <marc.leeman@gmail.com>  Mon, 15 Sep 2025 10:59:29 +0200
+
 gst-plugins-bad1.0 (1.26.5-2) unstable; urgency=medium
 
   * trixie has been released, re-upload to unstable
