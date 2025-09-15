@@ -1,3 +1,240 @@
+=== release 1.26.6 ===
+
+2025-09-14 13:13:58 +0100  Tim-Philipp Müller <tim@centricular.com>
+
+	* NEWS:
+	* RELEASE:
+	* gst-plugins-bad.doap:
+	* meson.build:
+	  Release 1.26.6
+
+2025-09-12 21:35:58 +0900  Seungha Yang <seungha@centricular.com>
+
+	* gst-libs/gst/d3d12/gstd3d12memory-private.h:
+	* gst-libs/gst/d3d12/gstd3d12memory.cpp:
+	* sys/dwrite/gstdwriterender_d3d12.cpp:
+	  dwrite: Fix D3D12 critical warning
+	  When using convert + blend mode, the final render target resource
+	  is also used as a source resource owned by our fence data storage.
+	  As a result, the resource may not be writable if the conversion
+	  command has not yet finished. To address this, add a private
+	  method that allows setting the fence without a writability check
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/9686>
+
+2025-07-23 11:37:15 -0400  Xavier Claessens <xclaessens@netflix.com>
+
+	* tests/check/elements/mpegtsmux.c:
+	  mpegtsmux: Caps event fails with stream type change error
+	  If mpegtsmux receives the same caps again, it wrongly claims the stream
+	  type changed:
+	  error: Stream type change from 06 to 8f not supported
+	  This adds a unit test that demonstrate the issue in the very hacky way.
+	  I have seen this happening with the below pipeline when upstream caps
+	  changes. Since the caps filter fixates the caps received by opusenc and
+	  mpegtsmux, the stream type cannot change.
+	  ...
+	  ! audioconvert
+	  ! audio/x-raw,format=S16LE,channels=2,rate=48000
+	  ! opusenc bitrate=128000
+	  ! mpegtsmux
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/9678>
+
+2025-08-07 14:31:38 +1000  Jan Schmidt <jan@centricular.com>
+
+	* gst/mpegtsmux/gstbasetsmux.c:
+	  mpegtsmux: Use 'internal' stream_type to detect codec changes
+	  The TsMuxStream internal_stream_type field stores the original
+	  'full' stream type (such as Opus), while the stream_type field
+	  stores the value that will actually be written into the MPEG-TS
+	  packets according to the codec mappings. When checking if
+	  input caps are changing stream type, check the original type.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/9678>
+
+2025-09-05 08:25:22 +0200  Ola Fornander <ola.fornander@axis.com>
+
+	* ext/curl/gstcurlsmtpsink.c:
+	  curlsmtpsink: adapt to date formatting issue
+	  In glib 2.73.1, padding for %e in gdatetime was changed from "space"
+	  to the Unicode character (U+2007). This violates rfc5322 (Internet
+	  Message Format), which states that a message shall be composed of
+	  characters in the range of 1 through 127 and interpreted as US-ASCII
+	  characters. Hence, when using g_date_time_format, it is necessary to
+	  instead write %_e to enforce space padding.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/9645>
+
+2025-09-02 09:06:20 +0530  Nirbheek Chauhan <nirbheek@centricular.com>
+
+	* ext/openh264/meson.build:
+	  meson: Avoid pulling in gtest for openh264
+	  Emits a big warning about wrapdbv1 and the updated wrap fails to build
+	  on Windows. We don't need the tests anyway.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/9637>
+
+2025-09-01 21:02:22 +0530  Nirbheek Chauhan <nirbheek@centricular.com>
+
+	* ext/analyticsoverlay/meson.build:
+	* ext/avtp/meson.build:
+	* ext/codec2json/meson.build:
+	* ext/iqa/meson.build:
+	* ext/mdns/meson.build:
+	* ext/openh264/meson.build:
+	* ext/openjpeg/meson.build:
+	* ext/qroverlay/meson.build:
+	* ext/soundtouch/meson.build:
+	* gst-libs/gst/webrtc/nice/meson.build:
+	* meson.build:
+	* sys/tinyalsa/meson.build:
+	  meson: Convert all remaining fallback: usages to [provide]
+	  Only commonly-used plugin deps like pango, orc, openh264, libvpx,
+	  libnice are enabled by default.
+	  Fixes https://gitlab.freedesktop.org/gstreamer/gstreamer/-/issues/1788
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/9637>
+
+2025-08-26 20:17:36 +0200  Víctor Manuel Jáquez Leal <vjaquez@igalia.com>
+
+	* ext/vulkan/vkh264dec.c:
+	* ext/vulkan/vkh265dec.c:
+	  vulkanh26xdec: fix discont state handling
+	  It fixes a couple tests in fluster for H.265 decoding.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/9613>
+
+2025-08-17 15:58:22 -0400  Daniel Morin <daniel.morin@collabora.com>
+
+	* gst-libs/gst/analytics/gsttensormeta.c:
+	  analytics: always add GstTensorMeta
+	  Always add GstTensorMeta to buffer instead of re-using existing GstTensorMeta
+	  when it's already present. The reason for the change is when we have cascaded
+	  inference elements overwriting (tflite) or leaking (ONNX) GstTensorMeta when we
+	  have cascaded inferences. We didn't create and API to append to GstTensorMeta
+	  and I think it's more convenient to have a new GstTensorMeta for each
+	  inferences. It's also more clear that a group of tensor was produced by one
+	  inference but doesn't limit tensordecoders from using tensors produced by
+	  multiple inference. I don't see much value in having all tensors data always
+	  inside one GstTensorMeta since appending would mean re-allocation of the tensors
+	  array anyway.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/9601>
+
+2025-08-19 11:15:29 +0100  Ian Napier <ian@digitaledgesubsea.com>
+
+	* sys/decklink/gstdecklink.h:
+	* sys/decklink/gstdecklinkvideosrc.cpp:
+	  decklinkvideosrc: fix decklinkvideosrc becomes unrecoverable if it fails to start streaming
+	  See #2611
+	  When transitioning to PLAYING we call IDeckLinkInput::StartStreams() (via GstDecklinkInput::start_streams). This can
+	  fail for various reasons, including if the hardware device is already in use.
+	  Previously, we logged StartStreams() failure as an element error but otherwise continued to successfully transition to
+	  PLAYING. Now, if StartStreams() returns an error we fail the state change.
+	  If StartStreams() fails then a subsequent call to StopStreams(), when transitioning PAUSED to READY, will also fail.
+	  Previously, if StopStreams() failed then the state change also failed. Unfortunately this prevented the element from
+	  later being disposed, which in turn meant the associated hardware resources was never freed. Consequently, if a
+	  decklinkvideosrc failed to transition PAUSED to READY, then the associated hardware device could not subsequently be
+	  used by any other decklinkvideosrc.
+	  Now, we log an element error if StopStreams() fails but otherwise consider the state change to have succeeded. This
+	  means that the element can be disposed and the associated hardware resource released.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/9592>
+
+2025-08-15 13:02:57 +0200  Víctor Manuel Jáquez Leal <vjaquez@igalia.com>
+
+	* ext/vulkan/vkh264dec.c:
+	* ext/vulkan/vkh265dec.c:
+	  vulkanh26xdec: fix debug category name
+	  This is a regression from merge request !78011
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/9562>
+
+2025-08-15 12:06:45 +0200  Víctor Manuel Jáquez Leal <vjaquez@igalia.com>
+
+	* ext/vulkan/vkh264dec.c:
+	* ext/vulkan/vkh265dec.c:
+	  vulkanh26xdec: re-negotiate after FLUSH
+	  Vulkan decoders also have the same issue as VA decoders fixed in !9457, where
+	  FLUSH event doesn't renegotiate downstream the pipeline.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/9562>
+
+2025-08-14 15:55:41 +0200  Jan Alexander Steffens (heftig) <jan.steffens@ltnglobal.com>
+
+	* tests/check/elements/cccombiner.c:
+	  tests: cccombiner: Test durationless buffers
+	  Crashes without the previous fix.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/9559>
+
+2025-07-17 14:40:47 +0200  Jan Alexander Steffens (heftig) <jan.steffens@ltnglobal.com>
+
+	* ext/closedcaption/gstcccombiner.c:
+	  cccombiner: Don't crash when first frame has no duration
+	  Aggregate again so the code above can determine the end time or EOS.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/9559>
+
+2025-07-17 14:29:07 +0200  Jan Alexander Steffens (heftig) <jan.steffens@ltnglobal.com>
+
+	* ext/closedcaption/gstcccombiner.c:
+	  cccombiner: Avoid dividing by zero framerate
+	  This was broken in b29262e662b86cd76225894f7504ee505125fa49.
+	  The `gst_util_uint64_scale` emitted a critical warning and returned
+	  `GST_CLOCK_TIME_NONE`, so beyond removing the warning this fix does not
+	  change behavior.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/9559>
+
+2025-08-12 21:27:53 +0200  Víctor Manuel Jáquez Leal <vjaquez@igalia.com>
+
+	* tests/check/libs/vkimagebufferpool.c:
+	  test: vkimagebufferpool: silence validation
+	  The validation complained with
+	  VUID-VkImageCreateInfo-usage-requiredbitmask]:
+	  vkCreateImage(): pCreateInfo->usage is zero.
+	  This patch force to use the internal defaults in vkimagebufferpool if no usage
+	  is defined.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/9546>
+
+2025-08-12 14:24:12 +0200  Víctor Manuel Jáquez Leal <vjaquez@igalia.com>
+
+	* gst-libs/gst/vulkan/gstvkphysicaldevice.c:
+	  vkphysicaldevice: silence validation for features
+	  With merge request !9438 the validation layer started to complain with
+	  VUID-VkDeviceCreateInfo-pNext-02829
+	  This patch fixes this ill-usage of Vulkan API, by removing the feature enabling
+	  of sampler ycbcr conversion, since it was promoted since Vulkan 1.1, and in
+	  GStreamer is only used in Vulkan Video operations, which are only enabled in
+	  Vulkan 1.3+.
+	  Also, these features detection and enabling were moved to a function called when
+	  filling the physical device data, in order to check the API version of the
+	  device driver before adding the enabling of the feature.
+	  Finally, the getters were adapted to use the version feature structure if the
+	  device driver version matches.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/9546>
+
+2025-08-11 22:54:29 +1000  Jan Schmidt <jan@centricular.com>
+
+	* ext/hls/m3u8.c:
+	  hlsdemux: Fix parsing of byterange and init map directives
+	  Don't reuse the same offset and size variables when reading
+	  the byterange out of a MAP directive, as it can overwrite
+	  values from a pending BYTERANGE directive for the next
+	  fragment URI.
+	  Fixes problems where the EXT-X-MAP directive has been written
+	  into the playlist between an EXT-X-BYTERANGE and the fragment
+	  URI it applies to.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/9541>
+
+2025-08-08 17:38:33 +0800  Qian Hu (胡骞) <qian.hu@mediatek.com>
+
+	* gst-libs/gst/wayland/gstwldisplay.c:
+	  waylandsink: add some error handler for event dispatch
+	  if wl client got last_error, wl_display_dispatch_queue_pending
+	  will return -1, may lead to unhandled case, we should quit.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/9537>
+
+2025-08-08 07:13:24 +0200  Jan Alexander Steffens (heftig) <heftig@archlinux.org>
+
+	* tests/check/elements/zbar.c:
+	  zbar: tests: Handle symbol-bytes as not null-terminated
+	  Fixes: https://gitlab.freedesktop.org/gstreamer/gstreamer/-/issues/4592
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/9514>
+
+2025-08-07 19:15:29 +0100  Tim-Philipp Müller <tim@centricular.com>
+
+	* meson.build:
+	  Back to development after 1.26.5
+
 === release 1.26.5 ===
 
 2025-08-07 19:06:46 +0100  Tim-Philipp Müller <tim@centricular.com>

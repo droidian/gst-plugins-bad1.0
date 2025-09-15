@@ -107,6 +107,7 @@ struct _GstVulkanH264Decoder
   VkChromaLocation xloc, yloc;
 
   GstVideoCodecState *output_state;
+  GstVideoCodecState *input_state;
 
   SPS std_sps;
   PPS std_pps;
@@ -136,8 +137,8 @@ GST_STATIC_PAD_TEMPLATE ("src", GST_PAD_SRC, GST_PAD_ALWAYS,
 static gpointer
 _register_debug_category (gpointer data)
 {
-  GST_DEBUG_CATEGORY_INIT (gst_vulkan_h264_decoder_debug,
-      "gst_vulkan_h264_decoder_debug", 0, "Vulkan H.264 decoder");
+  GST_DEBUG_CATEGORY_INIT (gst_vulkan_h264_decoder_debug, "vulkanh264dec", 0,
+      "Vulkan H.264 decoder");
 
   return NULL;
 }
@@ -231,8 +232,8 @@ gst_vulkan_h264_decoder_stop (GstVideoDecoder * decoder)
   if (self->decoder)
     gst_vulkan_decoder_stop (self->decoder);
 
-  if (self->output_state)
-    gst_video_codec_state_unref (self->output_state);
+  g_clear_pointer (&self->output_state, gst_video_codec_state_unref);
+  g_clear_pointer (&self->input_state, gst_video_codec_state_unref);
 
   return GST_VIDEO_DECODER_CLASS (parent_class)->stop (decoder);
 }
@@ -299,14 +300,16 @@ static gboolean
 gst_vulkan_h264_decoder_negotiate (GstVideoDecoder * decoder)
 {
   GstVulkanH264Decoder *self = GST_VULKAN_H264_DECODER (decoder);
-  GstH264Decoder *h264dec = GST_H264_DECODER (decoder);
   VkVideoFormatPropertiesKHR format_prop;
   GstVideoInterlaceMode interlace_mode;
   GstVideoFormat format;
 
   /* Ignore downstream renegotiation request. */
-  if (!self->need_negotiation)
-    return TRUE;
+  if (!self->need_negotiation) {
+    GST_DEBUG_OBJECT (decoder,
+        "Input state hasn't changed, no need to reconfigure downstream caps");
+    goto bail;
+  }
 
   if (!gst_vulkan_decoder_out_format (self->decoder, &format_prop))
     return FALSE;
@@ -323,7 +326,7 @@ gst_vulkan_h264_decoder_negotiate (GstVideoDecoder * decoder)
 
   format = gst_vulkan_format_to_video_format (format_prop.format);
   self->output_state = gst_video_decoder_set_interlaced_output_state (decoder,
-      format, interlace_mode, self->width, self->height, h264dec->input_state);
+      format, interlace_mode, self->width, self->height, self->input_state);
 
   self->output_state->caps = gst_video_info_to_caps (&self->output_state->info);
   gst_caps_set_features_simple (self->output_state->caps,
@@ -333,6 +336,7 @@ gst_vulkan_h264_decoder_negotiate (GstVideoDecoder * decoder)
   GST_INFO_OBJECT (self, "Negotiated caps %" GST_PTR_FORMAT,
       self->output_state->caps);
 
+bail:
   return GST_VIDEO_DECODER_CLASS (parent_class)->negotiate (decoder);
 }
 
@@ -636,6 +640,9 @@ gst_vulkan_h264_decoder_new_sequence (GstH264Decoder * decoder,
   self->need_negotiation &= (width != self->width || height != self->height);
   self->width = width;
   self->height = height;
+
+  g_clear_pointer (&self->input_state, gst_video_codec_state_unref);
+  self->input_state = gst_video_codec_state_ref (decoder->input_state);
 
   /* Ycbcr sampler */
   {
@@ -1319,13 +1326,18 @@ gst_vulkan_h264_decoder_output_picture (GstH264Decoder * decoder,
 {
   GstVideoDecoder *vdec = GST_VIDEO_DECODER (decoder);
   GstVulkanH264Decoder *self = GST_VULKAN_H264_DECODER (decoder);
+  GstVideoCodecState *discont_state =
+      GST_CODEC_PICTURE (picture)->discont_state;
 
   GST_TRACE_OBJECT (self, "Output picture");
 
   GST_LOG_OBJECT (self,
       "Outputting picture %p (poc %d)", picture, picture->pic_order_cnt);
 
-  if (GST_CODEC_PICTURE (picture)->discont_state) {
+  if (discont_state) {
+    g_clear_pointer (&self->input_state, gst_video_codec_state_unref);
+    self->input_state = gst_video_codec_state_ref (discont_state);
+
     self->need_negotiation = TRUE;
     if (!gst_video_decoder_negotiate (vdec)) {
       gst_h264_picture_unref (picture);
