@@ -1,0 +1,38 @@
+#!/bin/sh
+
+set -eux
+
+WORKDIR=$(mktemp -d)
+export XDG_RUNTIME_DIR="$WORKDIR"
+cleanup () {
+    rm -fr "${WORKDIR:?}"
+}
+trap cleanup 0 INT QUIT ABRT PIPE TERM
+cd "$WORKDIR"
+
+if [ -n "${DEB_HOST_GNU_TYPE:-}" ]; then
+    CROSS_COMPILE="$DEB_HOST_GNU_TYPE-"
+else
+    CROSS_COMPILE=
+fi
+
+cat <<EOF > play_api.c
+#include <gst/play/gstplay.h>
+#include <stdio.h>
+
+int main(void)
+{
+    GType play_api = gst_play_state_get_type();
+    g_assert_cmpuint (play_api, !=, 0);
+    g_assert_cmpuint (play_api, !=, G_TYPE_INVALID);
+    return 0;
+}
+EOF
+
+# Deliberately word-splitting, that's how pkg-config works:
+# shellcheck disable=SC2046
+"${CROSS_COMPILE}gcc" -o play_api play_api.c $("${CROSS_COMPILE}pkgconf" --cflags --libs gstreamer-play-1.0)
+echo "build:  OK"
+[ -x ./play_api ]
+./play_api
+echo "run: OK"

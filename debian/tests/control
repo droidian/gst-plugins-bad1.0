@@ -2,3 +2,23 @@ Tests: build-and-test
 Depends: @builddeps@
 Restrictions: allow-stderr
 Architecture: !riscv64
+
+Test-Command: gst-transcoder-1.0 --help
+Depends: gstreamer1.0-plugins-bad-apps
+Restrictions: superficial
+
+Tests: libgstreamer-plugins-bad1.0-dev
+Depends: build-essential,
+         libgstreamer-plugins-bad1.0-dev,
+Restrictions: superficial, allow-stderr
+
+Tests: gir1.2-gst-plugins-bad-1.0
+Depends: gir1.2-gst-plugins-bad-1.0,
+         python3-gi,
+Restrictions: superficial
+
+# NOTE: gstreamer1.0-validate is, at the time of writing, not
+# available in Debian. Mark this test as skip-not-installable for now.
+Tests: validate
+Depends: gstreamer1.0-plugins-bad, gstreamer1.0-validate, xauth, xvfb
+Restrictions: superficial, allow-stderr, needs-internet, skip-not-installable
