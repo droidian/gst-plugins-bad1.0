@@ -295,6 +295,7 @@ Depends: gir1.2-gst-plugins-bad-1.0 (= ${binary:Version}),
          libopencv-dev (>= 2.3.0) [amd64 arm64 armel armhf mips64el ppc64el riscv64 s390x alpha powerpc ppc64 sparc64],
          ${misc:Depends}
 Conflicts: pitivi (<< 0.9999)
+Provides: ${gir:Provides}
 Description: GStreamer development files for libraries from the "bad" set
  GStreamer is a streaming media framework, based on graphs of filters
  which operate on media data.  Applications using this library can do
