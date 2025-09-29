@@ -293,6 +293,7 @@ Depends: gir1.2-gst-plugins-bad-1.0 (= ${binary:Version}),
          libgstreamer-plugins-base1.0-dev,
          libgstreamer1.0-dev,
          libopencv-dev (>= 2.3.0) [amd64 arm64 armel armhf mips64el ppc64el riscv64 s390x alpha powerpc ppc64 sparc64],
+         ${gir:Depends},
          ${misc:Depends}
 Conflicts: pitivi (<< 0.9999)
 Provides: ${gir:Provides}
