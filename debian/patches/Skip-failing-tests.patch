@@ -7,14 +7,31 @@ https://gitlab.freedesktop.org/gstreamer/gstreamer/-/issues/1244
 
 netsim:
 https://gitlab.freedesktop.org/gstreamer/gstreamer/-/issues/3000
----
- tests/check/meson.build | 4 ++--
- 1 file changed, 2 insertions(+), 2 deletions(-)
 
-Index: gst-plugins-bad1.0/tests/check/meson.build
-===================================================================
---- gst-plugins-bad1.0.orig/tests/check/meson.build
-+++ gst-plugins-bad1.0/tests/check/meson.build
+curlhttpsrc:
+https://gitlab.freedesktop.org/gstreamer/gstreamer/-/issues/4686
+---
+ tests/check/elements/curlhttpsrc.c |  2 +-
+ tests/check/meson.build            | 16 ++++++++--------
+ 2 files changed, 9 insertions(+), 9 deletions(-)
+
+diff --git a/tests/check/elements/curlhttpsrc.c b/tests/check/elements/curlhttpsrc.c
+index d0901d5..10cd7a6 100644
+--- a/tests/check/elements/curlhttpsrc.c
++++ b/tests/check/elements/curlhttpsrc.c
+@@ -903,7 +903,7 @@ curlhttpsrc_suite (void)
+ 
+   suite_add_tcase (s, tc_chain);
+   tcase_add_test (tc_chain, test_first_buffer_has_offset);
+-  tcase_add_test (tc_chain, test_redirect_yes);
++//  tcase_add_test (tc_chain, test_redirect_yes);
+   tcase_add_test (tc_chain, test_redirect_no);
+   tcase_add_test (tc_chain, test_not_found);
+   tcase_add_test (tc_chain, test_not_found_with_data);
+diff --git a/tests/check/meson.build b/tests/check/meson.build
+index 7e8606e..c5ea414 100644
+--- a/tests/check/meson.build
++++ b/tests/check/meson.build
 @@ -34,7 +34,7 @@ base_tests = [
    [['elements/autoconvert.c'], get_option('autoconvert').disabled()],
    [['elements/autovideoconvert.c'], get_option('autoconvert').disabled()],
