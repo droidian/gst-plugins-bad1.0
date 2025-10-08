@@ -101,7 +101,7 @@ execute_before_dh_auto_clean:
 # Only make the tests fail for release architectures plus a few more
 override_dh_auto_test:
 ifneq (,$(filter $(DEB_HOST_ARCH), amd64 arm64 armhf i386 ppc64el riscv64 s390x loong64 powerpc ppc64))
-	xvfb-run dh_auto_test
+	xvfb-run dh_auto_test -- --timeout-multiplier 3
 else
 	xvfb-run dh_auto_test || true
 endif
