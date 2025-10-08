@@ -127,7 +127,6 @@ Architecture: any
 Section: utils
 Depends: gstreamer1.0-plugins-bad (= ${binary:Version}),
          ${misc:Depends},
-         ${perl:Depends},
          ${shlibs:Depends}
 Conflicts: pitivi (<< 0.9999)
 Description: GStreamer helper programs from the "bad" set
@@ -196,10 +195,6 @@ Replaces: gstreamer1.0-plugins-bad (<< 1.17.2~)
 Recommends: opencv-data
 XB-GStreamer-Version: ${gstreamer:Version}
 XB-GStreamer-Elements: ${gstreamer:Elements}
-XB-GStreamer-URI-Sources: ${gstreamer:URISources}
-XB-GStreamer-URI-Sinks: ${gstreamer:URISinks}
-XB-GStreamer-Encoders: ${gstreamer:Encoders}
-XB-GStreamer-Decoders: ${gstreamer:Decoders}
 Description: GStreamer OpenCV plugins
  GStreamer is a streaming media framework, based on graphs of filters
  which operate on media data.  Applications using this library can do
@@ -316,7 +311,7 @@ Package: gir1.2-gst-plugins-bad-1.0
 Section: introspection
 Architecture: any
 Multi-Arch: same
-Depends: ${gir:Depends}, ${misc:Depends}, ${shlibs:Depends}
+Depends: ${gir:Depends}, ${misc:Depends}
 Provides: ${gir:Provides}
 Description: GObject introspection data for the GStreamer libraries from the "bad" set
  GStreamer is a streaming media framework, based on graphs of filters
