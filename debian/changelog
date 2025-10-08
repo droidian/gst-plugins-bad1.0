@@ -1,3 +1,10 @@
+gst-plugins-bad1.0 (1.26.6-4) unstable; urgency=medium
+
+  * Increase build test timeout for riscv64 autopkgtest
+  * Stop skipping the curl redirect build test (Closes: #1114141)
+
+ -- Jeremy Bícha <jbicha@ubuntu.com>  Wed, 08 Oct 2025 15:22:53 -0400
+
 gst-plugins-bad1.0 (1.26.6-3) unstable; urgency=medium
 
   * Team upload
