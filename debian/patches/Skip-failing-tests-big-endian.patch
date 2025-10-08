@@ -8,7 +8,7 @@ This could mean that openjpeg is broken on these architectures!
  1 file changed, 1 insertion(+), 1 deletion(-)
 
 diff --git a/tests/check/meson.build b/tests/check/meson.build
-index c5ea414..074f5f0 100644
+index c5ea414..38e7b70 100644
 --- a/tests/check/meson.build
 +++ b/tests/check/meson.build
 @@ -67,7 +67,7 @@ base_tests = [
