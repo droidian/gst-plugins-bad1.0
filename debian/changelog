@@ -1,3 +1,10 @@
+gst-plugins-bad1.0 (1.26.6-3) unstable; urgency=medium
+
+  * Team upload
+  * Fix logic error in big endian skip test patch
+
+ -- Jeremy Bícha <jbicha@ubuntu.com>  Wed, 08 Oct 2025 04:46:44 -0400
+
 gst-plugins-bad1.0 (1.26.6-2) unstable; urgency=medium
 
   * Team upload
