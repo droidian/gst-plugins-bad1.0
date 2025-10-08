@@ -1,3 +1,25 @@
+gst-plugins-bad1.0 (1.26.6-2) unstable; urgency=medium
+
+  * Team upload
+
+  [ Jeremy Bícha ]
+  * Skip a redirect test that began failing once curl was updated to 8.16
+    (Closes: #1098871. Mitigates: #1114141.)
+  * Add patches to skip specific tests on some architectures
+  * Stop ignoring non-skipped test failures on release architectures
+  * Add an autopkgtest to ensure that build tests still pass when dependencies
+    change
+  * Restore default soundfont patch (Closes: #1018145)
+
+  [ Simon McVittie ]
+  * d/control: Add Build-Depends on systematic names for gir1.2-*-dev packages
+  * d/control: Replace libgirepository1.0-dev B-D with gobject-introspection
+  * gir1.2-gst-plugins-bad-1.0: Add ${gir:Provides}
+  * libgstreamer-plugins-bad1.0-dev: Add ${gir:Provides}
+  * libgstreamer-plugins-bad1.0-dev: Add ${gir:Depends}
+
+ -- Jeremy Bícha <jbicha@ubuntu.com>  Tue, 07 Oct 2025 20:24:44 -0400
+
 gst-plugins-bad1.0 (1.26.6-1) unstable; urgency=medium
 
   * New upstream version 1.26.6
