@@ -1,3 +1,150 @@
+=== release 1.26.7 ===
+
+2025-10-14 18:25:43 +0100  Tim-Philipp Müller <tim@centricular.com>
+
+	* NEWS:
+	* RELEASE:
+	* gst-plugins-bad.doap:
+	* meson.build:
+	  Release 1.26.7
+
+2025-10-09 08:09:33 +0200  Branko Subasic <branko.subasic@axis.com>
+
+	* gst/mpegtsmux/gstbasetsmux.c:
+	  mpegtsmux: Properly check if pads are EOS in find_best_pad
+	  In find_best_pad(), when checking if a pad is EOS we use the macro
+	  GST_PAD_IS_EOS. But the aggregator pads will not propagate EOS received
+	  on it's sinkpads until it has received EOS on all of them. Instead the
+	  EOS event is put in the queue, which means that GST_PAD_IS_EOS will
+	  return FALSE.
+	  This makes find_best_pad() fail to find a best pad when all but one sink
+	  pad has received EOS, and have no data left in their queues, and the
+	  last one has data. The problem is solved by modifying find_best_pad() to
+	  use gst_aggregator_pad_is_eos() instead.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/9821>
+
+2025-10-08 14:05:07 +0200  Branko Subasic <branko.subasic@axis.com>
+
+	* ext/closedcaption/gstcea608mux.c:
+	  cea608mux: Properly check if pads are EOS in find_best_pad
+	  In find_best_pad(), when checking if a pad is EOS we use the macro
+	  GST_PAD_IS_EOS. But the aggregator pads will not propagate EOS received
+	  on it's sinkpads until it has received EOS on all of them. Instead the
+	  EOS event is put in the queue, which means that GST_PAD_IS_EOS will
+	  return FALSE.
+	  This makes find_best_pad() fail to find a best pad when all but one sink
+	  pad has received EOS, and have no data left in their queues, and the
+	  last one has data. The problem is solved by modifying find_best_pad() to
+	  use gst_aggregator_pad_is_eos() instead.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/9821>
+
+2025-10-07 12:25:07 +0100  Philippe Normand <philn@igalia.com>
+
+	* gst-libs/gst/webrtc/nice/nice.c:
+	  webrtc: nice: Fix a use-after-free and a mem leak
+	  `new_candidate` was freed too early and `new_addr` wasn't freed in case of early
+	  return from the on_candidate_resolved function.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/9816>
+
+2025-09-26 16:58:38 +0900  Seungha Yang <seungha@centricular.com>
+
+	* gst-libs/gst/cuda/gstcudanvrtc.cpp:
+	  cuda: Fix runtime kernel compile with CUDA 13.0
+	  Instead of hardcoded value, checks compute compatibility at runtime
+	  Fixes: https://gitlab.freedesktop.org/gstreamer/gstreamer/-/issues/4655
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/9769>
+
+2025-09-22 12:00:32 +0300  Sebastian Dröge <sebastian@centricular.com>
+
+	* gst/mpegtsdemux/tsdemux.c:
+	  tsdemux: Directly forward Opus AUs without `opus_control_header`
+	  ffmpeg does the same, assuming that it's raw Opus data.
+	  ZLMediaKit is producing MPEG-TS like this and probably nobody ever noticed
+	  because ffmpeg allows for this, so let's work around their bugs and handle it
+	  the same way as ffmpeg.
+	  See https://github.com/ZLMediaKit/ZLMediaKit/issues/4461
+	  Fixes https://gitlab.freedesktop.org/gstreamer/gstreamer/-/issues/4645
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/9765>
+
+2025-09-25 22:42:12 -0400  Doug Nazar <nazard@nazar.ca>
+
+	* ext/lv2/gstlv2utils.c:
+	* ext/teletextdec/gstteletextdec.c:
+	* gst/rist/gstristsink.c:
+	* gst/rist/gstristsrc.c:
+	* sys/decklink/gstdecklinkvideosink.cpp:
+	* sys/uvcgadget/gstuvcsink.c:
+	  gst: Fix a few small leaks
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/9761>
+
+2025-09-24 19:37:00 +0900  Seungha Yang <seungha@centricular.com>
+
+	* sys/d3d12/gstd3d12convert.cpp:
+	  d3d12convert: Fix crop meta support
+	  When in/output caps are identical, even if downstream didn't propose
+	  pool, always respond to support crop meta
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/9743>
+
+2025-09-23 09:06:09 +0300  Sebastian Dröge <sebastian@centricular.com>
+
+	* gst/mpegtsmux/gstbasetsmux.c:
+	  tsmux: Write a full Opus channel configuration if no matching Vorbis one is found
+	  Instead of simply failing negotiation despite the stream being supported.
+	  Without this the following pipeline will fail:
+	  audiotestsrc is-live=true ! audio/x-raw,channels=8 ! opusenc ! mpegtsmux ! fakesink
+	  opusenc selects the Vorbis channel layout family but a channel-mapping that is
+	  not one of the ones supported by the short MPEG-TS Opus channel configurations.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/9733>
+
+2025-09-22 10:09:48 +0800  Cheah, Vincent Beng Keat <vincent.beng.keat.cheah@intel.com>
+
+	* sys/va/gstvacompositor.c:
+	  vacompositor: Correct scale-method properties
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/9726>
+
+2025-09-08 17:50:32 -0400  Doug Nazar <nazard@nazar.ca>
+
+	* ext/closedcaption/gstcea608mux.c:
+	* gst/audiomixmatrix/gstaudiomixmatrix.c:
+	* gst/debugutils/gsttestsrcbin.c:
+	  gst: Don't use g_assert() around production code
+	  If G_DISABLE_ASSERT is defined the code will not be compiled.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/9721>
+
+2025-09-16 19:00:47 +0530  Nirbheek Chauhan <nirbheek@centricular.com>
+
+	* ext/isac/meson.build:
+	  isac: Suppress warning about -Wno-virtual-dtor on Fedora
+	  The absl pkgconfig files on Fedora contain -Wnon-virtual-dtor in
+	  Cflags: even though pc files should not contain -W flags. Worse, our
+	  plugin is written in C but that's a C++ argument so GCC emits
+	  a warning about that.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/9715>
+
+2025-09-16 16:38:22 -0700  Xavier Claessens <xclaessens@netflix.com>
+
+	* gst/unixfd/gstunixfd.c:
+	* tests/check/elements/unixfd.c:
+	  unixfd: Fix case of buffer with big payload
+	  In the case a buffer has big meta serialization, for example if it
+	  contains a GstBuffer, the payload cannot be sent/received in a single
+	  call.
+	  Idealy we should serialize metas into a memfd in that case, instead of
+	  writing the data on the socket.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/9706>
+
+2025-09-16 15:24:22 +0900  Seungha Yang <seungha@centricular.com>
+
+	* sys/d3d12/gstd3d12deinterlace.cpp:
+	  d3d12deinterlace: Fix passthrough handling
+	  Don't try to convert buffer when passthrough is enabled
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/9696>
+
+2025-09-14 13:19:28 +0100  Tim-Philipp Müller <tim@centricular.com>
+
+	* meson.build:
+	  Back to development after 1.26.6
+
 === release 1.26.6 ===
 
 2025-09-14 13:13:58 +0100  Tim-Philipp Müller <tim@centricular.com>
