@@ -110,7 +110,7 @@ find_best_pad (GstAggregator * aggregator, GstClockTime * ts, gboolean timeout)
 
         buffer = gst_aggregator_pad_peek_buffer (apad);
         if (!buffer) {
-          if (!timeout && !GST_PAD_IS_EOS (apad)) {
+          if (!timeout && !gst_aggregator_pad_is_eos (apad)) {
             gst_object_replace ((GstObject **) & best, NULL);
             best_ts = GST_CLOCK_TIME_NONE;
             done = TRUE;
@@ -363,11 +363,12 @@ gst_cea608_mux_negotiated_src_caps (GstAggregator * agg, GstCaps * caps)
   gint fps_n, fps_d;
   GstCea608Mux *self = GST_CEA608MUX (agg);
   GstClockTime latency;
+  gboolean success G_GNUC_UNUSED;       /* G_DISABLE_ASSERT */
 
   GST_INFO_OBJECT (agg->srcpad, "set src caps: %" GST_PTR_FORMAT, caps);
 
-  g_assert (gst_structure_get_fraction (s, "framerate", &fps_n,
-          &fps_d) == TRUE);
+  success = gst_structure_get_fraction (s, "framerate", &fps_n, &fps_d);
+  g_assert (success);
   self->cdp_fps_entry = cdp_fps_entry_from_fps (fps_n, fps_d);
   g_assert (self->cdp_fps_entry != NULL && self->cdp_fps_entry->fps_n != 0);
 

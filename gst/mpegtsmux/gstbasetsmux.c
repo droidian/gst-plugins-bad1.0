@@ -756,6 +756,7 @@ gst_base_ts_mux_create_or_update_stream (GstBaseTsMux * mux,
       goto not_negotiated;
     }
 
+    /* First check for the cases that have a simplified configuration */
     if (channels <= 2 && mapping_family == 0) {
       opus_channel_config[0] = channels;
       opus_channel_config_len = 1;
@@ -803,11 +804,11 @@ gst_base_ts_mux_create_or_update_stream (GstBaseTsMux * mux,
               channels) == 0) {
         opus_channel_config[0] = channels | 0x80;
         opus_channel_config_len = 1;
-      } else {
-        GST_FIXME_OBJECT (ts_pad, "Opus channel mapping not handled");
-        goto not_negotiated;
       }
-    } else {
+    }
+
+    /* If none of the simple cases matched, write out the full configuration */
+    if (opus_channel_config_len == 0) {
       GstBitWriter writer;
       guint i;
       guint n_bits;
@@ -2669,7 +2670,7 @@ gst_base_ts_mux_find_best_pad (GstAggregator * aggregator,
 
     buffer = gst_aggregator_pad_peek_buffer (apad);
     if (!buffer) {
-      if (!timeout && !GST_PAD_IS_EOS (apad)) {
+      if (!timeout && !gst_aggregator_pad_is_eos (apad)) {
         best = NULL;
         best_ts = GST_CLOCK_TIME_NONE;
         break;
