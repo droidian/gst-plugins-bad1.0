@@ -1,3 +1,9 @@
+gst-plugins-bad1.0 (1.26.7-1) unstable; urgency=medium
+
+  * New upstream version 1.26.7
+
+ -- Marc Leeman <marc.leeman@gmail.com>  Wed, 15 Oct 2025 10:05:19 +0200
+
 gst-plugins-bad1.0 (1.26.6-5) unstable; urgency=medium
 
   * autopkgtest: Don't run on riscv64
