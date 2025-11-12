@@ -117,7 +117,7 @@ Build-Depends: debhelper-compat (= 13),
                xvfb
 Build-Conflicts: libopenaptx-dev
 Rules-Requires-Root: no
-Standards-Version: 4.6.2
+Standards-Version: 4.7.2
 Vcs-Git: https://salsa.debian.org/gstreamer-team/gst-plugins-bad1.0.git
 Vcs-Browser: https://salsa.debian.org/gstreamer-team/gst-plugins-bad1.0/
 Homepage: https://gstreamer.freedesktop.org
