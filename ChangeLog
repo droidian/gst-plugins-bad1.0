@@ -1,3 +1,181 @@
+=== release 1.26.8 ===
+
+2025-11-10 17:22:05 +0000  Tim-Philipp Müller <tim@centricular.com>
+
+	* NEWS:
+	* RELEASE:
+	* gst-plugins-bad.doap:
+	* meson.build:
+	  Release 1.26.8
+
+2025-11-10 13:21:43 +0100  Kevin Scott <kevin.scott@axis.com>
+
+	* ext/dtls/gstdtlsconnection.c:
+	  dtlsconnection: Increase DTLS MTU to 1200
+	  Returning 0 defaults the MTU to 256 in OpenSSL, which is too small for some
+	  handshake messages. An MTU of 1200 prevents certificate fragmentation
+	  and potential message reordering. Chromium does something similar:
+	  https://chromium.googlesource.com/external/webrtc/+/06b8f7e/rtc_base/openssl_stream_adapter.cc#259
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/10055>
+
+2025-06-16 16:40:07 +0900  dongjoo.kim <dongjoo.kim@lge.com>
+
+	* gst-libs/gst/wayland/gstwllinuxdmabuf.c:
+	  wayland: Fix using uninitialized value of data.wbuf
+	  There are cases which it goes to "out" without initializing data.wbuf
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/10052>
+
+2025-11-04 13:48:12 +0200  Sebastian Dröge <sebastian@centricular.com>
+
+	* gst/timecode/gstavwait.c:
+	  avwait: Unify conditions between the different modes
+	  And as part of that fix a couple of mode changes while running, e.g.
+	  starting recording in video-first mode, then switching to running time mode and
+	  only setting an end running time.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/10040>
+
+2025-11-05 12:37:42 +0200  Rares Branici <rares.branici@senstar.com>
+
+	* gst-libs/gst/d3d12/gstd3d12converter.cpp:
+	  d3d12converter: Initialize video_direction
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/10024>
+
+2025-11-05 12:37:01 +0200  Rares Branici <rares.branici@senstar.com>
+
+	* gst-libs/gst/d3d11/gstd3d11converter.cpp:
+	  d3d11converter: Initialize video_direction
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/10024>
+
+2025-10-31 10:51:48 +0100  Loïc Le Page <llepage@igalia.com>
+
+	* gst-libs/gst/codecparsers/gsth264parser.c:
+	* tests/check/libs/h264parser.c:
+	  gsth264parser: fix uint32 to int32 truncation
+	  The H264 parser is using int32 to compute the framerate numerator and
+	  denominator while the SPS block holding the original values used for
+	  this computation are stored on uint32. On corner cases it may lead to a
+	  truncation of the final values leading to an invalid framerate.
+	  This patch is shifting right the numerator and denominator until both
+	  values may be stored on int32. It may introduce a small computation
+	  error with odd values but negligeable taking into account the huge
+	  initial values > max_int32.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/9973>
+
+2025-10-31 17:20:31 +0900  jeongmin kwak <jeongmin.kwak@lge.com>
+
+	* gst-libs/gst/mpegts/gst-scte-section.c:
+	  scte-section: fix resource leak in splice component parsing
+	  Free the `component` buffer in the error path of `gst_scte_section_parse()`
+	  to prevent a memory leak when an error occurs after allocation.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/9971>
+
+2025-10-26 16:06:26 +0000  Jan Schmidt <jan@centricular.com>
+
+	* gst/mpegtsmux/gstbasetsmux.c:
+	* gst/mpegtsmux/tsmux/tsmuxstream.c:
+	  mpegtsmux: Split large non-video PES packets
+	  MPEG-TS PES packets have a maximum payload size of 65535 bytes
+	  (including the header bytes). For larger incoming payloads,
+	  split them into maximum-size PES packets. Video packets are
+	  allowed to be unbounded
+	  When breaking incoming buffers across PES packet payloads, only
+	  the first should carry the incoming PTS/DTS
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/9954>
+
+2025-10-26 16:06:26 +0000  Jan Schmidt <jan@centricular.com>
+
+	* gst/mpegtsmux/tsmux/tsmuxstream.c:
+	  mpegtsmux: Use some named constants instead of hard-coded values
+	  Make some code a bit more readable
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/9954>
+
+2025-10-29 14:17:28 +0900  jeongmin kwak <jeongmin.kwak@lge.com>
+
+	* sys/v4l2codecs/gstv4l2decoder.c:
+	  v4l2codecs: Free sub-request on allocation failure
+	  If gst_vec_deque_pop_head() returns NULL, a new GstV4l2Request is allocated.
+	  Free it on MEDIA_IOC_REQUEST_ALLOC failure to avoid memory leak.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/9947>
+
+2025-08-09 22:51:03 +0900  Seungha Yang <seungha@centricular.com>
+
+	* sys/wasapi2/gstwasapi2activator.cpp:
+	  wasapi2: Tone down activation fail log
+	  If there's no endpoint available, that failure is expected error
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/9896>
+
+2025-08-05 00:41:34 +0900  Seungha Yang <seungha@centricular.com>
+
+	* sys/wasapi2/gstwasapi2activator.cpp:
+	* sys/wasapi2/gstwasapi2activator.h:
+	  wasapi2: Handle GetActivateResult failure
+	  Even if GetActivateResult() succeeded, activation result can fail.
+	  Checks output HRESULT code as well
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/9896>
+
+2025-10-25 16:14:49 +0100  He Junyan <junyan.he@intel.com>
+
+	* gst/videoparsers/gstav1parse.c:
+	  av1parse: Fix duplicated frames issue in frame splitting
+	  This fix a bug where we append two frames into one buffer despite trying to
+	  split stream into unique frames.
+	  Fixes #4701
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/9906>
+
+2025-04-01 14:46:23 -0400  Nicolas Dufresne <nicolas.dufresne@collabora.com>
+
+	* gst/codecalpha/gstalphacombine.c:
+	  alphacombine: Only reset once both pads are done flushing
+	  Since reset also removes the blocking pad probe, this meant that the
+	  new mechanism only worked if the main pads received flush-stop first.
+	  Keep both pad implementation symmetrical and reset once both pads
+	  have received the event.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/9905>
+
+2025-10-16 14:34:48 +0200  Jan Alexander Steffens (heftig) <jan.steffens@ltnglobal.com>
+
+	* gst/mpegtsmux/tsmux/tsmux.c:
+	  tsmux: Reset PUSI flag after writing stream packet
+	  Otherwise we might accidentally set it on a PCR-only packet when we pad
+	  the stream on a subsequent write.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/9899>
+
+2025-10-16 11:35:57 -0400  Nicolas Dufresne <nicolas.dufresne@collabora.com>
+
+	* gst/rist/gstristsink.c:
+	  ristsink: Fix double free regression
+	  The rtpext element was leaked in error path and fixed in MR !9756, but the
+	  rtpext owner ship is later passed to a bin using gst_bin_add(). Ref-sync the
+	  rtpext element so we can unref it in finalize() function without any special
+	  cases.
+	  Fixes #4707
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/9859>
+
+2024-09-21 00:53:11 +0200  Michael Grzeschik <m.grzeschik@pengutronix.de>
+
+	* sys/uvcgadget/gstuvcsink.c:
+	  uvcgadget: always ensure to switch to fakesink
+	  In the case we transition the uvcsink to toggle between ready and
+	  playing we have to ensure to always switch between fakesink and
+	  v4l2sink.
+	  Using the already linked v4l2sink a second time does curr ntly not work
+	  when we restart the stream and therefor switch to streaming again.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/9860>
+
+2025-10-15 11:38:29 +0200  David Maseda Neira <david.maseda@cinfo.es>
+
+	* ext/x265/gstx265enc.c:
+	  x265enc: Calculate latency based on encoder parameters
+	  Estimate latency based on lookahead queue depth + bframes + number of
+	  encoding threads.
+	  Fixes https://gitlab.freedesktop.org/gstreamer/gstreamer/-/issues/4697
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/9852>
+
+2025-10-14 18:34:39 +0100  Tim-Philipp Müller <tim@centricular.com>
+
+	* meson.build:
+	  Back to development after 1.26.7
+
 === release 1.26.7 ===
 
 2025-10-14 18:25:43 +0100  Tim-Philipp Müller <tim@centricular.com>
