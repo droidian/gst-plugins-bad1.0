@@ -1,3 +1,160 @@
+=== release 1.26.9 ===
+
+2025-12-01 17:27:07 +0000  Tim-Philipp Müller <tim@centricular.com>
+
+	* NEWS:
+	* RELEASE:
+	* gst-plugins-bad.doap:
+	* meson.build:
+	  Release 1.26.9
+
+2025-12-01 17:58:22 +0200  Sebastian Dröge <sebastian@centricular.com>
+
+	* gst/mxf/mxfmux.c:
+	  mxfmux: Fix memset usage
+	  This was supposed to clear the local, stack-allocated struct and not set another
+	  pointer to NULL in a complicated way.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/10255>
+
+2025-11-20 12:42:48 -0500  Nicolas Dufresne <nicolas.dufresne@collabora.com>
+
+	* gst/unixfd/gstunixfdsrc.c:
+	  unixfdsrc: Keep dmabuf mapped
+	  The unixfdsrc has as equal use for CPU access and device access. Keeping the CPU
+	  address mapping is preferable, with not down side for device access.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/10164>
+
+2025-11-20 12:41:10 -0500  Nicolas Dufresne <nicolas.dufresne@collabora.com>
+
+	* gst-libs/gst/va/gstvaallocator.c:
+	  va: allocator: Keep dmabuf mapped
+	  VA buffers are rarely access from CPU, but if this is someone use case, it is
+	  preferable to keep the CPU address mapping around since this isn't cheap to
+	  create each time we map/unmap the buffer.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/10164>
+
+2025-12-01 13:00:14 +0200  Sebastian Dröge <sebastian@centricular.com>
+
+	* gst/mpegtsdemux/tsdemux.c:
+	  tsdemux: Consider DTS in private streams as audio instead of private
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/10251>
+
+2025-11-21 15:48:05 -0500  Dominique Leroux <dominique.p.leroux@gmail.com>
+
+	* sys/applemedia/vtdec.c:
+	  vtdec: Fix race condition in decoder draining. Fluster runs were unstable
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/10231>
+
+2025-10-15 06:49:03 +0530  Nirbheek Chauhan <nirbheek@centricular.com>
+
+	* ext/sctp/sctpassociation.c:
+	  sctp: Fix GMutex leak
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/10141>
+
+2025-10-15 04:35:27 +0530  Nirbheek Chauhan <nirbheek@centricular.com>
+
+	* sys/applemedia/vtenc.c:
+	  vtenc: Fix a leak when setting caps
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/10141>
+
+2025-11-21 10:59:14 +0100  Hyunjun Ko <zzoon@igalia.com>
+
+	* gst-libs/gst/vulkan/gstvkvideo-private.c:
+	* gst-libs/gst/vulkan/gstvkvideo-private.h:
+	  vkvideo-private: Replace GstBuffer with GstMemory array for video sessions
+	  GstBuffer has a maximum limit on the number of memories it can hold
+	  (GST_BUFFER_MEM_MAX, typically 16). However, Vulkan video sessions
+	  can require more memories than this limit - for example, AV1 decoding
+	  on ANV requires over 30 memories.
+	  This fixes AV1 decoding on ANV and any other scenarios where video
+	  sessions require more than 16 memory allocations.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/10185>
+
+2025-11-20 14:04:59 +0100  Hyunjun Ko <zzoon@igalia.com>
+
+	* gst-libs/gst/vulkan/gstvkvideo-private.c:
+	  vkvideo-private: fix to use correct index for picking a memory type
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/10185>
+
+2025-11-21 11:41:41 +0200  Sebastian Dröge <sebastian@centricular.com>
+
+	* sys/aja/gstajasink.cpp:
+	  ajasink: Remove parity bits from ancillary meta DID/SDID before passing further
+	  The GstAncillaryMeta contains the parity bits but the AJA SDK expects them
+	  without.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/10171>
+
+2025-11-20 13:48:16 +0100  Hyunjun Ko <zzoon@igalia.com>
+
+	* ext/vulkan/vkh265dec.c:
+	  vkh265dec: fix a typo
+	  This fixes also H265 decoding with LTR on ANV.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/10170>
+
+2024-03-15 23:11:20 +1100  Jan Schmidt <jan@centricular.com>
+
+	* gst/mpegtsmux/tsmux/tsmux.c:
+	  mpegtsmux: Avoid infinite recursion writing PCR packets
+	  If scheduling a PCR packet from tsmux_packet_out(), or
+	  already writing one, don't do the PCR checks that can
+	  recurse infinitely and crash.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/10150>
+
+2025-11-05 15:37:25 +0100  Jordan Yelloz <jordan.yelloz@collabora.com>
+
+	* gst-libs/gst/play/gstplay.c:
+	  gstplay: Fixed wrong initial configuration
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/10122>
+
+2025-11-17 10:24:17 +0900  dongjoo.kim <dongjoo.kim@lge.com>
+
+	* gst/mxf/mxfffv1.c:
+	  mxfdemux: Fix typo on mxf_ffv1_create_caps
+	  In this section, the p value cannot be NULL, so it is dead code.
+	  However, if you refer to the code in mxf_ffv1_get_track_wrapping,
+	  you can see that you should check desc, not p.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/10116>
+
+2025-11-03 11:23:36 +0900  jeongmin kwak <jeongmin.kwak@lge.com>
+
+	* gst-libs/gst/mpegts/gst-scte-section.c:
+	  scte-section: fix missing cleanup and clarify event ownership on parse failure
+	  Free only the allocated component when _parse_splice_component() fails,
+	  leaving event cleanup to the caller to maintain proper ownership.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/10093>
+
+2025-11-12 16:53:32 -0800  Matthew Semeniuk <megaman22342@live.ca>
+
+	* gst-libs/gst/vulkan/gstvkqueue.h:
+	  vulkan: add G_DECLS to gstvkqueue
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/10085>
+
+2025-11-12 16:53:05 -0800  Matthew Semeniuk <megaman22342@live.ca>
+
+	* gst-libs/gst/vulkan/gstvkcommandpool.h:
+	  vulkan: add G_DECLS to gstvkcommandpool
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/10085>
+
+2025-06-18 14:25:17 +0900  dongjoo.kim <dongjoo.kim@lge.com>
+
+	* gst/id3tag/id3tag.c:
+	  id3tag: Fix resource leak
+	  When latin1 is not NULL and latin1[0] is '\0'
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/10067>
+
+2025-10-31 16:59:45 +0900  jeongmin kwak <jeongmin.kwak@lge.com>
+
+	* gst-libs/gst/analytics/gstanalyticsmeta.c:
+	  analyticsmeta: Initialize span to avoid undefined behavior
+	  Fix uninitialized scalar variable by setting 'span' when max_relation_span is non-negative.
+	  Prevents potential issues when accessing adjacency matrix.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/10060>
+
+2025-11-10 17:30:54 +0000  Tim-Philipp Müller <tim@centricular.com>
+
+	* meson.build:
+	  Back to development after 1.26.8
+
 === release 1.26.8 ===
 
 2025-11-10 17:22:05 +0000  Tim-Philipp Müller <tim@centricular.com>
