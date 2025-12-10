@@ -1,0 +1,27 @@
+#!/bin/sh
+
+set -eux
+
+export G_MESSAGES_DEBUG=all
+echo "Environment:"
+env | LC_ALL=C sort -u
+
+xvfb-run -a \
+gst-validate-1.0 \
+	--set-scenario play_5s \
+	playbin3 'uri=https://gitlab.freedesktop.org/gstreamer/gst-integration-testsuites/-/raw/main/defaults/bipbop/bipbopall.m3u8?ref_type=heads'
+
+xvfb-run -a \
+gst-validate-1.0 \
+	--set-scenario fast_forward \
+	playbin3 'uri=http://devimages.apple.com/iphone/samples/bipbop/gear4/prog_index.m3u8'
+
+# Check the h265 parser is somewhat functional.
+GST_DEBUG='*h265*:5' gst-launch-1.0 urisourcebin 'uri=https://gitlab.freedesktop.org/gstreamer/gst-integration-testsuites/-/raw/main/defaults/h265/alternate.h265?ref_type=heads' ! queue ! h265parse ! fakesink 2>&1 | grep 'Complete nal found'
+if [ $? -eq 0 ]; then
+    echo "OK: 'Complete nal found' was detected in h265 parser."
+    exit 0
+else
+    echo "FAILED: 'Complete nal found' was NOT found by h265 parser."
+    exit 1
+fi

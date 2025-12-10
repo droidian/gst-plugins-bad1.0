@@ -107,7 +107,7 @@ gst_vulkan_video_session_create (GstVulkanVideoSession * session,
   VkVideoSessionMemoryRequirementsKHR *mem = NULL;
   VkBindVideoSessionMemoryInfoKHR *bind_mem = NULL;
   VkResult res;
-  guint32 i, n_mems, index;
+  guint32 i, n_mems;
   gboolean ret = FALSE;
 
   g_return_val_if_fail (session && !session->session, FALSE);
@@ -137,7 +137,8 @@ gst_vulkan_video_session_create (GstVulkanVideoSession * session,
           "vkGetVideoSessionMemoryRequirementsKHR") != VK_SUCCESS)
     goto beach;
 
-  session->buffer = gst_buffer_new ();
+  session->video_mems = g_malloc0 (sizeof (GstMemory *) * n_mems);
+  session->n_mems = n_mems;
   mem_req = g_new (VkMemoryRequirements2, n_mems);
   mem = g_new (VkVideoSessionMemoryRequirementsKHR, n_mems);
   bind_mem = g_new (VkBindVideoSessionMemoryInfoKHR, n_mems);
@@ -163,9 +164,8 @@ gst_vulkan_video_session_create (GstVulkanVideoSession * session,
     GstMemory *vk_mem;
     VkPhysicalDeviceMemoryProperties *props;
     VkMemoryPropertyFlags prop_flags;
+    guint index;
 
-    props = &device->physical_device->memory_properties;
-    prop_flags = props->memoryTypes[i].propertyFlags;
     if (!gst_vulkan_memory_find_memory_type_index_with_requirements (device,
             &mem[i].memoryRequirements, G_MAXUINT32, &index)) {
       g_set_error (error, GST_VULKAN_ERROR, VK_ERROR_INITIALIZATION_FAILED,
@@ -173,14 +173,17 @@ gst_vulkan_video_session_create (GstVulkanVideoSession * session,
       goto beach;
     }
 
+    props = &device->physical_device->memory_properties;
+    prop_flags = props->memoryTypes[index].propertyFlags;
+
     vk_mem = gst_vulkan_memory_alloc (device, index, NULL,
         mem[i].memoryRequirements.size, prop_flags);
     if (!vk_mem) {
       g_set_error (error, GST_VULKAN_ERROR, VK_ERROR_INITIALIZATION_FAILED,
-          "Cannot allocate memory for video sesson");
+          "Cannot allocate memory for video session");
       goto beach;
     }
-    gst_buffer_append_memory (session->buffer, vk_mem);
+    session->video_mems[i] = vk_mem;
 
     /* *INDENT-OFF* */
     bind_mem[i] = (VkBindVideoSessionMemoryInfoKHR) {
@@ -214,7 +217,11 @@ gst_vulkan_video_session_destroy (GstVulkanVideoSession * session)
   g_return_if_fail (session);
 
   gst_clear_vulkan_handle (&session->session);
-  gst_clear_buffer (&session->buffer);
+
+  for (guint i = 0; i < session->n_mems; i++)
+    gst_memory_unref (session->video_mems[i]);
+
+  g_free (session->video_mems);
 }
 
 GstBuffer *

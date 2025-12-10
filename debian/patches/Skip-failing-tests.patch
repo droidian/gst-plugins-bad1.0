@@ -8,13 +8,13 @@ https://gitlab.freedesktop.org/gstreamer/gstreamer/-/issues/1244
 netsim:
 https://gitlab.freedesktop.org/gstreamer/gstreamer/-/issues/3000
 ---
- tests/check/meson.build | 4 ++--
- 1 file changed, 2 insertions(+), 2 deletions(-)
+ tests/check/meson.build | 16 ++++++++--------
+ 1 file changed, 8 insertions(+), 8 deletions(-)
 
-Index: gst-plugins-bad1.0/tests/check/meson.build
-===================================================================
---- gst-plugins-bad1.0.orig/tests/check/meson.build
-+++ gst-plugins-bad1.0/tests/check/meson.build
+diff --git a/tests/check/meson.build b/tests/check/meson.build
+index 7e8606e..c5ea414 100644
+--- a/tests/check/meson.build
++++ b/tests/check/meson.build
 @@ -34,7 +34,7 @@ base_tests = [
    [['elements/autoconvert.c'], get_option('autoconvert').disabled()],
    [['elements/autovideoconvert.c'], get_option('autoconvert').disabled()],

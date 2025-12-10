@@ -1497,7 +1497,7 @@ create_pad_for_stream (MpegTSBase * base, MpegTSBaseStream * bstream,
         case DRF_ID_DTS2:
         case DRF_ID_DTS3:
           /* SMPTE registered DTS */
-          is_private = TRUE;
+          is_audio = TRUE;
           caps = gst_caps_new_empty_simple ("audio/x-dts");
           break;
         case DRF_ID_S302M:
@@ -3158,14 +3158,25 @@ static GstBufferList *
 parse_opus_access_unit (TSDemuxStream * stream)
 {
   GstByteReader reader;
+  guint16 id;
   GstBufferList *buffer_list = NULL;
 
   buffer_list = gst_buffer_list_new ();
   gst_byte_reader_init (&reader, stream->data, stream->current_size);
 
+  if (!gst_byte_reader_peek_uint16_be (&reader, &id))
+    goto error;
+
+  /* No control header at the beginning of the access unit -- assume raw Opus */
+  if ((id >> 5) != 0x3ff) {
+    GstBuffer *buffer =
+        gst_buffer_new_wrapped (stream->data, stream->current_size);
+    gst_buffer_list_add (buffer_list, buffer);
+    return buffer_list;
+  }
+
   do {
     GstBuffer *buffer;
-    guint16 id;
     guint au_size = 0;
     guint8 b;
     gboolean start_trim_flag, end_trim_flag, control_extension_flag;

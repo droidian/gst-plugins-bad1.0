@@ -756,6 +756,7 @@ gst_base_ts_mux_create_or_update_stream (GstBaseTsMux * mux,
       goto not_negotiated;
     }
 
+    /* First check for the cases that have a simplified configuration */
     if (channels <= 2 && mapping_family == 0) {
       opus_channel_config[0] = channels;
       opus_channel_config_len = 1;
@@ -803,11 +804,11 @@ gst_base_ts_mux_create_or_update_stream (GstBaseTsMux * mux,
               channels) == 0) {
         opus_channel_config[0] = channels | 0x80;
         opus_channel_config_len = 1;
-      } else {
-        GST_FIXME_OBJECT (ts_pad, "Opus channel mapping not handled");
-        goto not_negotiated;
       }
-    } else {
+    }
+
+    /* If none of the simple cases matched, write out the full configuration */
+    if (opus_channel_config_len == 0) {
       GstBitWriter writer;
       guint i;
       guint n_bits;
@@ -973,10 +974,10 @@ gst_base_ts_mux_create_or_update_stream (GstBaseTsMux * mux,
     goto error;
   }
 
-  if (ts_pad->stream && st != ts_pad->stream->stream_type) {
+  if (ts_pad->stream && st != ts_pad->stream->internal_stream_type) {
     GST_ELEMENT_ERROR (mux, STREAM, MUX,
         ("Stream type change from %02x to %02x not supported",
-            ts_pad->stream->stream_type, st), NULL);
+            ts_pad->stream->internal_stream_type, st), NULL);
     goto error;
   }
 
@@ -1695,15 +1696,6 @@ gst_base_ts_mux_aggregate_buffer (GstBaseTsMux * mux,
   if (best->stream->gst_stream_type == GST_STREAM_TYPE_VIDEO) {
     delta = GST_BUFFER_FLAG_IS_SET (buf, GST_BUFFER_FLAG_DELTA_UNIT);
     header = GST_BUFFER_FLAG_IS_SET (buf, GST_BUFFER_FLAG_HEADER);
-  }
-
-  if (best->stream->internal_stream_type == TSMUX_ST_PS_KLV &&
-      gst_buffer_get_size (buf) > (G_MAXUINT16 - 3)) {
-    GST_WARNING_OBJECT (mux, "KLV meta unit too big, splitting not supported");
-
-    gst_buffer_unref (buf);
-    g_mutex_unlock (&mux->lock);
-    return GST_FLOW_OK;
   }
 
   GST_DEBUG_OBJECT (mux, "delta: %d", delta);
@@ -2669,7 +2661,7 @@ gst_base_ts_mux_find_best_pad (GstAggregator * aggregator,
 
     buffer = gst_aggregator_pad_peek_buffer (apad);
     if (!buffer) {
-      if (!timeout && !GST_PAD_IS_EOS (apad)) {
+      if (!timeout && !gst_aggregator_pad_is_eos (apad)) {
         best = NULL;
         best_ts = GST_CLOCK_TIME_NONE;
         break;

@@ -1,0 +1,52 @@
+#!/usr/bin/env python3
+
+import sys
+import gi
+import importlib
+
+
+def simple_api_check(module: str, object_name: str, version='1.0'):
+    """
+    Ensure the GIR can be loaded and seen to contain basic types
+    for the specified module (e.g., GstWebRTC).
+    """
+    try:
+        gi.require_version(module, version)
+        full_module_name = f'gi.repository.{module}'
+        mod = importlib.import_module(full_module_name)
+
+        _ = getattr(mod, object_name)
+
+        print(f"OK: API objects are present for {module}")
+        return True
+
+    except ValueError as e:
+        print(f"FAILURE: Could not require {module} v{version}. "
+              "Library installation is broken.", file=sys.stderr)
+        print(f"Error details: {e}", file=sys.stderr)
+        return False
+
+    except (ImportError, ModuleNotFoundError) as e:
+        print(f"FAILURE: Could not dynamically import '{full_module_name}'.",
+              file=sys.stderr)
+        print(f"Error details: {e}", file=sys.stderr)
+        return False
+
+    except AttributeError:
+        print(f"FAILURE: Object '{object_name}' not found in module "
+              "'{module}'.", file=sys.stderr)
+        return False
+
+    except Exception as e:
+        print(f"FAILURE: Unexpected error: {e}", file=sys.stderr)
+        return False
+
+
+tests = [
+        simple_api_check('GstWebRTC', 'WebRTCDataChannelClass', '1.0'),
+        simple_api_check('GstCuda', 'CudaContext', '1.0'),
+        simple_api_check('GstPlay', 'Play', '1.0'),
+]
+
+all_ok = all([test for test in tests])
+sys.exit(0 if all_ok else 1)

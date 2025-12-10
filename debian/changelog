@@ -1,3 +1,83 @@
+gst-plugins-bad1.0 (1.26.9-1) unstable; urgency=medium
+
+  * d/control: bump Standards-Version to 4.7.2
+  * New upstream version 1.26.9
+
+ -- Marc Leeman <marc.leeman@gmail.com>  Tue, 02 Dec 2025 09:50:33 +0100
+
+gst-plugins-bad1.0 (1.26.8-1) unstable; urgency=medium
+
+  * New upstream version 1.26.8
+
+ -- Marc Leeman <marc.leeman@gmail.com>  Wed, 12 Nov 2025 10:45:58 +0100
+
+gst-plugins-bad1.0 (1.26.7-2) unstable; urgency=medium
+
+  * Team upload
+
+  [ Marc Leeman ]
+  * d/control: bump meson version to match meson.build
+
+  [ Charles ]
+  * Add several more autopkgtests
+
+ -- Jeremy Bícha <jbicha@ubuntu.com>  Mon, 03 Nov 2025 17:48:43 -0500
+
+gst-plugins-bad1.0 (1.26.7-1) unstable; urgency=medium
+
+  * New upstream version 1.26.7
+
+ -- Marc Leeman <marc.leeman@gmail.com>  Wed, 15 Oct 2025 10:05:19 +0200
+
+gst-plugins-bad1.0 (1.26.6-5) unstable; urgency=medium
+
+  * autopkgtest: Don't run on riscv64
+  * Revert increasing the build test timeout since it was ineffective
+
+ -- Jeremy Bícha <jbicha@ubuntu.com>  Thu, 09 Oct 2025 11:42:50 -0400
+
+gst-plugins-bad1.0 (1.26.6-4) unstable; urgency=medium
+
+  * Increase build test timeout for riscv64 autopkgtest
+  * Stop skipping the curl redirect build test (Closes: #1114141)
+
+ -- Jeremy Bícha <jbicha@ubuntu.com>  Wed, 08 Oct 2025 15:22:53 -0400
+
+gst-plugins-bad1.0 (1.26.6-3) unstable; urgency=medium
+
+  * Team upload
+  * Fix logic error in big endian skip test patch
+
+ -- Jeremy Bícha <jbicha@ubuntu.com>  Wed, 08 Oct 2025 04:46:44 -0400
+
+gst-plugins-bad1.0 (1.26.6-2) unstable; urgency=medium
+
+  * Team upload
+
+  [ Jeremy Bícha ]
+  * Skip a redirect test that began failing once curl was updated to 8.16
+    (Closes: #1098871. Mitigates: #1114141.)
+  * Add patches to skip specific tests on some architectures
+  * Stop ignoring non-skipped test failures on release architectures
+  * Add an autopkgtest to ensure that build tests still pass when dependencies
+    change
+  * Restore default soundfont patch (Closes: #1018145)
+
+  [ Simon McVittie ]
+  * d/control: Add Build-Depends on systematic names for gir1.2-*-dev packages
+  * d/control: Replace libgirepository1.0-dev B-D with gobject-introspection
+  * gir1.2-gst-plugins-bad-1.0: Add ${gir:Provides}
+  * libgstreamer-plugins-bad1.0-dev: Add ${gir:Provides}
+  * libgstreamer-plugins-bad1.0-dev: Add ${gir:Depends}
+
+ -- Jeremy Bícha <jbicha@ubuntu.com>  Tue, 07 Oct 2025 20:24:44 -0400
+
+gst-plugins-bad1.0 (1.26.6-1) unstable; urgency=medium
+
+  * New upstream version 1.26.6
+
+ -- Marc Leeman <marc.leeman@gmail.com>  Mon, 15 Sep 2025 10:59:29 +0200
+
 gst-plugins-bad1.0 (1.26.5-2) unstable; urgency=medium
 
   * trixie has been released, re-upload to unstable

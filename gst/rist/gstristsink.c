@@ -561,6 +561,7 @@ gst_rist_sink_init (GstRistSink * sink)
   GstPadTemplate *pad_template;
 
   sink->rtpext = gst_element_factory_make ("ristrtpext", "ristrtpext");
+  gst_object_ref_sink (sink->rtpext);
 
   g_mutex_init (&sink->bonds_lock);
   sink->bonds = g_ptr_array_new ();
@@ -1322,7 +1323,8 @@ gst_rist_sink_finalize (GObject * object)
   }
   g_ptr_array_free (sink->bonds, TRUE);
 
-  g_clear_object (&sink->rtxbin);
+  gst_clear_object (&sink->rtxbin);
+  gst_clear_object (&sink->rtpext);
 
   g_mutex_unlock (&sink->bonds_lock);
   g_mutex_clear (&sink->bonds_lock);

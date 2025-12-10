@@ -101,7 +101,7 @@ override_dh_auto_configure:
 execute_before_dh_auto_clean:
 	rm -rf $(CURDIR)/fake-home
 
-# Only make the tests fail for key architectures
+# Only make the tests fail for release architectures plus a few more
 override_dh_auto_test:
 
 override_dh_makeshlibs:
