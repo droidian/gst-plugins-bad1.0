@@ -41,6 +41,7 @@ conf_flags += -Dsvtjpegxs=disabled
 conf_flags += -Dtflite-edgetpu=disabled
 conf_flags += -Dwpe2=disabled
 conf_flags += -Dmpeghdec=disabled
+conf_flags += -Dvmaf=disabled
 # Unmaintained library
 conf_flags += -Dmsdk=disabled
 # Only available on Windows
