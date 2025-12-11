@@ -1,2 +1,3 @@
 02_opencv-data-path.patch
 Skip-failing-tests.patch
+0001_meson-vmaf_dep-missing-variable.patch
