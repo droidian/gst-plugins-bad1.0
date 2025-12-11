@@ -1,3 +1,21 @@
+gst-plugins-bad1.0 (1.27.50-1) experimental; urgency=medium
+
+  [ Dylan Aïssi ]
+  * Build the TensorFlow Lite (LiteRT) plugin
+
+  [ Marc Leeman ]
+  * New upstream version 1.27.50
+  * d/control: update dependencies to >= 1.27.50
+  * d/patches: refresh Skip-failing-tests
+  * d/rules: disable mpeghdec, not in debian
+  * d/rules: disable vmaf, not in debian
+  * d/patches: avoid vmaf_dep in checks when vmaf is disabled
+  * d/rules: disable vulkan, dependency sdl3 not in debian
+  * d/control: remove libvulkan-dev because of sdl3 dep
+  * d/install: install libgsthip
+
+ -- Marc Leeman <marc.leeman@gmail.com>  Thu, 11 Dec 2025 12:51:31 +0100
+
 gst-plugins-bad1.0 (1.27.2-1) experimental; urgency=medium
 
   * New upstream version 1.27.2
