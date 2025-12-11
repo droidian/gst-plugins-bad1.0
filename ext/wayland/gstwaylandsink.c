@@ -46,6 +46,7 @@
 
 #include <drm_fourcc.h>
 #include <gst/allocators/allocators.h>
+#include <gst/video/gstvideodmabufpool.h>
 #include <gst/video/videooverlay.h>
 
 /* signals */
@@ -61,6 +62,7 @@ enum
   PROP_0,
   PROP_DISPLAY,
   PROP_FULLSCREEN,
+  PROP_FULLSCREEN_OUTPUT,
   PROP_ROTATE_METHOD,
   PROP_DRM_DEVICE,
   PROP_FORCE_ASPECT_RATIO,
@@ -164,6 +166,16 @@ gst_wayland_sink_class_init (GstWaylandSinkClass * klass)
           G_PARAM_STATIC_STRINGS));
 
   /**
+   * waylandsink:fullscreen-output:
+   *
+   * Since: 1.28
+   */
+  g_object_class_install_property (gobject_class, PROP_FULLSCREEN_OUTPUT,
+      g_param_spec_string ("fullscreen-output", "Wayland Output name",
+          "The name of the wayland output to fullscreen to.", NULL,
+          G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
+
+  /**
    * waylandsink:rotate-method:
    *
    * Since: 1.22
@@ -224,15 +236,20 @@ gst_wayland_sink_init (GstWaylandSink * self)
 
 /* must be called with the OBJECT_LOCK */
 static void
-gst_wayland_sink_set_fullscreen (GstWaylandSink * self, gboolean fullscreen)
+gst_wayland_sink_set_fullscreen (GstWaylandSink * self, gboolean fullscreen,
+    const gchar * fullscreen_output)
 {
-  if (fullscreen == self->fullscreen)
-    return;
-
   self->fullscreen = fullscreen;
+
+  if (self->fullscreen_output != fullscreen_output) {
+    g_free (self->fullscreen_output);
+    self->fullscreen_output = g_strdup (fullscreen_output);
+  }
+
   if (self->window) {
     g_mutex_lock (&self->render_lock);
-    gst_wl_window_ensure_fullscreen (self->window, fullscreen);
+    gst_wl_window_ensure_fullscreen_for_output (self->window, fullscreen,
+        fullscreen_output);
     g_mutex_unlock (&self->render_lock);
   }
 }
@@ -308,6 +325,11 @@ gst_wayland_sink_get_property (GObject * object,
       g_value_set_boolean (value, self->fullscreen);
       GST_OBJECT_UNLOCK (self);
       break;
+    case PROP_FULLSCREEN_OUTPUT:
+      GST_OBJECT_LOCK (self);
+      g_value_set_string (value, self->fullscreen_output);
+      GST_OBJECT_UNLOCK (self);
+      break;
     case PROP_ROTATE_METHOD:
       GST_OBJECT_LOCK (self);
       g_value_set_enum (value, self->current_rotate_method);
@@ -344,7 +366,14 @@ gst_wayland_sink_set_property (GObject * object,
       break;
     case PROP_FULLSCREEN:
       GST_OBJECT_LOCK (self);
-      gst_wayland_sink_set_fullscreen (self, g_value_get_boolean (value));
+      gst_wayland_sink_set_fullscreen (self, g_value_get_boolean (value),
+          self->fullscreen_output);
+      GST_OBJECT_UNLOCK (self);
+      break;
+    case PROP_FULLSCREEN_OUTPUT:
+      GST_OBJECT_LOCK (self);
+      gst_wayland_sink_set_fullscreen (self, self->fullscreen,
+          g_value_get_string (value));
       GST_OBJECT_UNLOCK (self);
       break;
     case PROP_ROTATE_METHOD:
@@ -390,6 +419,7 @@ gst_wayland_sink_finalize (GObject * object)
 
   g_free (self->display_name);
   g_free (self->drm_device);
+  g_free (self->fullscreen_output);
 
   g_mutex_clear (&self->display_lock);
   g_mutex_clear (&self->render_lock);
@@ -596,6 +626,9 @@ gst_wayland_sink_event (GstBaseSink * bsink, GstEvent * event)
       }
 
       break;
+    case GST_EVENT_FLUSH_STOP:
+      gst_wl_window_flush (self->window);
+      break;
     default:
       break;
   }
@@ -739,22 +772,22 @@ gst_wayland_sink_set_caps (GstBaseSink * bsink, GstCaps * caps)
   GstWaylandSink *self = GST_WAYLAND_SINK (bsink);;
   gboolean use_dmabuf;
 
-  GST_DEBUG_OBJECT (self, "set caps %" GST_PTR_FORMAT, caps);
+  GST_INFO_OBJECT (self, "set caps %" GST_PTR_FORMAT, caps);
 
   if (gst_video_is_dma_drm_caps (caps)) {
     if (!gst_video_info_dma_drm_from_caps (&self->drm_info, caps))
       goto invalid_format;
 
     if (!gst_video_info_dma_drm_to_video_info (&self->drm_info,
-            &self->video_info))
+            &self->render_info))
       goto invalid_format;
   } else {
     /* extract info from caps */
-    if (!gst_video_info_from_caps (&self->video_info, caps))
+    if (!gst_video_info_from_caps (&self->render_info, caps))
       goto invalid_format;
 
     if (!gst_video_info_dma_drm_from_video_info (&self->drm_info,
-            &self->video_info, DRM_FORMAT_MOD_LINEAR))
+            &self->render_info, DRM_FORMAT_MOD_LINEAR))
       gst_video_info_dma_drm_init (&self->drm_info);
   }
 
@@ -763,7 +796,7 @@ gst_wayland_sink_set_caps (GstBaseSink * bsink, GstCaps * caps)
   self->have_light_info =
       gst_video_content_light_level_from_caps (&self->linfo, caps);
 
-  self->video_info_changed = TRUE;
+  self->render_info_changed = TRUE;
   self->skip_dumb_buffer_copy = FALSE;
 
   /* free pooled buffer used with previous caps */
@@ -781,7 +814,7 @@ gst_wayland_sink_set_caps (GstBaseSink * bsink, GstCaps * caps)
             &self->drm_info))
       goto unsupported_drm_format;
   } else if (!gst_wl_display_check_format_for_shm (self->display,
-          &self->video_info)) {
+          &self->render_info)) {
     /* Note: we still support dmabuf in this case, but formats must also be
      * supported on SHM interface to ensure a fallback is possible as we are
      * not guarantied we'll get dmabuf in the buffers. */
@@ -790,6 +823,7 @@ gst_wayland_sink_set_caps (GstBaseSink * bsink, GstCaps * caps)
 
   /* Will be used to create buffer pools */
   gst_caps_replace (&self->caps, caps);
+  self->video_info = self->render_info;
 
   return TRUE;
 
@@ -809,7 +843,8 @@ unsupported_drm_format:
 unsupported_format:
   {
     GST_ERROR_OBJECT (self, "Format %s is not available on the display",
-        gst_video_format_to_string (GST_VIDEO_INFO_FORMAT (&self->video_info)));
+        gst_video_format_to_string (GST_VIDEO_INFO_FORMAT
+            (&self->render_info)));
     return FALSE;
   }
 }
@@ -817,11 +852,11 @@ unsupported_format:
 static gboolean
 gst_wayland_sink_propose_allocation (GstBaseSink * bsink, GstQuery * query)
 {
+  GstWaylandSink *self = GST_WAYLAND_SINK (bsink);;
+  GstAllocator *allocator = NULL;
   GstCaps *caps;
   GstBufferPool *pool = NULL;
   gboolean need_pool;
-  GstVideoInfoDmaDrm drm_info;
-  GstVideoInfo vinfo;
   guint size;
 
   gst_query_parse_allocation (query, &caps, &need_pool);
@@ -830,38 +865,54 @@ gst_wayland_sink_propose_allocation (GstBaseSink * bsink, GstQuery * query)
     return FALSE;
 
   if (gst_video_is_dma_drm_caps (caps)) {
+    GstVideoInfoDmaDrm drm_info;
+
     if (!gst_video_info_dma_drm_from_caps (&drm_info, caps))
       return FALSE;
+
     size = drm_info.vinfo.size;
   } else {
+    GstVideoInfo vinfo;
+
     /* extract info from caps */
     if (!gst_video_info_from_caps (&vinfo, caps))
       return FALSE;
+
     size = vinfo.size;
+
+    allocator = gst_udmabuf_allocator_get ();
+    if (!allocator)
+      allocator = gst_shm_allocator_get ();
   }
 
   if (need_pool && !gst_video_is_dma_drm_caps (caps)) {
     GstStructure *config;
-    pool = gst_wl_video_buffer_pool_new ();
-    config = gst_buffer_pool_get_config (pool);
-    gst_buffer_pool_config_set_params (config, caps, size, 2, 0);
-    gst_buffer_pool_config_set_allocator (config,
-        gst_shm_allocator_get (), NULL);
-    gst_buffer_pool_set_config (pool, config);
+
+    if (GST_IS_UDMABUF_ALLOCATOR (allocator)) {
+      pool = gst_video_dmabuf_pool_new ();
+    } else {
+      pool = gst_wl_video_buffer_pool_new ();
+      config = gst_buffer_pool_get_config (pool);
+      gst_buffer_pool_config_set_params (config, caps, size, 2, 0);
+      gst_buffer_pool_config_set_allocator (config,
+          gst_object_ref (allocator), NULL);
+      gst_buffer_pool_set_config (pool, config);
+    }
   }
 
   gst_query_add_allocation_pool (query, pool, size, 2, 0);
   if (pool)
     g_object_unref (pool);
 
-  if (!gst_video_is_dma_drm_caps (caps)) {
-    GstAllocator *alloc = gst_shm_allocator_get ();
-    gst_query_add_allocation_param (query, alloc, NULL);
-    g_object_unref (alloc);
-  }
+  if (!gst_video_is_dma_drm_caps (caps))
+    gst_query_add_allocation_param (query, allocator, NULL);
 
   gst_query_add_allocation_meta (query, GST_VIDEO_META_API_TYPE, NULL);
 
+  if (gst_wl_display_get_viewporter (self->display))
+    gst_query_add_allocation_meta (query, GST_VIDEO_CROP_META_API_TYPE, NULL);
+
+  gst_clear_object (&allocator);
   return TRUE;
 }
 
@@ -876,8 +927,8 @@ render_last_buffer (GstWaylandSink * self, gboolean redraw)
 
   wlbuffer = gst_buffer_get_wl_buffer (self->display, self->last_buffer);
 
-  if (G_UNLIKELY (self->video_info_changed && !redraw)) {
-    info = &self->video_info;
+  if (G_UNLIKELY (self->render_info_changed && !redraw)) {
+    info = &self->render_info;
 
     if (self->have_mastering_info)
       minfo = &self->minfo;
@@ -885,8 +936,9 @@ render_last_buffer (GstWaylandSink * self, gboolean redraw)
     if (self->have_light_info)
       linfo = &self->linfo;
 
-    self->video_info_changed = FALSE;
+    self->render_info_changed = FALSE;
   }
+
   return gst_wl_window_render_hdr (self->window, wlbuffer, info, minfo, linfo);
 }
 
@@ -898,6 +950,51 @@ on_window_closed (GstWlWindow * window, gpointer user_data)
   /* Handle window closure by posting an error on the bus */
   GST_ELEMENT_ERROR (self, RESOURCE, NOT_FOUND,
       ("Output window was closed"), (NULL));
+}
+
+static GstFlowReturn
+gst_wayland_sink_copy_frame (GstWaylandSink * self, GstBuffer * src_buffer,
+    GstBuffer * dst_buffer)
+{
+  GstVideoFrame src, dst;
+
+  if (!gst_video_frame_map (&dst, &self->video_info, dst_buffer, GST_MAP_WRITE))
+    goto dst_map_failed;
+
+  if (!gst_video_frame_map (&src, &self->video_info, src_buffer, GST_MAP_READ)) {
+    gst_video_frame_unmap (&dst);
+    goto src_map_failed;
+  }
+
+  gst_video_frame_copy (&dst, &src);
+
+  gst_video_frame_unmap (&src);
+  gst_video_frame_unmap (&dst);
+
+  /* Also copy the crop meta so its offloaded */
+  GstVideoCropMeta *src_cmeta = gst_buffer_get_video_crop_meta (src_buffer);
+  if (src_cmeta) {
+    GstVideoCropMeta *dst_cmeta = gst_buffer_add_video_crop_meta (dst_buffer);
+    dst_cmeta->x = src_cmeta->x;
+    dst_cmeta->y = src_cmeta->y;
+    dst_cmeta->width = src_cmeta->width;
+    dst_cmeta->height = src_cmeta->height;
+  }
+
+  return GST_FLOW_OK;
+
+src_map_failed:
+  {
+    GST_ELEMENT_ERROR (self, RESOURCE, READ,
+        ("Video memory can not be read from userspace."), (NULL));
+    return GST_FLOW_ERROR;
+  }
+dst_map_failed:
+  {
+    GST_ELEMENT_ERROR (self, RESOURCE, WRITE,
+        ("Video memory can not be written from userspace."), (NULL));
+    return GST_FLOW_ERROR;
+  }
 }
 
 static GstFlowReturn
@@ -924,14 +1021,44 @@ gst_wayland_sink_show_frame (GstVideoSink * vsink, GstBuffer * buffer)
 
     if (!self->window) {
       /* if we were not provided a window, create one ourselves */
-      self->window = gst_wl_window_new_toplevel (self->display,
-          &self->video_info, self->fullscreen, &self->render_lock);
+      self->window = gst_wl_window_new_toplevel_full (self->display,
+          &self->render_info, self->fullscreen, self->fullscreen_output,
+          &self->render_lock);
       g_signal_connect_object (self->window, "closed",
           G_CALLBACK (on_window_closed), self, 0);
       gst_wl_window_set_rotate_method (self->window,
           self->current_rotate_method);
       gst_wl_window_set_force_aspect_ratio (self->window,
           self->force_aspect_ratio);
+    }
+  }
+
+  /*
+   * The GstVideoFrame fast copy can't crop, make sure the internal pool
+   * allocated buffers large enough to hold the padded frames.
+   */
+  if (gst_buffer_get_video_crop_meta (buffer)) {
+    gint padded_width, padded_height;
+    GstVideoMeta *vmeta;
+    GstStructure *s;
+
+    vmeta = gst_buffer_get_video_meta (buffer);
+    self->caps = gst_caps_make_writable (self->caps);
+    s = gst_caps_get_structure (self->caps, 0);
+    gst_structure_get (s, "width", G_TYPE_INT, &padded_width,
+        "height", G_TYPE_INT, &padded_height, NULL);
+
+    if (vmeta->width != padded_width || vmeta->height != padded_height) {
+      gst_structure_set (s, "width", G_TYPE_INT, vmeta->width,
+          "height", G_TYPE_INT, vmeta->height, NULL);
+
+      if (self->pool) {
+        gst_buffer_pool_set_active (self->pool, FALSE);
+        gst_clear_object (&self->pool);
+      }
+
+      gst_video_info_set_format (&self->video_info, vmeta->format,
+          vmeta->width, vmeta->height);
     }
   }
 
@@ -974,7 +1101,6 @@ gst_wayland_sink_show_frame (GstVideoSink * vsink, GstBuffer * buffer)
        * offloading the compositor from a copy helps maintaining a smoother
        * desktop.
        */
-      GstVideoFrame src, dst;
 
       if (!gst_wayland_activate_drm_dumb_pool (self)) {
         self->skip_dumb_buffer_copy = TRUE;
@@ -1002,19 +1128,9 @@ gst_wayland_sink_show_frame (GstVideoSink * vsink, GstBuffer * buffer)
         wlbuffer = gst_buffer_add_wl_buffer (to_render, wbuf, self->display);
       }
 
-      if (!gst_video_frame_map (&dst, &self->video_info, to_render,
-              GST_MAP_WRITE))
-        goto dst_map_failed;
-
-      if (!gst_video_frame_map (&src, &self->video_info, buffer, GST_MAP_READ)) {
-        gst_video_frame_unmap (&dst);
-        goto src_map_failed;
-      }
-
-      gst_video_frame_copy (&dst, &src);
-
-      gst_video_frame_unmap (&src);
-      gst_video_frame_unmap (&dst);
+      ret = gst_wayland_sink_copy_frame (self, buffer, to_render);
+      if (ret != GST_FLOW_OK)
+        goto done;
 
       goto render;
     }
@@ -1022,15 +1138,13 @@ gst_wayland_sink_show_frame (GstVideoSink * vsink, GstBuffer * buffer)
 
 handle_shm:
   if (!wbuf && gst_wl_display_check_format_for_shm (self->display,
-          &self->video_info)) {
+          &self->render_info)) {
     if (gst_buffer_n_memory (buffer) == 1 && gst_is_fd_memory (mem))
       wbuf = gst_wl_shm_memory_construct_wl_buffer (mem, self->display,
           &self->video_info);
 
     /* If nothing worked, copy into our internal pool */
     if (!wbuf) {
-      GstVideoFrame src, dst;
-
       /* we don't know how to create a wl_buffer directly from the provided
        * memory, so we have to copy the data to shm memory that we know how
        * to handle... */
@@ -1061,19 +1175,9 @@ handle_shm:
         wlbuffer = gst_buffer_add_wl_buffer (to_render, wbuf, self->display);
       }
 
-      if (!gst_video_frame_map (&dst, &self->video_info, to_render,
-              GST_MAP_WRITE))
-        goto dst_map_failed;
-
-      if (!gst_video_frame_map (&src, &self->video_info, buffer, GST_MAP_READ)) {
-        gst_video_frame_unmap (&dst);
-        goto src_map_failed;
-      }
-
-      gst_video_frame_copy (&dst, &src);
-
-      gst_video_frame_unmap (&src);
-      gst_video_frame_unmap (&dst);
+      ret = gst_wayland_sink_copy_frame (self, buffer, to_render);
+      if (ret != GST_FLOW_OK)
+        goto done;
 
       goto render;
     }
@@ -1134,20 +1238,6 @@ activate_failed:
   {
     GST_ELEMENT_ERROR (self, RESOURCE, FAILED,
         ("failed to activate bufferpool."), (NULL));
-    ret = GST_FLOW_ERROR;
-    goto done;
-  }
-src_map_failed:
-  {
-    GST_ELEMENT_ERROR (self, RESOURCE, READ,
-        ("Video memory can not be read from userspace."), (NULL));
-    ret = GST_FLOW_ERROR;
-    goto done;
-  }
-dst_map_failed:
-  {
-    GST_ELEMENT_ERROR (self, RESOURCE, WRITE,
-        ("Video memory can not be written from userspace."), (NULL));
     ret = GST_FLOW_ERROR;
     goto done;
   }

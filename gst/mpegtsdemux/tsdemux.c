@@ -184,6 +184,8 @@ struct _TSDemuxStream
   GstClockTime pts;
   GstClockTime dts;
 
+  PESHeaderFlags current_pes_packet_flags;
+
   /* Reference PTS used to detect gaps */
   GstClockTime gap_ref_pts;
   /* Number of outputted buffers */
@@ -802,6 +804,7 @@ scan_keyframe_h264 (TSDemuxStream * stream, const guint8 * data,
         break;
       }
       default:
+        GST_TRACE_OBJECT (stream->pad, "unit type %d", unit.type);
         break;
     }
 
@@ -1348,7 +1351,7 @@ create_pad_for_stream (MpegTSBase * base, MpegTSBaseStream * bstream,
   GstPad *pad = NULL;
   gboolean sparse = FALSE;
   gboolean is_audio = FALSE, is_video = FALSE, is_subpicture = FALSE,
-      is_private = FALSE;
+      is_private = FALSE, is_metadata = FALSE;
 
   gst_ts_demux_create_tags (stream);
 
@@ -1402,6 +1405,9 @@ create_pad_for_stream (MpegTSBase * base, MpegTSBaseStream * bstream,
         is_audio = TRUE;
         caps = gst_caps_new_empty_simple ("audio/x-dts");
         stream->target_pes_substream = 0x71;
+        break;
+      default:
+        GST_DEBUG_OBJECT (demux, "Stream type %d", bstream->stream_type);
         break;
     }
   }
@@ -1497,7 +1503,7 @@ create_pad_for_stream (MpegTSBase * base, MpegTSBaseStream * bstream,
         case DRF_ID_DTS2:
         case DRF_ID_DTS3:
           /* SMPTE registered DTS */
-          is_private = TRUE;
+          is_audio = TRUE;
           caps = gst_caps_new_empty_simple ("audio/x-dts");
           break;
         case DRF_ID_S302M:
@@ -1692,8 +1698,16 @@ create_pad_for_stream (MpegTSBase * base, MpegTSBaseStream * bstream,
         case DRF_ID_KLVA:
           sparse = TRUE;
           is_private = TRUE;
+          is_metadata = TRUE;
           caps = gst_caps_new_simple ("meta/x-klv",
               "parsed", G_TYPE_BOOLEAN, TRUE, NULL);
+          break;
+        case DRF_ID_ID3:
+          sparse = TRUE;
+          is_private = TRUE;
+          is_metadata = TRUE;
+          caps = gst_caps_new_simple ("meta/x-id3",
+              "parsed", G_TYPE_BOOLEAN, FALSE, NULL);
           break;
         case DRF_ID_AC4:
           is_audio = TRUE;
@@ -1705,6 +1719,7 @@ create_pad_for_stream (MpegTSBase * base, MpegTSBaseStream * bstream,
           break;
         case DRF_ID_VANC:
           is_private = TRUE;
+          is_metadata = TRUE;
           caps =
               gst_caps_new_simple ("meta/x-st-2038", "alignment", G_TYPE_STRING,
               "line", NULL);
@@ -1760,17 +1775,32 @@ create_pad_for_stream (MpegTSBase * base, MpegTSBaseStream * bstream,
       if (desc) {
         GstMpegtsMetadataDescriptor *metadataDescriptor;
         if (gst_mpegts_descriptor_parse_metadata (desc, &metadataDescriptor)) {
-          if ((metadataDescriptor->metadata_format ==
-                  GST_MPEGTS_METADATA_FORMAT_IDENTIFIER_FIELD)
-              && (metadataDescriptor->metadata_format_identifier ==
-                  DRF_ID_KLVA)) {
-            sparse = TRUE;
-            is_private = TRUE;
-            /* registration_id is not correctly set or parsed for some streams */
-            bstream->registration_id = DRF_ID_KLVA;
+          if (metadataDescriptor->metadata_format ==
+              GST_MPEGTS_METADATA_FORMAT_IDENTIFIER_FIELD) {
 
-            caps = gst_caps_new_simple ("meta/x-klv",
-                "parsed", G_TYPE_BOOLEAN, TRUE, NULL);
+            switch (metadataDescriptor->metadata_format_identifier) {
+              case DRF_ID_KLVA:
+                sparse = TRUE;
+                is_private = TRUE;
+                is_metadata = TRUE;
+                /* registration_id is not correctly set or parsed for some streams */
+                bstream->registration_id = DRF_ID_KLVA;
+
+                caps = gst_caps_new_simple ("meta/x-klv",
+                    "parsed", G_TYPE_BOOLEAN, TRUE, NULL);
+                break;
+
+              case DRF_ID_ID3:
+                sparse = TRUE;
+                is_private = TRUE;
+                is_metadata = TRUE;
+                bstream->registration_id = DRF_ID_ID3;
+
+                caps = gst_caps_new_simple ("meta/x-id3",
+                    "parsed", G_TYPE_BOOLEAN, FALSE, NULL);
+                break;
+            }
+
           }
           g_free (metadataDescriptor);
         }
@@ -1859,6 +1889,8 @@ create_pad_for_stream (MpegTSBase * base, MpegTSBaseStream * bstream,
             colorimetry_mode = GST_VIDEO_COLORIMETRY_BT709;
             break;
           default:
+            GST_DEBUG_OBJECT (demux, "color specification %d",
+                color_specification);
             break;
         }
         caps = gst_caps_new_simple ("image/x-jpc",
@@ -2094,6 +2126,9 @@ done:
       name =
           g_strdup_printf ("private_%01x_%04x", demux->program_generation,
           bstream->pid);
+      if (is_metadata)
+        gst_stream_set_stream_type (bstream->stream_object,
+            GST_STREAM_TYPE_METADATA);
     } else if (is_subpicture) {
       template = gst_static_pad_template_get (&subpicture_template);
       name =
@@ -2830,6 +2865,7 @@ gst_ts_demux_parse_pes_header (GstTSDemux * demux, TSDemuxStream * stream,
   stream->current_size = length;
 
   stream->state = PENDING_PACKET_BUFFER;
+  stream->current_pes_packet_flags = header.flags;
 
   if (stream->pending_header_data) {
     g_free (stream->pending_header_data);
@@ -3158,14 +3194,25 @@ static GstBufferList *
 parse_opus_access_unit (TSDemuxStream * stream)
 {
   GstByteReader reader;
+  guint16 id;
   GstBufferList *buffer_list = NULL;
 
   buffer_list = gst_buffer_list_new ();
   gst_byte_reader_init (&reader, stream->data, stream->current_size);
 
+  if (!gst_byte_reader_peek_uint16_be (&reader, &id))
+    goto error;
+
+  /* No control header at the beginning of the access unit -- assume raw Opus */
+  if ((id >> 5) != 0x3ff) {
+    GstBuffer *buffer =
+        gst_buffer_new_wrapped (stream->data, stream->current_size);
+    gst_buffer_list_add (buffer_list, buffer);
+    return buffer_list;
+  }
+
   do {
     GstBuffer *buffer;
-    guint16 id;
     guint au_size = 0;
     guint8 b;
     gboolean start_trim_flag, end_trim_flag, control_extension_flag;
@@ -3611,9 +3658,17 @@ parse_access_unit (GstTSDemux * demux, TSDemuxStream * stream,
     buffer = parse_jp2k_access_unit (stream);
   } else if (bs->stream_type == GST_MPEGTS_STREAM_TYPE_AUDIO_AAC_ADTS) {
     buffer = parse_aac_adts_frame (stream);
-  } else if (bs->stream_type == GST_MPEGTS_STREAM_TYPE_METADATA_PES_PACKETS
-      && bs->registration_id == DRF_ID_KLVA) {
-    buffer_list = parse_pes_metadata_frame (stream);
+  } else if (bs->stream_type == GST_MPEGTS_STREAM_TYPE_METADATA_PES_PACKETS) {
+    if (bs->registration_id == DRF_ID_KLVA) {
+      buffer_list = parse_pes_metadata_frame (stream);
+    } else if (bs->registration_id == DRF_ID_ID3) {
+      buffer = gst_buffer_new_wrapped (stream->data, stream->current_size);
+      if ((stream->current_pes_packet_flags & PES_FLAG_DATA_ALIGNMENT) == 0) {
+        gst_buffer_set_flags (buffer, GST_BUFFER_FLAG_DELTA_UNIT);
+      }
+    } else {
+      buffer = gst_buffer_new_wrapped (stream->data, stream->current_size);
+    }
   } else if (bs->stream_type == GST_MPEGTS_STREAM_TYPE_VIDEO_JPEG_XS) {
     buffer = parse_jpegxs_access_unit (stream);
   } else {

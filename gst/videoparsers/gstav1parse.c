@@ -1704,6 +1704,7 @@ gst_av1_parse_handle_one_obu (GstAV1Parse * self, GstAV1OBU * obu,
           && gst_av1_parse_frame_start_new_temporal_unit (self, obu)) {
         if (check_new_tu) {
           *check_new_tu = TRUE;
+          *frame_complete = TRUE;
           res = GST_AV1_PARSER_OK;
           goto out;
         }
@@ -1944,7 +1945,6 @@ gst_av1_parse_handle_to_small_and_equal_align (GstBaseParse * parse,
   GstBuffer *buffer = gst_buffer_ref (frame->buffer);
   guint32 offset, consumed_before_push, consumed;
   gboolean frame_complete;
-  GstBaseParseFrame subframe;
 
   if (!gst_buffer_map (buffer, &map_info, GST_MAP_READ)) {
     GST_ERROR_OBJECT (parse, "Couldn't map incoming buffer");
@@ -1977,9 +1977,11 @@ again:
 
     if ((self->align == GST_AV1_PARSE_ALIGN_OBU) ||
         (self->align == GST_AV1_PARSE_ALIGN_FRAME && frame_complete)) {
+      GstBaseParseFrame subframe;
       gst_av1_parse_create_subframe (frame, &subframe, buffer);
       ret = gst_av1_parse_push_data (self, &subframe,
           consumed_before_push, frame_complete);
+      gst_base_parse_frame_free (&subframe);
       if (ret != GST_FLOW_OK)
         goto out;
 

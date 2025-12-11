@@ -1,6 +1,7 @@
 vulkan_sources = [
   'gstvulkan.c',
   'gstvulkanelement.c',
+  'gstvkutils.c',
   'vkdownload.c',
   'vkdeviceprovider.c',
   'vksink.c',
@@ -33,6 +34,8 @@ glsc_sources = [
 
 video_sources = [
   'base/gsth264encoder.c',
+  'gstvkvideocaps.c',
+  'vkav1dec.c',
   'vkh264enc.c',
   'vkh264dec.c',
   'vkh265dec.c',

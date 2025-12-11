@@ -656,6 +656,7 @@ enum
   REQUEST_AUX_SENDER,
   REQUEST_POST_RTP_AUX_SENDER,
   ADD_ICE_CANDIDATE_FULL_SIGNAL,
+  CLOSE_SIGNAL,
   LAST_SIGNAL,
 };
 
@@ -1169,12 +1170,8 @@ _start_thread (GstWebRTCBin * webrtc)
 }
 
 static void
-_stop_thread (GstWebRTCBin * webrtc)
+_quit_pc_loop (GstWebRTCBin * webrtc)
 {
-  GST_OBJECT_LOCK (webrtc);
-  webrtc->priv->is_closed = TRUE;
-  GST_OBJECT_UNLOCK (webrtc);
-
   PC_LOCK (webrtc);
   g_main_loop_quit (webrtc->priv->loop);
   while (webrtc->priv->loop)
@@ -1182,6 +1179,20 @@ _stop_thread (GstWebRTCBin * webrtc)
   PC_UNLOCK (webrtc);
 
   g_thread_unref (webrtc->priv->thread);
+}
+
+static void
+_stop_thread (GstWebRTCBin * webrtc)
+{
+  GST_OBJECT_LOCK (webrtc);
+  if (webrtc->priv->is_closed) {
+    GST_OBJECT_UNLOCK (webrtc);
+    return;
+  }
+  webrtc->priv->is_closed = TRUE;
+  GST_OBJECT_UNLOCK (webrtc);
+
+  _quit_pc_loop (webrtc);
 }
 
 static gboolean
@@ -1213,6 +1224,13 @@ _execute_op (GstWebRTCBinTask * op)
 
   PC_UNLOCK (op->webrtc);
 
+  if (op->deferred) {
+    GST_DEBUG_OBJECT (op->webrtc,
+        "Task successfully submitted, promise result is expected to be notified asynchronously");
+    gst_clear_structure (&s);
+    goto out;
+  }
+
   if (op->promise)
     gst_promise_reply (op->promise, s);
   else if (s)
@@ -1238,9 +1256,10 @@ _free_op (GstWebRTCBinTask * op)
  * be replied to in the case that @webrtc becomes closed between the idle
  * source addition and the the execution of the idle source.
  */
-gboolean
-gst_webrtc_bin_enqueue_task (GstWebRTCBin * webrtc, GstWebRTCBinFunc func,
-    gpointer data, GDestroyNotify notify, GstPromise * promise)
+static gboolean
+gst_webrtc_bin_enqueue_task_full (GstWebRTCBin * webrtc,
+    GstWebRTCBinFunc func, gpointer data,
+    GDestroyNotify notify, GstPromise * promise, gboolean deferred)
 {
   GstWebRTCBinTask *op;
   GMainContext *ctx;
@@ -1261,6 +1280,7 @@ gst_webrtc_bin_enqueue_task (GstWebRTCBin * webrtc, GstWebRTCBinFunc func,
 
   op = g_new0 (GstWebRTCBinTask, 1);
   op->webrtc = webrtc;
+  op->deferred = deferred;
   op->op = func;
   op->data = data;
   op->notify = notify;
@@ -1276,6 +1296,14 @@ gst_webrtc_bin_enqueue_task (GstWebRTCBin * webrtc, GstWebRTCBinFunc func,
   g_main_context_unref (ctx);
 
   return TRUE;
+}
+
+gboolean
+gst_webrtc_bin_enqueue_task (GstWebRTCBin * pc, GstWebRTCBinFunc func,
+    gpointer data, GDestroyNotify notify, GstPromise * promise)
+{
+  return gst_webrtc_bin_enqueue_task_full (pc, func, data, notify, promise,
+      FALSE);
 }
 
 void
@@ -1640,7 +1668,15 @@ _update_ice_gathering_state_task (GstWebRTCBin * webrtc, gpointer data)
   if (new_state == GST_WEBRTC_ICE_GATHERING_STATE_COMPLETE) {
     ICE_LOCK (webrtc);
     if (webrtc->priv->pending_local_ice_candidates->len != 0) {
-      /* ICE candidates queued for emissiong -> we're gathering, not complete */
+      /* ICE candidates queued for emission -> we're gathering, not complete */
+
+      const gchar *new_s =
+          _enum_value_to_string (GST_TYPE_WEBRTC_ICE_GATHERING_STATE,
+          GST_WEBRTC_ICE_GATHERING_STATE_GATHERING);
+      GST_INFO_OBJECT (webrtc,
+          "Deferring ICE gathering state change to %s(%u) due to pending candidates",
+          new_s, GST_WEBRTC_ICE_GATHERING_STATE_GATHERING);
+
       new_state = GST_WEBRTC_ICE_GATHERING_STATE_GATHERING;
     }
     ICE_UNLOCK (webrtc);
@@ -4171,7 +4207,7 @@ _create_offer_task (GstWebRTCBin * webrtc, const GstStructure * options,
 
         /* Verify that we didn't ignore any locked m-line transceivers */
         for (i = 0; i < webrtc->priv->transceivers->len; i++) {
-          WebRTCTransceiver *wtrans;
+          WebRTCTransceiver *wtrans GST_UNUSED_ASSERT;
 
           trans = g_ptr_array_index (webrtc->priv->transceivers, i);
           wtrans = WEBRTC_TRANSCEIVER (trans);
@@ -5443,6 +5479,7 @@ _add_ice_candidate (GstWebRTCBin * webrtc, IceCandidateItem * item,
       ICE_LOCK (webrtc);
       g_array_append_val (webrtc->priv->pending_remote_ice_candidates, new);
       ICE_UNLOCK (webrtc);
+      gst_promise_reply (item->promise, NULL);
     }
     return;
   }
@@ -7129,6 +7166,9 @@ _add_ice_candidate_task (GstWebRTCBin * webrtc, IceCandidateItem * item)
     ICE_LOCK (webrtc);
     g_array_append_val (webrtc->priv->pending_remote_ice_candidates, new);
     ICE_UNLOCK (webrtc);
+    if (item->promise) {
+      gst_promise_reply (item->promise, NULL);
+    }
   } else {
     _add_ice_candidate (webrtc, item, FALSE);
   }
@@ -7148,6 +7188,7 @@ gst_webrtc_bin_add_ice_candidate (GstWebRTCBin * webrtc, guint mline,
     const gchar * attr, GstPromise * promise)
 {
   IceCandidateItem *item;
+  gboolean defer_result = promise != NULL;
 
   item = g_new0 (IceCandidateItem, 1);
   item->mlineindex = mline;
@@ -7158,9 +7199,10 @@ gst_webrtc_bin_add_ice_candidate (GstWebRTCBin * webrtc, guint mline,
     else if (!g_ascii_strncasecmp (attr, "candidate:", 10))
       item->candidate = g_strdup_printf ("a=%s", attr);
   }
-  if (!gst_webrtc_bin_enqueue_task (webrtc,
+
+  if (!gst_webrtc_bin_enqueue_task_full (webrtc,
           (GstWebRTCBinFunc) _add_ice_candidate_task, item,
-          (GDestroyNotify) _free_ice_candidate_item, promise)) {
+          (GDestroyNotify) _free_ice_candidate_item, promise, defer_result)) {
     GError *error =
         g_error_new (GST_WEBRTC_ERROR, GST_WEBRTC_ERROR_INVALID_STATE,
         "Could not add ICE candidate. webrtcbin is closed");
@@ -7174,7 +7216,7 @@ gst_webrtc_bin_add_ice_candidate (GstWebRTCBin * webrtc, guint mline,
 }
 
 static GstStructure *
-_on_local_ice_candidate_task (GstWebRTCBin * webrtc)
+_on_local_ice_candidate_task (GstWebRTCBin * webrtc, gpointer data)
 {
   gsize i;
   GArray *items;
@@ -7243,7 +7285,9 @@ _on_local_ice_candidate_task (GstWebRTCBin * webrtc)
   }
   g_array_free (items, TRUE);
 
-  return NULL;
+  /* Clearing all pending ice candidates may have allowed the gathering
+   * state to transition to complete - so check it before exiting */
+  return _update_ice_gathering_state_task (webrtc, data);
 }
 
 static void
@@ -7446,7 +7490,10 @@ gst_webrtc_bin_create_data_channel (GstWebRTCBin * webrtc, const gchar * label,
   g_return_val_if_fail (GST_IS_WEBRTC_BIN (webrtc), NULL);
   g_return_val_if_fail (label != NULL, NULL);
   g_return_val_if_fail (strlen (label) <= 65535, NULL);
-  g_return_val_if_fail (webrtc->priv->is_closed != TRUE, NULL);
+
+  if (webrtc->priv->is_closed) {
+    return NULL;
+  }
 
   if (!init_params
       || !gst_structure_get_boolean (init_params, "ordered", &ordered))
@@ -7588,7 +7635,7 @@ on_rtpbin_pad_added (GstElement * rtpbin, GstPad * new_pad,
     guint32 session_id = 0, ssrc = 0, pt = 0;
     SsrcMapItem *mid_entry;
     GstWebRTCRTPTransceiver *rtp_trans = NULL;
-    WebRTCTransceiver *trans;
+    WebRTCTransceiver *trans GST_UNUSED_ASSERT;
     TransportStream *stream;
     GstWebRTCBinPad *pad;
     guint media_idx;
@@ -8283,6 +8330,7 @@ gst_webrtc_bin_change_state (GstElement * element, GstStateChange transition)
       webrtc->priv->running = FALSE;
       break;
     case GST_STATE_CHANGE_READY_TO_NULL:
+      gst_webrtc_ice_close (webrtc->priv->ice, NULL);
       _stop_thread (webrtc);
       break;
     default:
@@ -8628,6 +8676,161 @@ _update_rtpstorage_latency (GstWebRTCBin * webrtc)
   }
 }
 
+struct close_data
+{
+  GWeakRef webrtc_weak;
+  GstPromise *promise;
+};
+
+static struct close_data *
+close_data_new (GstWebRTCBin * webrtc, GstPromise * p)
+{
+  struct close_data *d = g_atomic_rc_box_new0 (struct close_data);
+  g_weak_ref_init (&d->webrtc_weak, webrtc);
+  if (p)
+    d->promise = gst_promise_ref (p);
+  return d;
+}
+
+static void
+close_data_clear (struct close_data *d)
+{
+  g_weak_ref_clear (&d->webrtc_weak);
+  if (d->promise)
+    gst_promise_unref (d->promise);
+}
+
+static void
+close_data_unref (struct close_data *d)
+{
+  g_atomic_rc_box_release_full (d, (GDestroyNotify) close_data_clear);
+}
+
+static void
+on_ice_closed (GstPromise * close_promise, gpointer user_data)
+{
+  struct close_data *d = (struct close_data *) user_data;
+  GstWebRTCBin *webrtc = g_weak_ref_get (&d->webrtc_weak);
+
+  if (webrtc) {
+    GST_OBJECT_LOCK (webrtc);
+    /* 10. Set connection.[[IceConnectionState]] to "closed". This does not fire
+     * any event. */
+    webrtc->ice_connection_state = GST_WEBRTC_ICE_CONNECTION_STATE_CLOSED;
+
+    /* 11. Set connection.[[ConnectionState]] to "closed". This does not fire
+     * any event. */
+    webrtc->peer_connection_state = GST_WEBRTC_PEER_CONNECTION_STATE_CLOSED;
+    GST_OBJECT_UNLOCK (webrtc);
+    gst_object_unref (webrtc);
+  }
+
+  if (d->promise)
+    gst_promise_reply (d->promise, NULL);
+}
+
+static void
+gst_webrtc_bin_close (GstWebRTCBin * webrtc, GstPromise * promise)
+{
+  guint i;
+  GstPromise *close_promise = NULL;
+  struct close_data *d = NULL;
+
+  /* https://www.w3.org/TR/webrtc/#dom-rtcpeerconnection-close */
+
+  GST_OBJECT_LOCK (webrtc);
+
+  /* 1. If connection.[[IsClosed]] is true, abort these steps. */
+  if (webrtc->priv->is_closed) {
+    GError *error = NULL;
+    GstStructure *s = NULL;
+
+    GST_OBJECT_UNLOCK (webrtc);
+
+    error =
+        g_error_new (GST_WEBRTC_ERROR, GST_WEBRTC_ERROR_INVALID_STATE,
+        "Connection is already closed");
+    s = gst_structure_new ("application/x-gst-promise", "error",
+        G_TYPE_ERROR, error, NULL);
+    gst_promise_reply (promise, s);
+    g_clear_error (&error);
+    return;
+  }
+
+  /* 2. Set connection.[[IsClosed]] to true. */
+  webrtc->priv->is_closed = TRUE;
+  GST_OBJECT_UNLOCK (webrtc);
+
+  _quit_pc_loop (webrtc);
+
+  /* 3. Set connection.[[SignalingState]] to "closed". This does not fire any
+   * event. */
+  GST_OBJECT_LOCK (webrtc);
+  webrtc->signaling_state = GST_WEBRTC_SIGNALING_STATE_CLOSED;
+
+  /* 4. Let transceivers be the result of executing the CollectTransceivers
+   * algorithm.
+   * For every RTCRtpTransceiver transceiver in transceivers, run the
+   * following steps: */
+  for (i = 0; i < webrtc->priv->transceivers->len; i++) {
+    GstWebRTCRTPTransceiver *rtp_trans =
+        g_ptr_array_index (webrtc->priv->transceivers, i);
+
+    /* 4.1. If transceiver.[[Stopped]] is true, abort these sub steps. */
+    if (rtp_trans->stopped) {
+      GST_TRACE_OBJECT (webrtc, "transceiver %p stopped", rtp_trans);
+      continue;
+    }
+    /* 4.2. Stop the RTCRtpTransceiver with transceiver and disappear. (Currently unsupported) */
+  }
+  GST_OBJECT_UNLOCK (webrtc);
+
+  /* 5. Set the [[ReadyState]] slot of each of connection's RTCDataChannels to
+   * "closed". */
+  DC_LOCK (webrtc);
+  for (i = 0; i < webrtc->priv->data_channels->len; i++) {
+    WebRTCDataChannel *channel =
+        g_ptr_array_index (webrtc->priv->data_channels, i);
+    channel->parent.ready_state = GST_WEBRTC_DATA_CHANNEL_STATE_CLOSED;
+  }
+  DC_UNLOCK (webrtc);
+
+  /* 6. If connection.[[SctpTransport]] is not null, tear down the underlying
+   * SCTP association by sending an SCTP ABORT chunk and set the
+   * [[SctpTransportState]] to "closed". */
+  if (webrtc->priv->sctp_transport) {
+    gst_element_set_state (webrtc->priv->sctp_transport->sctpenc,
+        GST_STATE_READY);
+  }
+
+  GST_OBJECT_LOCK (webrtc);
+
+  /* 7. Set the [[DtlsTransportState]] slot of each of connection's
+   * RTCDtlsTransports to "closed". */
+  for (i = 0; i < webrtc->priv->transceivers->len; i++) {
+    GstWebRTCRTPTransceiver *rtp_trans =
+        g_ptr_array_index (webrtc->priv->transceivers, i);
+    GstWebRTCDTLSTransport *transport;
+
+    transport = webrtc_transceiver_get_dtls_transport (rtp_trans);
+    transport->state = GST_WEBRTC_DTLS_TRANSPORT_STATE_CLOSED;
+  }
+
+  GST_OBJECT_UNLOCK (webrtc);
+
+  /* 8. Destroy connection's ICE Agent, abruptly ending any active ICE
+   * processing and releasing any relevant resources (e.g. TURN permissions).
+   * 9. Set the [[IceTransportState]] slot of each of connection's
+   * RTCIceTransports to "closed". */
+  /* NOTE: We perform these operations asynchronously while the "abruptly" word
+   * from the spec suggests this should be done synchronously. */
+  d = close_data_new (webrtc, promise);
+  close_promise =
+      gst_promise_new_with_change_func (on_ice_closed, d,
+      (GDestroyNotify) close_data_unref);
+  gst_webrtc_ice_close (webrtc->priv->ice, close_promise);
+}
+
 static void
 gst_webrtc_bin_set_property (GObject * object, guint prop_id,
     const GValue * value, GParamSpec * pspec)
@@ -8801,6 +9004,14 @@ gst_webrtc_bin_dispose (GObject * object)
     g_array_free (webrtc->priv->ice_stream_map, TRUE);
   webrtc->priv->ice_stream_map = NULL;
 
+  if (webrtc->priv->sctp_transport) {
+    gst_element_set_locked_state (webrtc->priv->sctp_transport->sctpdec, FALSE);
+    gst_element_set_locked_state (webrtc->priv->sctp_transport->sctpenc, FALSE);
+    gst_element_set_state (webrtc->priv->sctp_transport->sctpdec,
+        GST_STATE_NULL);
+    gst_element_set_state (webrtc->priv->sctp_transport->sctpenc,
+        GST_STATE_NULL);
+  }
   g_clear_object (&webrtc->priv->sctp_transport);
 
   G_OBJECT_CLASS (parent_class)->dispose (object);
@@ -9169,6 +9380,22 @@ gst_webrtc_bin_class_init (GstWebRTCBinClass * klass)
       G_TYPE_FROM_CLASS (klass), G_SIGNAL_RUN_LAST | G_SIGNAL_ACTION,
       G_CALLBACK (gst_webrtc_bin_add_ice_candidate), NULL, NULL, NULL,
       G_TYPE_NONE, 3, G_TYPE_UINT, G_TYPE_STRING, GST_TYPE_PROMISE);
+
+  /**
+   * GstWebRTCBin::close:
+   * @object: the #webrtcbin
+   * @promise: (nullable): a #GstPromise to be notified when the task is
+   * complete.
+   *
+   * Invoke the close procedure as specified in
+   * https://www.w3.org/TR/webrtc/#dom-rtcpeerconnection-close.
+   *
+   * Since: 1.28
+   */
+  gst_webrtc_bin_signals[CLOSE_SIGNAL] =
+      g_signal_new_class_handler ("close", G_TYPE_FROM_CLASS (klass),
+      G_SIGNAL_RUN_LAST | G_SIGNAL_ACTION, G_CALLBACK (gst_webrtc_bin_close),
+      NULL, NULL, NULL, G_TYPE_NONE, 1, GST_TYPE_PROMISE);
 
   /**
    * GstWebRTCBin::get-stats:

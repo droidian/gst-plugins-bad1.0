@@ -52,7 +52,8 @@ struct _GstWaylandSink
   GstWlWindow *window;
   GstBufferPool *pool;
 
-  gboolean video_info_changed;
+  gboolean render_info_changed;
+  GstVideoInfo render_info;
   GstVideoInfo video_info;
   GstVideoInfoDmaDrm drm_info;
   GstVideoMasteringDisplayInfo minfo;
@@ -60,6 +61,7 @@ struct _GstWaylandSink
   gboolean have_mastering_info;
   gboolean have_light_info;
   gboolean fullscreen;
+  gchar *fullscreen_output;
   GstCaps *caps;
 
   gchar *display_name;

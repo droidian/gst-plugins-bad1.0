@@ -72,18 +72,19 @@ struct _GstObjectDetectionOverlay
   guint od_outline_color;
   guint od_outline_stroke_width;
   gboolean draw_labels;
+  gboolean draw_tracking_labels;
   gboolean filled_box;
   guint labels_color;
   gdouble labels_stroke_width;
   gdouble labels_outline_ofs;
   GstClockTime expire_overlay;
+  gboolean tracking_outline_colors;
 
   /* composition */
   gboolean attach_compo_to_buffer;
   GstBuffer *canvas;
   gint canvas_length;
   GstVideoOverlayComposition *composition;
-  GstVideoOverlayComposition *upstream_composition;
   GstClockTime last_composition_update;
 
   /* Graphic Outline */
@@ -102,9 +103,11 @@ enum
 {
   PROP_OD_OUTLINE_COLOR = 1,
   PROP_DRAW_LABELS,
+  PROP_DRAW_TRACKING_LABELS,
   PROP_LABELS_COLOR,
   PROP_FILLED_BOX,
   PROP_EXPIRE_OVERLAY,
+  PROP_TRACKING_OUTLINE_COLORS,
   _PROP_COUNT
 };
 
@@ -171,7 +174,7 @@ static void gst_object_detection_overlay_finalize (GObject * object);
 static void
 gst_object_detection_overlay_render_boundingbox (GstObjectDetectionOverlay
     * overlay, GstObjectDetectionOverlayPangoCairoContext * cairo_ctx,
-    GstAnalyticsODMtd * od_mtd);
+    GstAnalyticsRelationMeta * rmeta, GstAnalyticsODMtd * od_mtd);
 
 static void
 gst_object_detection_overlay_render_text_annotation (GstObjectDetectionOverlay
@@ -227,6 +230,19 @@ gst_object_detection_overlay_class_init (GstObjectDetectionOverlayClass * klass)
           TRUE, G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
 
   /**
+   * GstObjectDetectionOverlay:draw-tracking-labels
+   *
+   * Control tracking labels drawing
+   *
+   * Since: 1.28
+   */
+  g_object_class_install_property (gobject_class, PROP_DRAW_TRACKING_LABELS,
+      g_param_spec_boolean ("draw-tracking-labels",
+          "Draw tracking labels",
+          "Draw object tracking labels",
+          TRUE, G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
+
+  /**
    * GstObjectDetectionOverlay:labels-color
    *
    * Control labels color
@@ -269,6 +285,21 @@ gst_object_detection_overlay_class_init (GstObjectDetectionOverlayClass * klass)
           " expiring it (in ns), MAX for never",
           0, GST_CLOCK_TIME_NONE, GST_SECOND,
           G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
+
+   /**
+   * GstObjectDetectionOverlay:tracking-outline-colors
+   *
+   * In the presence of tracking information, each object will get its
+   * own color, ignores object-detection-outline-color
+   *
+   * Since: 1.28
+   */
+  g_object_class_install_property (gobject_class, PROP_TRACKING_OUTLINE_COLORS,
+      g_param_spec_boolean ("tracking-outline-colors",
+          "Tracking outline colors",
+          "In the presence of tracking information, each object will get"
+          " its own color, ignores object-detection-outline-color",
+          TRUE, G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS));
 
   element_class = (GstElementClass *) klass;
 
@@ -323,6 +354,7 @@ gst_object_detection_overlay_init (GstObjectDetectionOverlay * overlay)
   overlay->pango_layout = NULL;
   overlay->od_outline_color = 0xFFFFFFFF;
   overlay->draw_labels = TRUE;
+  overlay->draw_tracking_labels = TRUE;
   overlay->labels_color = 0xFFFFFFFF;
   overlay->filled_box = FALSE;
   overlay->in_info = &GST_VIDEO_FILTER (overlay)->in_info;
@@ -331,9 +363,9 @@ gst_object_detection_overlay_init (GstObjectDetectionOverlay * overlay)
   overlay->labels_stroke_width = 1.0;
   overlay->od_outline_stroke_width = 2;
   overlay->composition = NULL;
-  overlay->upstream_composition = NULL;
   overlay->flushing = FALSE;
   overlay->expire_overlay = GST_SECOND;
+  overlay->tracking_outline_colors = TRUE;
   GST_DEBUG_CATEGORY_INIT (objectdetectionoverlay_debug,
       "analytics_overlay_od", 0, "Object detection overlay");
 }
@@ -352,6 +384,9 @@ gst_object_detection_overlay_set_property (GObject * object, guint prop_id,
     case PROP_DRAW_LABELS:
       overlay->draw_labels = g_value_get_boolean (value);
       break;
+    case PROP_DRAW_TRACKING_LABELS:
+      overlay->draw_tracking_labels = g_value_get_boolean (value);
+      break;
     case PROP_LABELS_COLOR:
       overlay->labels_color = g_value_get_uint (value);
       break;
@@ -360,6 +395,9 @@ gst_object_detection_overlay_set_property (GObject * object, guint prop_id,
       break;
     case PROP_EXPIRE_OVERLAY:
       overlay->expire_overlay = g_value_get_uint64 (value);
+      break;
+    case PROP_TRACKING_OUTLINE_COLORS:
+      overlay->tracking_outline_colors = g_value_get_boolean (value);
       break;
     default:
       G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
@@ -380,6 +418,9 @@ gst_object_detection_overlay_get_property (GObject * object,
     case PROP_DRAW_LABELS:
       g_value_set_boolean (value, od_overlay->draw_labels);
       break;
+    case PROP_DRAW_TRACKING_LABELS:
+      g_value_set_boolean (value, od_overlay->draw_tracking_labels);
+      break;
     case PROP_LABELS_COLOR:
       g_value_set_uint (value, od_overlay->labels_color);
       break;
@@ -388,6 +429,9 @@ gst_object_detection_overlay_get_property (GObject * object,
       break;
     case PROP_EXPIRE_OVERLAY:
       g_value_set_uint64 (value, od_overlay->expire_overlay);
+      break;
+    case PROP_TRACKING_OUTLINE_COLORS:
+      g_value_set_boolean (value, od_overlay->tracking_outline_colors);
       break;
     default:
       G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
@@ -727,7 +771,6 @@ gst_object_detection_overlay_transform_frame_ip (GstVideoFilter * filter,
 {
   GstBaseTransform *baset = GST_BASE_TRANSFORM (filter);
   GstObjectDetectionOverlay *overlay = GST_OBJECT_DETECTION_OVERLAY (filter);
-  GstVideoOverlayCompositionMeta *composition_meta;
   gpointer state = NULL;
   GstVideoOverlayRectangle *rectangle = NULL;
   gchar str_buf[5];
@@ -747,17 +790,6 @@ gst_object_detection_overlay_transform_frame_ip (GstVideoFilter * filter,
     return GST_FLOW_EOS;
   }
   g_mutex_unlock (&overlay->stream_event_mutex);
-
-  composition_meta =
-      gst_buffer_get_video_overlay_composition_meta (frame->buffer);
-  if (composition_meta) {
-    if (overlay->upstream_composition != composition_meta->overlay) {
-      GST_DEBUG_OBJECT (overlay, "GstVideoOverlayCompositionMeta found.");
-      overlay->upstream_composition = composition_meta->overlay;
-    }
-  } else if (overlay->upstream_composition != NULL) {
-    overlay->upstream_composition = NULL;
-  }
 
   if (baset->have_segment)
     rt = gst_segment_to_running_time (&baset->segment, GST_FORMAT_TIME,
@@ -792,12 +824,7 @@ gst_object_detection_overlay_transform_frame_ip (GstVideoFilter * filter,
     if (overlay->composition)
       gst_video_overlay_composition_unref (overlay->composition);
 
-    if (overlay->upstream_composition) {
-      overlay->composition =
-          gst_video_overlay_composition_copy (overlay->upstream_composition);
-    } else {
-      overlay->composition = gst_video_overlay_composition_new (NULL);
-    }
+    overlay->composition = gst_video_overlay_composition_new (NULL);
 
     overlay->last_composition_update = rt;
 
@@ -820,7 +847,7 @@ gst_object_detection_overlay_transform_frame_ip (GstVideoFilter * filter,
           gst_analytics_cls_mtd_get_mtd_type (), NULL, &cls_rlt_mtd);
 
       gst_object_detection_overlay_render_boundingbox
-          (GST_OBJECT_DETECTION_OVERLAY (filter), &cairo_ctx, od_mtd);
+          (GST_OBJECT_DETECTION_OVERLAY (filter), &cairo_ctx, rmeta, od_mtd);
 
       if (overlay->draw_labels) {
         if (success) {
@@ -850,8 +877,9 @@ gst_object_detection_overlay_transform_frame_ip (GstVideoFilter * filter,
         g_free (text);
       }
 
-      gst_object_detection_overlay_render_tracking_text_annotation
-          (GST_OBJECT_DETECTION_OVERLAY (filter), &cairo_ctx, rmeta, od_mtd);
+      if (overlay->draw_tracking_labels)
+        gst_object_detection_overlay_render_tracking_text_annotation
+            (GST_OBJECT_DETECTION_OVERLAY (filter), &cairo_ctx, rmeta, od_mtd);
     }
 
     rectangle = gst_video_overlay_rectangle_new_raw (overlay->canvas,
@@ -892,29 +920,129 @@ gst_object_detection_overlay_transform_frame_ip (GstVideoFilter * filter,
   return GST_FLOW_OK;
 }
 
+
+/*
+ * HSV version using golden angle distribution around the color wheel.
+ * This ensures maximum color separation by dividing the color wheel optimally.
+ * Sequence: 0°, 180°, 90°, 270°, 45°, 225°, 135°, 315°, etc.
+ *
+ * Returns RGB color as uint32_t in format 0x00RRGGBB
+ */
+static guint32
+generate_track_color_hsv (guint32 track_id)
+{
+  gfloat h = 0.0f;
+  gfloat increment = 0.5f;
+  // Fixed saturation and value for consistent appearance
+  const gfloat S = 0.85f;       // High saturation for vivid colors
+  const gfloat V = 0.95f;       // High value for bright colors
+
+  /* Start from 1 to avoid special case */
+  track_id++;
+
+  /* Calculate hue using bit-reversal pattern for optimal distribution */
+  /* Gives us the sequence: 0, 0.5, 0.25, 0.75, 0.125, 0.625, 0.375, 0.875, .. */
+  while (track_id > 1) {
+    if (track_id & 1) {
+      h += increment;
+    }
+    track_id >>= 1;
+    increment *= 0.5f;
+  }
+
+  /* Keep hue in [0, 1) range */
+  while (h >= 1.0f)
+    h -= 1.0f;
+
+  /* Convert HSV to RGB */
+  int hi = (int) (h * 6.0f);
+  gfloat f = h * 6.0f - hi;
+  gfloat p = V * (1.0f - S);
+  gfloat q = V * (1.0f - f * S);
+  gfloat t = V * (1.0f - (1.0f - f) * S);
+
+  gfloat r, g, b;
+  switch (hi % 6) {
+    case 0:
+      r = V;
+      g = t;
+      b = p;
+      break;
+    case 1:
+      r = q;
+      g = V;
+      b = p;
+      break;
+    case 2:
+      r = p;
+      g = V;
+      b = t;
+      break;
+    case 3:
+      r = p;
+      g = q;
+      b = V;
+      break;
+    case 4:
+      r = t;
+      g = p;
+      b = V;
+      break;
+    case 5:
+      r = V;
+      g = p;
+      b = q;
+      break;
+    default:
+      r = g = b = 0;
+      break;
+  }
+
+  guint8 r8 = (guint8) (r * 255.0f);
+  guint8 g8 = (guint8) (g * 255.0f);
+  guint8 b8 = (guint8) (b * 255.0f);
+
+  return ((guint32) r8 << 16) | ((guint32) g8 << 8) | (guint32) b8 | 0xFF000000;
+}
+
 static void
 gst_object_detection_overlay_render_boundingbox (GstObjectDetectionOverlay
     * overlay, GstObjectDetectionOverlayPangoCairoContext * ctx,
-    GstAnalyticsODMtd * od_mtd)
+    GstAnalyticsRelationMeta * rmeta, GstAnalyticsODMtd * od_mtd)
 {
   gint x, y, w, h;
   gfloat _dummy;
-  cairo_save (ctx->cr);
-  gst_analytics_od_mtd_get_location (od_mtd, &x, &y, &w, &h, &_dummy);
   gint maxw = GST_VIDEO_INFO_WIDTH (overlay->in_info) - 1;
   gint maxh = GST_VIDEO_INFO_HEIGHT (overlay->in_info) - 1;
+  GstAnalyticsTrackingMtd tracking_mtd;
+  guint32 color;
+
+  cairo_save (ctx->cr);
+  gst_analytics_od_mtd_get_location (od_mtd, &x, &y, &w, &h, &_dummy);
 
   x = CLAMP (x, 0, maxw);
   y = CLAMP (y, 0, maxh);
   w = CLAMP (w, 0, maxw - x);
   h = CLAMP (h, 0, maxh - y);
 
+  if (overlay->tracking_outline_colors &&
+      gst_analytics_relation_meta_get_direct_related (rmeta, od_mtd->id,
+          GST_ANALYTICS_REL_TYPE_RELATE_TO,
+          gst_analytics_tracking_mtd_get_mtd_type (), NULL, &tracking_mtd)) {
+    guint64 tid;
+
+    gst_analytics_tracking_mtd_get_info (&tracking_mtd, &tid, NULL, NULL, NULL);
+
+    color = generate_track_color_hsv (tid & 0xFFFFFFF);
+  } else {
+    color = overlay->od_outline_color;
+  }
+
   /* Set bounding box stroke color and width */
   cairo_set_source_rgba (ctx->cr,
-      ((overlay->od_outline_color >> 16) & 0xFF) / 255.0,
-      ((overlay->od_outline_color >> 8) & 0xFF) / 255.0,
-      ((overlay->od_outline_color) & 0xFF) / 255.0,
-      ((overlay->od_outline_color >> 24) & 0xFF) / 255.0);
+      ((color >> 16) & 0xFF) / 255.0,
+      ((color >> 8) & 0xFF) / 255.0,
+      (color & 0xFF) / 255.0, ((color >> 24) & 0xFF) / 255.0);
   cairo_set_line_width (ctx->cr, overlay->od_outline_stroke_width);
 
   /* draw bounding box */
@@ -979,7 +1107,6 @@ static void
 {
   GstAnalyticsMtd tracking_mtd;
   guint64 tid;
-  gboolean lost;
   PangoRectangle ink_rect, logical_rect;
   gint x, y, w, h;
   gint maxw = GST_VIDEO_INFO_WIDTH (overlay->in_info) - 1;
@@ -993,7 +1120,7 @@ static void
     return;
 
   gst_analytics_od_mtd_get_location (od_mtd, &x, &y, &w, &h, NULL);
-  gst_analytics_tracking_mtd_get_info (&tracking_mtd, &tid, NULL, NULL, &lost);
+  gst_analytics_tracking_mtd_get_info (&tracking_mtd, &tid, NULL, NULL, NULL);
 
   cairo_save (ctx->cr);
   x = CLAMP (x, 0, maxw);

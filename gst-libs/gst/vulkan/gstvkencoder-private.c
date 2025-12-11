@@ -24,6 +24,7 @@
 
 #include "gstvkencoder-private.h"
 
+#include "gstvkphysicaldevice-private.h"
 #include "gstvkvideo-private.h"
 
 typedef struct _GstVulkanEncoderPrivate GstVulkanEncoderPrivate;
@@ -87,19 +88,12 @@ _populate_function_table (GstVulkanEncoder * self)
 {
   GstVulkanEncoderPrivate *priv =
       gst_vulkan_encoder_get_instance_private (self);
-  GstVulkanInstance *instance;
 
   if (priv->vk_loaded)
     return TRUE;
 
-  instance = gst_vulkan_device_get_instance (self->queue->device);
-  if (!instance) {
-    GST_ERROR_OBJECT (self, "Failed to get instance from the device");
-    return FALSE;
-  }
-
-  priv->vk_loaded = gst_vulkan_video_get_vk_functions (instance, &priv->vk);
-  gst_object_unref (instance);
+  priv->vk_loaded =
+      gst_vulkan_video_get_vk_functions (self->queue->device, &priv->vk);
   return priv->vk_loaded;
 }
 
@@ -137,82 +131,6 @@ gst_vulkan_encoder_class_init (GstVulkanEncoderClass * klass)
   GObjectClass *gobject_class = G_OBJECT_CLASS (klass);
 
   gobject_class->finalize = gst_vulkan_encoder_finalize;
-}
-
-static VkFormat
-gst_vulkan_video_encoder_get_format (GstVulkanEncoder * self,
-    VkImageUsageFlagBits imageUsage, GError ** error)
-{
-  VkResult res;
-  VkVideoFormatPropertiesKHR *fmts = NULL;
-  guint i, n_fmts;
-  VkPhysicalDevice gpu =
-      gst_vulkan_device_get_physical_device (self->queue->device);
-  GstVulkanEncoderPrivate *priv =
-      gst_vulkan_encoder_get_instance_private (self);
-  GstVideoFormat format = GST_VIDEO_FORMAT_UNKNOWN;
-  VkFormat vk_format = VK_FORMAT_UNDEFINED;
-  VkVideoProfileListInfoKHR profile_list = {
-    .sType = VK_STRUCTURE_TYPE_VIDEO_PROFILE_LIST_INFO_KHR,
-    .profileCount = 1,
-    .pProfiles = &priv->profile.profile,
-  };
-  VkPhysicalDeviceVideoFormatInfoKHR fmt_info = {
-    .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VIDEO_FORMAT_INFO_KHR,
-    .pNext = &profile_list,
-    .imageUsage = imageUsage,
-  };
-
-  res = priv->vk.GetPhysicalDeviceVideoFormatProperties (gpu, &fmt_info,
-      &n_fmts, NULL);
-  if (gst_vulkan_error_to_g_error (res, error,
-          "vkGetPhysicalDeviceVideoFormatPropertiesKHR") != VK_SUCCESS)
-    goto beach;
-
-  if (n_fmts == 0) {
-    g_set_error (error, GST_VULKAN_ERROR, VK_ERROR_INITIALIZATION_FAILED,
-        "Profile doesn't have an output format");
-    return vk_format;
-  }
-
-  fmts = g_new0 (VkVideoFormatPropertiesKHR, n_fmts);
-  for (i = 0; i < n_fmts; i++)
-    fmts[i].sType = VK_STRUCTURE_TYPE_VIDEO_FORMAT_PROPERTIES_KHR;
-
-  res = priv->vk.GetPhysicalDeviceVideoFormatProperties (gpu, &fmt_info,
-      &n_fmts, fmts);
-  if (gst_vulkan_error_to_g_error (res, error,
-          "vkGetPhysicalDeviceVideoFormatPropertiesKHR") != VK_SUCCESS) {
-    goto beach;
-  }
-
-  if (n_fmts == 0) {
-    g_set_error (error, GST_VULKAN_ERROR, VK_ERROR_INITIALIZATION_FAILED,
-        "Profile doesn't have an output format");
-    goto beach;
-  }
-
-  /* find the best output format */
-  for (i = 0; i < n_fmts; i++) {
-    format = gst_vulkan_format_to_video_format (fmts[i].format);
-    if (format == GST_VIDEO_FORMAT_UNKNOWN) {
-      GST_WARNING_OBJECT (self, "Unknown Vulkan format %i", fmts[i].format);
-      continue;
-    } else {
-      vk_format = fmts[i].format;
-      priv->format = fmts[i];
-      break;
-    }
-  }
-
-  if (vk_format == VK_FORMAT_UNDEFINED) {
-    g_set_error (error, GST_VULKAN_ERROR, VK_ERROR_INITIALIZATION_FAILED,
-        "No valid output format found");
-  }
-
-beach:
-  g_clear_pointer (&fmts, g_free);
-  return vk_format;
 }
 
 static void
@@ -600,12 +518,15 @@ gst_vulkan_encoder_start (GstVulkanEncoder * self,
   VkResult res;
   VkVideoSessionCreateInfoKHR session_create;
   VkPhysicalDevice gpu;
-  VkFormat pic_format = VK_FORMAT_UNDEFINED;
-  int codec_idx;
+  VkFormat vk_format = VK_FORMAT_UNDEFINED;
+  guint i, codec_idx;
   GstVulkanCommandPool *cmd_pool;
+  GstVulkanPhysicalDevice *phy_dev;
   VkQueryPoolVideoEncodeFeedbackCreateInfoKHR query_create;
   VkPhysicalDeviceVideoEncodeQualityLevelInfoKHR quality_info;
   VkVideoEncodeQualityLevelPropertiesKHR quality_props;
+  GArray *fmts;
+  GstVideoFormat format;
   GError *query_err = NULL;
 
   g_return_val_if_fail (GST_IS_VULKAN_ENCODER (self), FALSE);
@@ -625,44 +546,13 @@ gst_vulkan_encoder_start (GstVulkanEncoder * self,
 
   switch (self->codec) {
     case VK_VIDEO_CODEC_OPERATION_ENCODE_H264_BIT_KHR:
-      if (!gst_vulkan_video_profile_is_valid (profile, self->codec)) {
-        g_set_error (error, GST_VULKAN_ERROR, VK_ERROR_INITIALIZATION_FAILED,
-            "Invalid profile");
-        return FALSE;
-      }
-      priv->caps.encoder.codec.h264 = (VkVideoEncodeH264CapabilitiesKHR) {
-        /* *INDENT-OFF* */
-        .sType = VK_STRUCTURE_TYPE_VIDEO_ENCODE_H264_CAPABILITIES_KHR,
-        /* *INDENT-ON* */
-      };
       codec_idx = GST_VK_VIDEO_EXTENSION_ENCODE_H264;
       break;
     case VK_VIDEO_CODEC_OPERATION_ENCODE_H265_BIT_KHR:
-      if (!gst_vulkan_video_profile_is_valid (profile, self->codec)) {
-        g_set_error (error, GST_VULKAN_ERROR, VK_ERROR_INITIALIZATION_FAILED,
-            "Invalid profile");
-        return FALSE;
-      }
-      priv->caps.encoder.codec.h265 = (VkVideoEncodeH265CapabilitiesKHR) {
-        /* *INDENT-OFF* */
-        .sType = VK_STRUCTURE_TYPE_VIDEO_ENCODE_H265_CAPABILITIES_KHR,
-        /* *INDENT-ON* */
-      };
       codec_idx = GST_VK_VIDEO_EXTENSION_ENCODE_H265;
       break;
     case VK_VIDEO_CODEC_OPERATION_ENCODE_AV1_BIT_KHR:
-      if (!gst_vulkan_video_profile_is_valid (profile, self->codec)) {
-        g_set_error (error, GST_VULKAN_ERROR, VK_ERROR_INITIALIZATION_FAILED,
-            "Invalid profile");
-        return FALSE;
-      }
-      priv->caps.encoder.codec.av1 = (VkVideoEncodeAV1CapabilitiesKHR) {
-        /* *INDENT-OFF* */
-        .sType = VK_STRUCTURE_TYPE_VIDEO_ENCODE_AV1_CAPABILITIES_KHR,
-        /* *INDENT-ON* */
-      };
       codec_idx = GST_VK_VIDEO_EXTENSION_ENCODE_AV1;
-
       break;
     default:
       g_set_error (error, GST_VULKAN_ERROR, VK_ERROR_INITIALIZATION_FAILED,
@@ -670,34 +560,17 @@ gst_vulkan_encoder_start (GstVulkanEncoder * self,
       return FALSE;
   }
 
-  priv->profile = *profile;
-
-  /* ensure the chain up of structure */
-  priv->profile.usage.encode.pNext = &priv->profile.codec;
-  priv->profile.profile.pNext = &priv->profile.usage.encode;
-
-  /* *INDENT-OFF* */
-  priv->caps.encoder.caps = (VkVideoEncodeCapabilitiesKHR) {
-    .sType = VK_STRUCTURE_TYPE_VIDEO_ENCODE_CAPABILITIES_KHR,
-    .pNext = &priv->caps.encoder.codec,
-  };
-  priv->caps.caps = (VkVideoCapabilitiesKHR) {
-    .sType = VK_STRUCTURE_TYPE_VIDEO_CAPABILITIES_KHR,
-    .pNext = &priv->caps.encoder.caps,
-  };
-  /* *INDENT-ON* */
-
-  gpu = gst_vulkan_device_get_physical_device (self->queue->device);
-  res = priv->vk.GetPhysicalDeviceVideoCapabilities (gpu,
-      &priv->profile.profile, &priv->caps.caps);
-  if (gst_vulkan_error_to_g_error (res, error,
-          "vkGetPhysicalDeviceVideoCapabilitiesKHR") != VK_SUCCESS)
+  if (!gst_vulkan_video_profile_is_valid (profile, self->codec)) {
+    g_set_error (error, GST_VULKAN_ERROR, VK_ERROR_INITIALIZATION_FAILED,
+        "Invalid profile");
     return FALSE;
+  }
 
   if (_vk_codec_extensions[codec_idx].specVersion <
       _vk_codec_supported_extensions[codec_idx]) {
     g_set_error (error, GST_VULKAN_ERROR, VK_ERROR_INITIALIZATION_FAILED,
-        "STD version headers [%i.%i.%i] not supported, need at least [%i.%i.%i], check your SDK path.",
+        "STD version headers [%i.%i.%i] not supported, need at least [%i.%i.%i],"
+        " check your SDK path.",
         VK_CODEC_VERSION (_vk_codec_extensions[codec_idx].specVersion),
         VK_CODEC_VERSION (_vk_codec_supported_extensions[codec_idx]));
     return FALSE;
@@ -706,22 +579,51 @@ gst_vulkan_encoder_start (GstVulkanEncoder * self,
   if (_vk_codec_extensions[codec_idx].specVersion <
       priv->caps.caps.stdHeaderVersion.specVersion) {
     g_set_error (error, GST_VULKAN_ERROR, VK_ERROR_INITIALIZATION_FAILED,
-        "The driver needs a newer version [%i.%i.%i] of the current headers %d.%d.%d, please update the code to support this driver.",
+        "The driver needs a newer version [%i.%i.%i] of the current headers"
+        "%d.%d.%d, please update the code to support this driver.",
         VK_CODEC_VERSION (priv->caps.caps.stdHeaderVersion.specVersion),
         VK_CODEC_VERSION (_vk_codec_extensions[codec_idx].specVersion));
     return FALSE;
   }
 
-  /* Get output format */
-  pic_format = gst_vulkan_video_encoder_get_format (self,
-      VK_IMAGE_USAGE_VIDEO_ENCODE_SRC_BIT_KHR |
-      VK_IMAGE_USAGE_VIDEO_ENCODE_DPB_BIT_KHR, error);
-  if (pic_format == VK_FORMAT_UNDEFINED)
+  priv->profile = *profile;
+
+  /* ensure the chain up of structure */
+  priv->profile.usage.encode.pNext = &priv->profile.codec;
+  priv->profile.profile.pNext = &priv->profile.usage.encode;
+
+  phy_dev = self->queue->device->physical_device;
+  if (!gst_vulkan_video_try_configuration (phy_dev, &priv->profile, &priv->caps,
+          &priv->profile_caps, &fmts, error))
     return FALSE;
+
+  /* Get output format */
+  for (i = 0; i < fmts->len; i++) {
+    VkVideoFormatPropertiesKHR *fmt =
+        &g_array_index (fmts, VkVideoFormatPropertiesKHR, i);
+
+    format = gst_vulkan_format_to_video_format (fmt->format);
+    if (format == GST_VIDEO_FORMAT_UNKNOWN) {
+      GST_WARNING_OBJECT (self, "Unknown Vulkan format %i", fmt->format);
+      continue;
+    } else {
+      vk_format = fmt->format;
+      priv->format = *fmt;
+      priv->format.pNext = NULL;
+      break;
+    }
+  }
+  g_array_unref (fmts);
+
+  if (vk_format == VK_FORMAT_UNDEFINED) {
+    g_set_error (error, GST_VULKAN_ERROR, VK_ERROR_INITIALIZATION_FAILED,
+        "No valid input format found");
+    goto failed;
+  }
 
   cmd_pool = gst_vulkan_queue_create_command_pool (self->queue, error);
   if (!cmd_pool)
-    return FALSE;
+    goto failed;
   priv->exec = gst_vulkan_operation_new (cmd_pool);
   gst_object_unref (cmd_pool);
 
@@ -744,8 +646,6 @@ gst_vulkan_encoder_start (GstVulkanEncoder * self,
     }
     g_clear_error (&query_err);
   }
-
-  priv->profile_caps = gst_vulkan_video_profile_to_caps (&priv->profile);
 
   GST_LOG_OBJECT (self, "Encoder capabilities for %" GST_PTR_FORMAT ":\n"
       "    Codec header version: %i.%i.%i (driver), %i.%i.%i (compiled)\n"
@@ -825,6 +725,7 @@ gst_vulkan_encoder_start (GstVulkanEncoder * self,
   };
   /* *INDENT-ON* */
 
+  gpu = gst_vulkan_device_get_physical_device (self->queue->device);
   res = priv->vk.GetPhysicalDeviceVideoEncodeQualityLevelProperties (gpu,
       &quality_info, &quality_props);
   if (gst_vulkan_error_to_g_error (res, error,
@@ -837,9 +738,9 @@ gst_vulkan_encoder_start (GstVulkanEncoder * self,
     .sType = VK_STRUCTURE_TYPE_VIDEO_SESSION_CREATE_INFO_KHR,
     .queueFamilyIndex = self->queue->family,
     .pVideoProfile = &profile->profile,
-    .pictureFormat = pic_format,
+    .pictureFormat = vk_format,
     .maxCodedExtent = priv->caps.caps.maxCodedExtent,
-    .referencePictureFormat = pic_format,
+    .referencePictureFormat = vk_format,
     .maxDpbSlots = priv->caps.caps.maxDpbSlots,
     .maxActiveReferencePictures = priv->caps.caps.maxActiveReferencePictures,
     .pStdHeaderVersion = &_vk_codec_extensions[codec_idx],

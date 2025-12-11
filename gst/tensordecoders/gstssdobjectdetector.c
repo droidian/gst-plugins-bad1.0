@@ -53,6 +53,7 @@
 #include <gst/analytics/analytics.h>
 
 /* Object detection tensor id strings */
+#define GROUP_ID "ssd-mobilenet-v1-variant-1-out"
 #define GST_MODEL_OBJECT_DETECTOR_BOXES "ssd-mobilenet-v1-variant-1-out-boxes"
 #define GST_MODEL_OBJECT_DETECTOR_SCORES "ssd-mobilenet-v1-variant-1-out-scores"
 #define GST_MODEL_OBJECT_DETECTOR_NUM_DETECTIONS "generic-variant-1-out-count"
@@ -61,7 +62,7 @@
 GST_DEBUG_CATEGORY_STATIC (ssd_object_detector_debug);
 #define GST_CAT_DEFAULT ssd_object_detector_debug
 GST_ELEMENT_REGISTER_DEFINE (ssd_object_detector, "ssdobjectdetector",
-    GST_RANK_PRIMARY, GST_TYPE_SSD_OBJECT_DETECTOR);
+    GST_RANK_SECONDARY, GST_TYPE_SSD_OBJECT_DETECTOR);
 
 /* GstSsdObjectDetector properties */
 enum
@@ -82,12 +83,45 @@ GST_STATIC_PAD_TEMPLATE ("src",
     GST_STATIC_CAPS ("video/x-raw")
     );
 
+/* *INDENT-OFF* */
+
 static GstStaticPadTemplate gst_ssd_object_detector_sink_template =
 GST_STATIC_PAD_TEMPLATE ("sink",
     GST_PAD_SINK,
     GST_PAD_ALWAYS,
-    GST_STATIC_CAPS ("video/x-raw")
-    );
+    GST_STATIC_CAPS ("video/x-raw,"
+      "tensors=(structure)["
+        "tensorgroups,"
+          GROUP_ID"=(/set){"
+            "(GstCaps)["
+              "tensor/strided,"
+                "tensor-id="GST_MODEL_OBJECT_DETECTOR_NUM_DETECTIONS","
+                "dims=(int)<[0, max]>,"
+                "dims-order=(string)row-major,"
+                "type=(string)float32;],"
+             "(GstCaps)["
+              "tensor/strided,"
+                "tensor-id="GST_MODEL_OBJECT_DETECTOR_SCORES","
+                "dims=(int)<[0, max],0>,"
+                "dims-order=(string)row-major,"
+                "type=(string)float32;],"
+            "(GstCaps)["
+              "tensor/strided,"
+                "tensor-id="GST_MODEL_OBJECT_DETECTOR_BOXES","
+                "dims=(int)<[0, max],0,4>,"
+                "dims-order=(string)row-major,"
+                "type=(string)float32;],"
+            "(GstCaps)["
+              "tensor/strided,"
+                "tensor-id="GST_MODEL_OBJECT_DETECTOR_CLASSES","
+                "dims=(int)<[0, max],0>,"
+                "dims-order=(string)row-major,"
+                "type=(string)float32;]"
+        "}"
+    "];"
+    ));
+
+/* *INDENT-ON* */
 
 static void gst_ssd_object_detector_set_property (GObject * object,
     guint prop_id, const GValue * value, GParamSpec * pspec);
@@ -160,12 +194,15 @@ gst_ssd_object_detector_class_init (GstSsdObjectDetectorClass * klass)
           (GParamFlags)
           (G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS)));
 
-  gst_element_class_set_static_metadata (element_class, "objectdetector",
+  gst_element_class_set_static_metadata (element_class,
+      "SSD MobileNet Object Detector tensor decoder",
       "Tensordecoder/Video",
       "Apply tensor output from inference to detect objects in video frames",
       "Aaron Boxer <aaron.boxer@collabora.com>, Marcus Edel <marcus.edel@collabora.com>");
+
   gst_element_class_add_pad_template (element_class,
       gst_static_pad_template_get (&gst_ssd_object_detector_sink_template));
+
   gst_element_class_add_pad_template (element_class,
       gst_static_pad_template_get (&gst_ssd_object_detector_src_template));
   basetransform_class->transform_ip =
@@ -179,6 +216,7 @@ gst_ssd_object_detector_init (GstSsdObjectDetector * self)
 {
   self->size_threshold = GST_SSD_OBJECT_DETECTOR_DEFAULT_SIZE_THRESHOLD;
   self->score_threshold = GST_SSD_OBJECT_DETECTOR_DEFAULT_SCORE_THRESHOLD;
+  GST_PAD_UNSET_ACCEPT_INTERSECT (self->basetransform.sinkpad);
 }
 
 static void
@@ -543,8 +581,9 @@ extract_bounding_boxes (GstSsdObjectDetector * self, gsize w, gsize h,
     if (gst_analytics_relation_meta_add_od_mtd (rmeta, label,
             x_i, y_i, bwidth_i, bheight_i, score, &odmtd))
       GST_DEBUG_OBJECT (self,
-          "Object detected with label : %s, score: %f, bound box: %dx%d at (%d,%d)",
-          g_quark_to_string (label), score, bwidth_i, bheight_i, x_i, y_i);
+          "Object detected with label[%u] : %s, score: %f, bound box: %dx%d at (%d,%d)",
+          bclass, g_quark_to_string (label), score, bwidth_i, bheight_i, x_i,
+          y_i);
     else
       GST_WARNING_OBJECT (self, "Could not add detection to meta");
   }

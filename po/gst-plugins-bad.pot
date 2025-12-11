@@ -6,9 +6,9 @@
 #, fuzzy
 msgid ""
 msgstr ""
-"Project-Id-Version: gst-plugins-bad-1.27.2\n"
+"Project-Id-Version: gst-plugins-bad-1.27.50\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2025-09-07 20:35+0100\n"
+"POT-Creation-Date: 2025-12-09 19:09+0000\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -17,7 +17,7 @@ msgstr ""
 "Content-Type: text/plain; charset=CHARSET\n"
 "Content-Transfer-Encoding: 8bit\n"
 
-#: ext/curl/gstcurlhttpsrc.c:1443
+#: ext/curl/gstcurlhttpsrc.c:1483
 msgid "No URL set."
 msgstr ""
 
@@ -48,7 +48,7 @@ msgstr ""
 msgid "Could not read DVD."
 msgstr ""
 
-#: ext/smoothstreaming/gstmssdemux.c:439
+#: ext/smoothstreaming/gstmssdemux.c:441
 #: gst-libs/gst/adaptivedemux/gstadaptivedemux.c:735
 msgid "This file contains no playable streams."
 msgstr ""

@@ -3524,6 +3524,18 @@
                         "type": "gboolean",
                         "writable": true
                     },
+                    "draw-tracking-labels": {
+                        "blurb": "Draw object tracking labels",
+                        "conditionally-available": false,
+                        "construct": false,
+                        "construct-only": false,
+                        "controllable": false,
+                        "default": "true",
+                        "mutable": "null",
+                        "readable": true,
+                        "type": "gboolean",
+                        "writable": true
+                    },
                     "expire-overlay": {
                         "blurb": "Re-uses the last overlay for the specified amount of time before expiring it (in ns), MAX for never",
                         "conditionally-available": false,
@@ -3576,6 +3588,73 @@
                         "mutable": "null",
                         "readable": true,
                         "type": "guint",
+                        "writable": true
+                    },
+                    "tracking-outline-colors": {
+                        "blurb": "In the presence of tracking information, each object will get its own color, ignores object-detection-outline-color",
+                        "conditionally-available": false,
+                        "construct": false,
+                        "construct-only": false,
+                        "controllable": false,
+                        "default": "true",
+                        "mutable": "null",
+                        "readable": true,
+                        "type": "gboolean",
+                        "writable": true
+                    }
+                },
+                "rank": "none"
+            },
+            "segmentationoverlay": {
+                "author": "Daniel Morin",
+                "description": "Overlay a visual representation of segmentation metadata on the video",
+                "hierarchy": [
+                    "GstSegmentationOverlay",
+                    "GstVideoFilter",
+                    "GstBaseTransform",
+                    "GstElement",
+                    "GstObject",
+                    "GInitiallyUnowned",
+                    "GObject"
+                ],
+                "klass": "Visualization/Video",
+                "pad-templates": {
+                    "sink": {
+                        "caps": "video/x-raw:\n         format: { A444_16LE, A444_16BE, Y416_LE, AYUV64, RGBA64_LE, ARGB64, ARGB64_LE, BGRA64_LE, ABGR64_LE, Y416_BE, RGBA64_BE, ARGB64_BE, BGRA64_BE, ABGR64_BE, A422_16LE, A422_16BE, A420_16LE, A420_16BE, A444_12LE, GBRA_12LE, A444_12BE, GBRA_12BE, Y412_LE, Y412_BE, A422_12LE, A422_12BE, A420_12LE, A420_12BE, A444_10LE, GBRA_10LE, A444_10BE, GBRA_10BE, A422_10LE, A422_10BE, A420_10LE, A420_10BE, BGR10A2_LE, RGB10A2_LE, Y410, A444, GBRA, AYUV, VUYA, RGBA, RBGA, ARGB, BGRA, ABGR, A422, A420, AV12, Y444_16LE, GBR_16LE, Y444_16BE, GBR_16BE, Y216_LE, Y216_BE, v216, P016_LE, P016_BE, Y444_12LE, GBR_12LE, Y444_12BE, GBR_12BE, I422_12LE, I422_12BE, Y212_LE, Y212_BE, I420_12LE, I420_12BE, P012_LE, P012_BE, Y444_10LE, GBR_10LE, Y444_10BE, GBR_10BE, BGR10x2_LE, RGB10x2_LE, r210, I422_10LE, I422_10BE, NV16_10LE40, NV16_10LE32, Y210, UYVP, v210, I420_10LE, I420_10BE, P010_10LE, NV12_10LE40, NV12_10LE32, P010_10BE, MT2110R, MT2110T, NV12_10BE_8L128, NV12_10LE40_4L4, Y444, BGRP, GBR, RGBP, NV24, v308, IYU2, RGBx, xRGB, BGRx, xBGR, RGB, BGR, Y42B, NV16, NV61, YUY2, YVYU, UYVY, VYUY, I420, YV12, NV12, NV21, NV12_16L32S, NV12_32L32, NV12_4L4, NV12_64Z32, NV12_8L128, Y41B, IYU1, YUV9, YVU9, BGR16, RGB16, BGR15, RGB15, RGB8P, GRAY16_LE, GRAY16_BE, GRAY10_LE16, GRAY10_LE32, GRAY8 }\n          width: [ 1, 2147483647 ]\n         height: [ 1, 2147483647 ]\n      framerate: [ 0/1, 2147483647/1 ]\n",
+                        "direction": "sink",
+                        "presence": "always"
+                    },
+                    "src": {
+                        "caps": "video/x-raw:\n         format: { A444_16LE, A444_16BE, Y416_LE, AYUV64, RGBA64_LE, ARGB64, ARGB64_LE, BGRA64_LE, ABGR64_LE, Y416_BE, RGBA64_BE, ARGB64_BE, BGRA64_BE, ABGR64_BE, A422_16LE, A422_16BE, A420_16LE, A420_16BE, A444_12LE, GBRA_12LE, A444_12BE, GBRA_12BE, Y412_LE, Y412_BE, A422_12LE, A422_12BE, A420_12LE, A420_12BE, A444_10LE, GBRA_10LE, A444_10BE, GBRA_10BE, A422_10LE, A422_10BE, A420_10LE, A420_10BE, BGR10A2_LE, RGB10A2_LE, Y410, A444, GBRA, AYUV, VUYA, RGBA, RBGA, ARGB, BGRA, ABGR, A422, A420, AV12, Y444_16LE, GBR_16LE, Y444_16BE, GBR_16BE, Y216_LE, Y216_BE, v216, P016_LE, P016_BE, Y444_12LE, GBR_12LE, Y444_12BE, GBR_12BE, I422_12LE, I422_12BE, Y212_LE, Y212_BE, I420_12LE, I420_12BE, P012_LE, P012_BE, Y444_10LE, GBR_10LE, Y444_10BE, GBR_10BE, BGR10x2_LE, RGB10x2_LE, r210, I422_10LE, I422_10BE, NV16_10LE40, NV16_10LE32, Y210, UYVP, v210, I420_10LE, I420_10BE, P010_10LE, NV12_10LE40, NV12_10LE32, P010_10BE, MT2110R, MT2110T, NV12_10BE_8L128, NV12_10LE40_4L4, Y444, BGRP, GBR, RGBP, NV24, v308, IYU2, RGBx, xRGB, BGRx, xBGR, RGB, BGR, Y42B, NV16, NV61, YUY2, YVYU, UYVY, VYUY, I420, YV12, NV12, NV21, NV12_16L32S, NV12_32L32, NV12_4L4, NV12_64Z32, NV12_8L128, Y41B, IYU1, YUV9, YVU9, BGR16, RGB16, BGR15, RGB15, RGB8P, GRAY16_LE, GRAY16_BE, GRAY10_LE16, GRAY10_LE32, GRAY8 }\n          width: [ 1, 2147483647 ]\n         height: [ 1, 2147483647 ]\n      framerate: [ 0/1, 2147483647/1 ]\n",
+                        "direction": "src",
+                        "presence": "always"
+                    }
+                },
+                "properties": {
+                    "hint-maximum-segment-type": {
+                        "blurb": "By providing the expected maximum segment type the overlay can optimize color differentiation between segment",
+                        "conditionally-available": false,
+                        "construct": false,
+                        "construct-only": false,
+                        "controllable": false,
+                        "default": "10",
+                        "max": "-1",
+                        "min": "1",
+                        "mutable": "null",
+                        "readable": true,
+                        "type": "guint",
+                        "writable": true
+                    },
+                    "selected-types": {
+                        "blurb": "List of segment types to overlay separated by ';'",
+                        "conditionally-available": false,
+                        "construct": false,
+                        "construct-only": false,
+                        "controllable": false,
+                        "default": "NULL",
+                        "mutable": "null",
+                        "readable": true,
+                        "type": "gchararray",
                         "writable": true
                     }
                 },
@@ -6075,12 +6154,12 @@
                 "long-name": "Audio Buffer Split",
                 "pad-templates": {
                     "sink": {
-                        "caps": "audio/x-raw:\n         format: { F64LE, F64BE, F32LE, F32BE, S32LE, S32BE, U32LE, U32BE, S24_32LE, S24_32BE, U24_32LE, U24_32BE, S24LE, S24BE, U24LE, U24BE, S20LE, S20BE, U20LE, U20BE, S18LE, S18BE, U18LE, U18BE, S16LE, S16BE, U16LE, U16BE, S8, U8 }\n           rate: [ 1, 2147483647 ]\n       channels: [ 1, 2147483647 ]\n         layout: interleaved\n",
+                        "caps": "audio/x-raw:\n         format: { F64LE, F64BE, F32LE, F32BE, S32LE, S32BE, U32LE, U32BE, S24_32LE, S24_32BE, U24_32LE, U24_32BE, S24LE, S24BE, U24LE, U24BE, S20_32LE, S20_32BE, U20_32LE, U20_32BE, S20LE, S20BE, U20LE, U20BE, S18LE, S18BE, U18LE, U18BE, S16LE, S16BE, U16LE, U16BE, S8, U8 }\n           rate: [ 1, 2147483647 ]\n       channels: [ 1, 2147483647 ]\n         layout: interleaved\n",
                         "direction": "sink",
                         "presence": "always"
                     },
                     "src": {
-                        "caps": "audio/x-raw:\n         format: { F64LE, F64BE, F32LE, F32BE, S32LE, S32BE, U32LE, U32BE, S24_32LE, S24_32BE, U24_32LE, U24_32BE, S24LE, S24BE, U24LE, U24BE, S20LE, S20BE, U20LE, U20BE, S18LE, S18BE, U18LE, U18BE, S16LE, S16BE, U16LE, U16BE, S8, U8 }\n           rate: [ 1, 2147483647 ]\n       channels: [ 1, 2147483647 ]\n         layout: interleaved\n",
+                        "caps": "audio/x-raw:\n         format: { F64LE, F64BE, F32LE, F32BE, S32LE, S32BE, U32LE, U32BE, S24_32LE, S24_32BE, U24_32LE, U24_32BE, S24LE, S24BE, U24LE, U24BE, S20_32LE, S20_32BE, U20_32LE, U20_32BE, S20LE, S20BE, U20LE, U20BE, S18LE, S18BE, U18LE, U18BE, S16LE, S16BE, U16LE, U16BE, S8, U8 }\n           rate: [ 1, 2147483647 ]\n       channels: [ 1, 2147483647 ]\n         layout: interleaved\n",
                         "direction": "src",
                         "presence": "always"
                     }
@@ -17995,7 +18074,7 @@
                 "long-name": "Fake Audio Sink",
                 "pad-templates": {
                     "sink": {
-                        "caps": "audio/x-raw:\n         format: { F64LE, F64BE, F32LE, F32BE, S32LE, S32BE, U32LE, U32BE, S24_32LE, S24_32BE, U24_32LE, U24_32BE, S24LE, S24BE, U24LE, U24BE, S20LE, S20BE, U20LE, U20BE, S18LE, S18BE, U18LE, U18BE, S16LE, S16BE, U16LE, U16BE, S8, U8 }\n           rate: [ 1, 2147483647 ]\n       channels: [ 1, 2147483647 ]\n",
+                        "caps": "audio/x-raw:\n         format: { F64LE, F64BE, F32LE, F32BE, S32LE, S32BE, U32LE, U32BE, S24_32LE, S24_32BE, U24_32LE, U24_32BE, S24LE, S24BE, U24LE, U24BE, S20_32LE, S20_32BE, U20_32LE, U20_32BE, S20LE, S20BE, U20LE, U20BE, S18LE, S18BE, U18LE, U18BE, S16LE, S16BE, U16LE, U16BE, S8, U8 }\n           rate: [ 1, 2147483647 ]\n       channels: [ 1, 2147483647 ]\n",
                         "direction": "sink",
                         "presence": "always"
                     }
@@ -19557,6 +19636,18 @@
                         "type": "GstDecklinkModes",
                         "writable": true
                     },
+                    "output-vanc": {
+                        "blurb": "Output ancillary data from input buffers",
+                        "conditionally-available": false,
+                        "construct": true,
+                        "construct-only": false,
+                        "controllable": false,
+                        "default": "false",
+                        "mutable": "null",
+                        "readable": true,
+                        "type": "gboolean",
+                        "writable": true
+                    },
                     "persistent-id": {
                         "blurb": "Output device instance to use. Higher priority than \"device-number\".",
                         "conditionally-available": false,
@@ -19734,6 +19825,18 @@
                     },
                     "output-stream-time": {
                         "blurb": "Output stream time directly instead of translating to pipeline clock",
+                        "conditionally-available": false,
+                        "construct": false,
+                        "construct-only": false,
+                        "controllable": false,
+                        "default": "false",
+                        "mutable": "null",
+                        "readable": true,
+                        "type": "gboolean",
+                        "writable": true
+                    },
+                    "output-vanc": {
+                        "blurb": "Extract and output VANC as GstMeta (if present)",
                         "conditionally-available": false,
                         "construct": false,
                         "construct-only": false,
@@ -39882,7 +39985,7 @@
                 "long-name": "Gtk Wayland Video Sink",
                 "pad-templates": {
                     "sink": {
-                        "caps": "video/x-raw(memory:DMABuf):\n         format: DMA_DRM\n          width: [ 1, 2147483647 ]\n         height: [ 1, 2147483647 ]\n      framerate: [ 0/1, 2147483647/1 ]\nvideo/x-raw:\n         format: { BGR10A2_LE, RGB10A2_LE, AYUV, RGBA, ARGB, BGRA, ABGR, BGR10x2_LE, RGB10x2_LE, P010_10LE, NV12_10LE40, v308, RGBx, xRGB, BGRx, xBGR, RGB, BGR, Y42B, NV16, NV61, YUY2, YVYU, UYVY, I420, YV12, NV12, NV21, Y41B, YUV9, YVU9, BGR16, RGB16 }\n          width: [ 1, 2147483647 ]\n         height: [ 1, 2147483647 ]\n      framerate: [ 0/1, 2147483647/1 ]\n",
+                        "caps": "video/x-raw(memory:DMABuf):\n         format: DMA_DRM\n          width: [ 1, 2147483647 ]\n         height: [ 1, 2147483647 ]\n      framerate: [ 0/1, 2147483647/1 ]\nvideo/x-raw:\n         format: { BGR10A2_LE, RGB10A2_LE, AYUV, RGBA, ARGB, BGRA, ABGR, BGR10x2_LE, RGB10x2_LE, P010_10LE, NV12_10LE40, Y444, v308, RGBx, xRGB, BGRx, xBGR, RGB, BGR, Y42B, NV16, NV61, YUY2, YVYU, UYVY, I420, YV12, NV12, NV21, Y41B, YUV9, YVU9, BGR16, RGB16 }\n          width: [ 1, 2147483647 ]\n         height: [ 1, 2147483647 ]\n      framerate: [ 0/1, 2147483647/1 ]\n",
                         "direction": "sink",
                         "presence": "always"
                     }
@@ -40987,7 +41090,7 @@
                 "long-name": "Internal audio sink",
                 "pad-templates": {
                     "sink": {
-                        "caps": "audio/x-raw:\n         format: { F64LE, F64BE, F32LE, F32BE, S32LE, S32BE, U32LE, U32BE, S24_32LE, S24_32BE, U24_32LE, U24_32BE, S24LE, S24BE, U24LE, U24BE, S20LE, S20BE, U20LE, U20BE, S18LE, S18BE, U18LE, U18BE, S16LE, S16BE, U16LE, U16BE, S8, U8 }\n           rate: [ 1, 2147483647 ]\n       channels: [ 1, 2147483647 ]\n",
+                        "caps": "audio/x-raw:\n         format: { F64LE, F64BE, F32LE, F32BE, S32LE, S32BE, U32LE, U32BE, S24_32LE, S24_32BE, U24_32LE, U24_32BE, S24LE, S24BE, U24LE, U24BE, S20_32LE, S20_32BE, U20_32LE, U20_32BE, S20LE, S20BE, U20LE, U20BE, S18LE, S18BE, U18LE, U18BE, S16LE, S16BE, U16LE, U16BE, S8, U8 }\n           rate: [ 1, 2147483647 ]\n       channels: [ 1, 2147483647 ]\n",
                         "direction": "sink",
                         "presence": "always"
                     }
@@ -41023,7 +41126,7 @@
                 "long-name": "Internal audio source",
                 "pad-templates": {
                     "src": {
-                        "caps": "audio/x-raw:\n         format: { F64LE, F64BE, F32LE, F32BE, S32LE, S32BE, U32LE, U32BE, S24_32LE, S24_32BE, U24_32LE, U24_32BE, S24LE, S24BE, U24LE, U24BE, S20LE, S20BE, U20LE, U20BE, S18LE, S18BE, U18LE, U18BE, S16LE, S16BE, U16LE, U16BE, S8, U8 }\n           rate: [ 1, 2147483647 ]\n       channels: [ 1, 2147483647 ]\n         layout: interleaved\n",
+                        "caps": "audio/x-raw:\n         format: { F64LE, F64BE, F32LE, F32BE, S32LE, S32BE, U32LE, U32BE, S24_32LE, S24_32BE, U24_32LE, U24_32BE, S24LE, S24BE, U24LE, U24BE, S20_32LE, S20_32BE, U20_32LE, U20_32BE, S20LE, S20BE, U20LE, U20BE, S18LE, S18BE, U18LE, U18BE, S16LE, S16BE, U16LE, U16BE, S8, U8 }\n           rate: [ 1, 2147483647 ]\n       channels: [ 1, 2147483647 ]\n         layout: interleaved\n",
                         "direction": "src",
                         "presence": "always"
                     }
@@ -43579,7 +43682,7 @@
                         "presence": "always"
                     },
                     "src": {
-                        "caps": "audio/x-raw:\n         format: { F64LE, F64BE, F32LE, F32BE, S32LE, S32BE, U32LE, U32BE, S24_32LE, S24_32BE, U24_32LE, U24_32BE, S24LE, S24BE, U24LE, U24BE, S20LE, S20BE, U20LE, U20BE, S18LE, S18BE, U18LE, U18BE, S16LE, S16BE, U16LE, U16BE, S8, U8 }\n           rate: [ 1, 2147483647 ]\n       channels: [ 1, 2147483647 ]\n         layout: { (string)interleaved, (string)non-interleaved }\naudio/x-unaligned-raw:\n         format: { F64LE, F64BE, F32LE, F32BE, S32LE, S32BE, U32LE, U32BE, S24_32LE, S24_32BE, U24_32LE, U24_32BE, S24LE, S24BE, U24LE, U24BE, S20LE, S20BE, U20LE, U20BE, S18LE, S18BE, U18LE, U18BE, S16LE, S16BE, U16LE, U16BE, S8, U8 }\n           rate: [ 1, 2147483647 ]\n       channels: [ 1, 2147483647 ]\n         layout: { (string)interleaved, (string)non-interleaved }\naudio/x-alaw:\n           rate: [ 1, 2147483647 ]\n       channels: [ 1, 2147483647 ]\naudio/x-mulaw:\n           rate: [ 1, 2147483647 ]\n       channels: [ 1, 2147483647 ]\n",
+                        "caps": "audio/x-raw:\n         format: { F64LE, F64BE, F32LE, F32BE, S32LE, S32BE, U32LE, U32BE, S24_32LE, S24_32BE, U24_32LE, U24_32BE, S24LE, S24BE, U24LE, U24BE, S20_32LE, S20_32BE, U20_32LE, U20_32BE, S20LE, S20BE, U20LE, U20BE, S18LE, S18BE, U18LE, U18BE, S16LE, S16BE, U16LE, U16BE, S8, U8 }\n           rate: [ 1, 2147483647 ]\n       channels: [ 1, 2147483647 ]\n         layout: { (string)interleaved, (string)non-interleaved }\naudio/x-unaligned-raw:\n         format: { F64LE, F64BE, F32LE, F32BE, S32LE, S32BE, U32LE, U32BE, S24_32LE, S24_32BE, U24_32LE, U24_32BE, S24LE, S24BE, U24LE, U24BE, S20_32LE, S20_32BE, U20_32LE, U20_32BE, S20LE, S20BE, U20LE, U20BE, S18LE, S18BE, U18LE, U18BE, S16LE, S16BE, U16LE, U16BE, S8, U8 }\n           rate: [ 1, 2147483647 ]\n       channels: [ 1, 2147483647 ]\n         layout: { (string)interleaved, (string)non-interleaved }\naudio/x-alaw:\n           rate: [ 1, 2147483647 ]\n       channels: [ 1, 2147483647 ]\naudio/x-mulaw:\n           rate: [ 1, 2147483647 ]\n       channels: [ 1, 2147483647 ]\n",
                         "direction": "src",
                         "presence": "always"
                     }
@@ -228937,7 +229040,7 @@
                         "presence": "request"
                     },
                     "vanc_sink_%%u": {
-                        "caps": "closedcaption/x-cea-708:\n         format: cdp\n      framerate: [ 0/1, 2147483647/1 ]\n",
+                        "caps": "meta/x-st-2038:\n      alignment: frame\n",
                         "direction": "sink",
                         "presence": "request"
                     },
@@ -242155,7 +242258,7 @@
                 "long-name": "rsndvdbin",
                 "pad-templates": {
                     "audio": {
-                        "caps": "audio/x-raw:\n         format: { F64LE, F64BE, F32LE, F32BE, S32LE, S32BE, U32LE, U32BE, S24_32LE, S24_32BE, U24_32LE, U24_32BE, S24LE, S24BE, U24LE, U24BE, S20LE, S20BE, U20LE, U20BE, S18LE, S18BE, U18LE, U18BE, S16LE, S16BE, U16LE, U16BE, S8, U8 }\n           rate: [ 1, 2147483647 ]\n       channels: [ 1, 2147483647 ]\n",
+                        "caps": "audio/x-raw:\n         format: { F64LE, F64BE, F32LE, F32BE, S32LE, S32BE, U32LE, U32BE, S24_32LE, S24_32BE, U24_32LE, U24_32BE, S24LE, S24BE, U24LE, U24BE, S20_32LE, S20_32BE, U20_32LE, U20_32BE, S20LE, S20BE, U20LE, U20BE, S18LE, S18BE, U18LE, U18BE, S16LE, S16BE, U16LE, U16BE, S8, U8 }\n           rate: [ 1, 2147483647 ]\n       channels: [ 1, 2147483647 ]\n",
                         "direction": "src",
                         "presence": "sometimes"
                     },
@@ -244826,12 +244929,12 @@
                 "long-name": "Audio buffer segment clipper",
                 "pad-templates": {
                     "sink": {
-                        "caps": "audio/x-raw:\n         format: { F64LE, F64BE, F32LE, F32BE, S32LE, S32BE, U32LE, U32BE, S24_32LE, S24_32BE, U24_32LE, U24_32BE, S24LE, S24BE, U24LE, U24BE, S20LE, S20BE, U20LE, U20BE, S18LE, S18BE, U18LE, U18BE, S16LE, S16BE, U16LE, U16BE, S8, U8 }\n           rate: [ 1, 2147483647 ]\n       channels: [ 1, 2147483647 ]\n",
+                        "caps": "audio/x-raw:\n         format: { F64LE, F64BE, F32LE, F32BE, S32LE, S32BE, U32LE, U32BE, S24_32LE, S24_32BE, U24_32LE, U24_32BE, S24LE, S24BE, U24LE, U24BE, S20_32LE, S20_32BE, U20_32LE, U20_32BE, S20LE, S20BE, U20LE, U20BE, S18LE, S18BE, U18LE, U18BE, S16LE, S16BE, U16LE, U16BE, S8, U8 }\n           rate: [ 1, 2147483647 ]\n       channels: [ 1, 2147483647 ]\n",
                         "direction": "sink",
                         "presence": "always"
                     },
                     "src": {
-                        "caps": "audio/x-raw:\n         format: { F64LE, F64BE, F32LE, F32BE, S32LE, S32BE, U32LE, U32BE, S24_32LE, S24_32BE, U24_32LE, U24_32BE, S24LE, S24BE, U24LE, U24BE, S20LE, S20BE, U20LE, U20BE, S18LE, S18BE, U18LE, U18BE, S16LE, S16BE, U16LE, U16BE, S8, U8 }\n           rate: [ 1, 2147483647 ]\n       channels: [ 1, 2147483647 ]\n",
+                        "caps": "audio/x-raw:\n         format: { F64LE, F64BE, F32LE, F32BE, S32LE, S32BE, U32LE, U32BE, S24_32LE, S24_32BE, U24_32LE, U24_32BE, S24LE, S24BE, U24LE, U24BE, S20_32LE, S20_32BE, U20_32LE, U20_32BE, S20LE, S20BE, U20LE, U20BE, S18LE, S18BE, U18LE, U18BE, S16LE, S16BE, U16LE, U16BE, S8, U8 }\n           rate: [ 1, 2147483647 ]\n       channels: [ 1, 2147483647 ]\n",
                         "direction": "src",
                         "presence": "always"
                     }
@@ -248583,7 +248686,7 @@
                 "klass": "Tensordecoder",
                 "pad-templates": {
                     "sink": {
-                        "caps": "ANY",
+                        "caps": "video/x-raw:\n        tensors: \"tensorgroups\\,\\ classification-generic-out\\=\\(/set\\)\\{\\ \\(caps\\)\\\"tensor/strided\\\\\\,\\\\\\ tensor-id\\\\\\=\\\\\\(string\\\\\\)classification-generic-out\\\\\\,\\\\\\ dims\\\\\\=\\\\\\(int\\\\\\)\\\\\\<\\\\\\ \\\\\\[\\\\\\ 0\\\\\\,\\\\\\ 1\\\\\\ \\\\\\]\\\\\\,\\\\\\ \\\\\\[\\\\\\ 1\\\\\\,\\\\\\ 2147483647\\\\\\ \\\\\\]\\\\\\ \\\\\\>\\\\\\,\\\\\\ dims-order\\\\\\=\\\\\\(string\\\\\\)row-major\\\\\\,\\\\\\ type\\\\\\=\\\\\\(string\\\\\\)\\\\\\{\\\\\\ float32\\\\\\,\\\\\\ uint8\\\\\\ \\\\\\}\\\\\\;\\\\\\ tensor/strided\\\\\\,\\\\\\ tensor-id\\\\\\=\\\\\\(string\\\\\\)classification-generic-out\\\\\\,\\\\\\ dims\\\\\\=\\\\\\(int\\\\\\)\\\\\\<\\\\\\ \\\\\\[\\\\\\ 1\\\\\\,\\\\\\ 2147483647\\\\\\ \\\\\\]\\\\\\ \\\\\\>\\\\\\,\\\\\\ dims-order\\\\\\=\\\\\\(string\\\\\\)row-major\\\\\\,\\\\\\ type\\\\\\=\\\\\\(string\\\\\\)\\\\\\{\\\\\\ float32\\\\\\,\\\\\\ uint8\\\\\\ \\\\\\}\\\"\\ \\}\\;\"\nvideo/x-raw:\n        tensors: \"tensorgroups\\,\\ classification-generic-softmaxed-out\\=\\(/set\\)\\{\\ \\(caps\\)\\\"tensor/strided\\\\\\,\\\\\\ tensor-id\\\\\\=\\\\\\(string\\\\\\)classification-generic-softmaxed-out\\\\\\,\\\\\\ dims\\\\\\=\\\\\\(int\\\\\\)\\\\\\<\\\\\\ \\\\\\[\\\\\\ 0\\\\\\,\\\\\\ 1\\\\\\ \\\\\\]\\\\\\,\\\\\\ \\\\\\[\\\\\\ 1\\\\\\,\\\\\\ 2147483647\\\\\\ \\\\\\]\\\\\\ \\\\\\>\\\\\\,\\\\\\ dims-order\\\\\\=\\\\\\(string\\\\\\)row-major\\\\\\,\\\\\\ type\\\\\\=\\\\\\(string\\\\\\)\\\\\\{\\\\\\ float32\\\\\\,\\\\\\ uint8\\\\\\ \\\\\\}\\\\\\;\\\\\\ tensor/strided\\\\\\,\\\\\\ tensor-id\\\\\\=\\\\\\(string\\\\\\)classification-generic-softmaxed-out\\\\\\,\\\\\\ dims\\\\\\=\\\\\\(int\\\\\\)\\\\\\<\\\\\\ \\\\\\[\\\\\\ 1\\\\\\,\\\\\\ 2147483647\\\\\\ \\\\\\]\\\\\\ \\\\\\>\\\\\\,\\\\\\ dims-order\\\\\\=\\\\\\(string\\\\\\)row-major\\\\\\,\\\\\\ type\\\\\\=\\\\\\(string\\\\\\)\\\\\\{\\\\\\ float32\\\\\\,\\\\\\ uint8\\\\\\ \\\\\\}\\\"\\ \\}\\;\"\n",
                         "direction": "sink",
                         "presence": "always"
                     },
@@ -248621,6 +248724,62 @@
                         "writable": true
                     }
                 },
+                "rank": "secondary"
+            },
+            "ioutracker": {
+                "author": "Santosh Mahto <santosh.mahto@collabora.com>",
+                "description": "Track the objects across frames based on Intersection-over-Union (IoU)",
+                "hierarchy": [
+                    "GstIouTracker",
+                    "GstBaseTransform",
+                    "GstElement",
+                    "GstObject",
+                    "GInitiallyUnowned",
+                    "GObject"
+                ],
+                "klass": "Analyzer/Video",
+                "pad-templates": {
+                    "sink": {
+                        "caps": "video/x-raw:\n",
+                        "direction": "sink",
+                        "presence": "always"
+                    },
+                    "src": {
+                        "caps": "video/x-raw:\n",
+                        "direction": "src",
+                        "presence": "always"
+                    }
+                },
+                "properties": {
+                    "iou-score-threshold": {
+                        "blurb": "Threshold for deciding wether the object is same in different frames",
+                        "conditionally-available": false,
+                        "construct": false,
+                        "construct-only": false,
+                        "controllable": false,
+                        "default": "0.5",
+                        "max": "1",
+                        "min": "0",
+                        "mutable": "null",
+                        "readable": true,
+                        "type": "gfloat",
+                        "writable": true
+                    },
+                    "min-frame-count-for-lost-track": {
+                        "blurb": "Min number of consecutive frames where object is absent before track is considered lost",
+                        "conditionally-available": false,
+                        "construct": false,
+                        "construct-only": false,
+                        "controllable": false,
+                        "default": "5",
+                        "max": "-1",
+                        "min": "0",
+                        "mutable": "null",
+                        "readable": true,
+                        "type": "guint",
+                        "writable": true
+                    }
+                },
                 "rank": "primary"
             },
             "ssdobjectdetector": {
@@ -248637,7 +248796,7 @@
                 "klass": "Tensordecoder/Video",
                 "pad-templates": {
                     "sink": {
-                        "caps": "video/x-raw:\n",
+                        "caps": "video/x-raw:\n        tensors: \"tensorgroups\\,\\ ssd-mobilenet-v1-variant-1-out\\=\\(/set\\)\\{\\ \\(caps\\)\\\"tensor/strided\\\\\\,\\\\\\ tensor-id\\\\\\=\\\\\\(string\\\\\\)generic-variant-1-out-count\\\\\\,\\\\\\ dims\\\\\\=\\\\\\(int\\\\\\)\\\\\\<\\\\\\ \\\\\\[\\\\\\ 0\\\\\\,\\\\\\ 2147483647\\\\\\ \\\\\\]\\\\\\ \\\\\\>\\\\\\,\\\\\\ dims-order\\\\\\=\\\\\\(string\\\\\\)row-major\\\\\\,\\\\\\ type\\\\\\=\\\\\\(string\\\\\\)float32\\\"\\,\\ \\(caps\\)\\\"tensor/strided\\\\\\,\\\\\\ tensor-id\\\\\\=\\\\\\(string\\\\\\)ssd-mobilenet-v1-variant-1-out-scores\\\\\\,\\\\\\ dims\\\\\\=\\\\\\(int\\\\\\)\\\\\\<\\\\\\ \\\\\\[\\\\\\ 0\\\\\\,\\\\\\ 2147483647\\\\\\ \\\\\\]\\\\\\,\\\\\\ 0\\\\\\ \\\\\\>\\\\\\,\\\\\\ dims-order\\\\\\=\\\\\\(string\\\\\\)row-major\\\\\\,\\\\\\ type\\\\\\=\\\\\\(string\\\\\\)float32\\\"\\,\\ \\(caps\\)\\\"tensor/strided\\\\\\,\\\\\\ tensor-id\\\\\\=\\\\\\(string\\\\\\)ssd-mobilenet-v1-variant-1-out-boxes\\\\\\,\\\\\\ dims\\\\\\=\\\\\\(int\\\\\\)\\\\\\<\\\\\\ \\\\\\[\\\\\\ 0\\\\\\,\\\\\\ 2147483647\\\\\\ \\\\\\]\\\\\\,\\\\\\ 0\\\\\\,\\\\\\ 4\\\\\\ \\\\\\>\\\\\\,\\\\\\ dims-order\\\\\\=\\\\\\(string\\\\\\)row-major\\\\\\,\\\\\\ type\\\\\\=\\\\\\(string\\\\\\)float32\\\"\\,\\ \\(caps\\)\\\"tensor/strided\\\\\\,\\\\\\ tensor-id\\\\\\=\\\\\\(string\\\\\\)ssd-mobilenet-v1-variant-1-out-classes\\\\\\,\\\\\\ dims\\\\\\=\\\\\\(int\\\\\\)\\\\\\<\\\\\\ \\\\\\[\\\\\\ 0\\\\\\,\\\\\\ 2147483647\\\\\\ \\\\\\]\\\\\\,\\\\\\ 0\\\\\\ \\\\\\>\\\\\\,\\\\\\ dims-order\\\\\\=\\\\\\(string\\\\\\)row-major\\\\\\,\\\\\\ type\\\\\\=\\\\\\(string\\\\\\)float32\\\"\\ \\}\\;\"\n",
                         "direction": "sink",
                         "presence": "always"
                     },
@@ -248689,7 +248848,36 @@
                         "writable": true
                     }
                 },
-                "rank": "primary"
+                "rank": "secondary"
+            },
+            "tensordecodebin": {
+                "author": "Daniel Morin <daniel.morin@collabora.com>",
+                "description": "Tensor Decode Bin",
+                "hierarchy": [
+                    "GstTensorDecodeBin",
+                    "GstBin",
+                    "GstElement",
+                    "GstObject",
+                    "GInitiallyUnowned",
+                    "GObject"
+                ],
+                "interfaces": [
+                    "GstChildProxy"
+                ],
+                "klass": "Tensor Decoder Bin",
+                "pad-templates": {
+                    "sink": {
+                        "caps": "ANY",
+                        "direction": "sink",
+                        "presence": "always"
+                    },
+                    "src": {
+                        "caps": "ANY",
+                        "direction": "src",
+                        "presence": "always"
+                    }
+                },
+                "rank": "none"
             },
             "ultralightfacedetectortensordec": {
                 "author": "Raghavendra Rao <raghavendra.rao@collabora.com>",
@@ -248705,7 +248893,7 @@
                 "klass": "Tensordecoder/Video",
                 "pad-templates": {
                     "sink": {
-                        "caps": "video/x-raw:\n",
+                        "caps": "video/x-raw:\n        tensors: \"tensorgroups\\,\\ ultra-lightweight-face-detection-rfb-320-v1-variant-1-out\\=\\(/set\\)\\{\\ \\(caps\\)\\\"tensor/strided\\\\\\,\\\\\\ tensor-id\\\\\\=\\\\\\(string\\\\\\)ssd-mobilenet-v1-variant-1-out-boxes\\\\\\,\\\\\\ dims\\\\\\=\\\\\\(int\\\\\\)\\\\\\<\\\\\\ 1\\\\\\,\\\\\\ \\\\\\[\\\\\\ 1\\\\\\,\\\\\\ 2147483647\\\\\\ \\\\\\]\\\\\\,\\\\\\ 4\\\\\\ \\\\\\>\\\\\\,\\\\\\ dims-order\\\\\\=\\\\\\(string\\\\\\)row-major\\\\\\,\\\\\\ type\\\\\\=\\\\\\(string\\\\\\)float32\\\"\\,\\ \\(caps\\)\\\"tensor/strided\\\\\\,\\\\\\ tensor-id\\\\\\=\\\\\\(string\\\\\\)ultra-lightweight-face-detection-rfb-320-v1-variant-1-out-scores\\\\\\,\\\\\\ dims\\\\\\=\\\\\\(int\\\\\\)\\\\\\<\\\\\\ 1\\\\\\,\\\\\\ \\\\\\[\\\\\\ 1\\\\\\,\\\\\\ 2147483647\\\\\\ \\\\\\]\\\\\\,\\\\\\ 2\\\\\\ \\\\\\>\\\\\\,\\\\\\ dims-order\\\\\\=\\\\\\(string\\\\\\)row-major\\\\\\,\\\\\\ type\\\\\\=\\\\\\(string\\\\\\)float32\\\"\\ \\}\\;\"\n",
                         "direction": "sink",
                         "presence": "always"
                     },
@@ -248746,11 +248934,216 @@
                     }
                 },
                 "rank": "primary"
+            },
+            "yolosegv8tensordec": {
+                "author": "Daniel Morin <daniel.morin@collabora.com>, Santosh Mahto <santosh.mahto@collabora.com>",
+                "description": "Decode tensors output from the inference of Yolo or FastSAM model (segmentation) on video frames. It works with YOLO version > 8 and FastSAM models.",
+                "hierarchy": [
+                    "GstYoloSegTensorDecoder",
+                    "GstYoloTensorDecoder",
+                    "GstBaseTransform",
+                    "GstElement",
+                    "GstObject",
+                    "GInitiallyUnowned",
+                    "GObject"
+                ],
+                "klass": "Tensordecoder/Video",
+                "pad-templates": {
+                    "sink": {
+                        "caps": "video/x-raw:\n        tensors: \"tensorgroups\\,\\ yolo-v8-segmentation-out\\=\\(/set\\)\\{\\ \\(caps\\)\\\"tensor/strided\\\\\\,\\\\\\ tensor-id\\\\\\=\\\\\\(string\\\\\\)yolo-v8-segmentation-out-detections\\\\\\,\\\\\\ dims\\\\\\=\\\\\\(int\\\\\\)\\\\\\<\\\\\\ 1\\\\\\,\\\\\\ \\\\\\[\\\\\\ 1\\\\\\,\\\\\\ 2147483647\\\\\\ \\\\\\]\\\\\\,\\\\\\ \\\\\\[\\\\\\ 1\\\\\\,\\\\\\ 2147483647\\\\\\ \\\\\\]\\\\\\ \\\\\\>\\\\\\,\\\\\\ dims-order\\\\\\=\\\\\\(string\\\\\\)row-major\\\\\\,\\\\\\ type\\\\\\=\\\\\\(string\\\\\\)float32\\\"\\,\\ \\(caps\\)\\\"tensor/strided\\\\\\,\\\\\\ tensor-id\\\\\\=\\\\\\(string\\\\\\)yolo-v8-segmentation-out-protos\\\\\\,\\\\\\ dims\\\\\\=\\\\\\(int\\\\\\)\\\\\\<\\\\\\ 1\\\\\\,\\\\\\ \\\\\\[\\\\\\ 1\\\\\\,\\\\\\ 2147483647\\\\\\ \\\\\\]\\\\\\,\\\\\\ \\\\\\[\\\\\\ 1\\\\\\,\\\\\\ 2147483647\\\\\\ \\\\\\]\\\\\\,\\\\\\ \\\\\\[\\\\\\ 1\\\\\\,\\\\\\ 2147483647\\\\\\ \\\\\\]\\\\\\ \\\\\\>\\\\\\,\\\\\\ dims-order\\\\\\=\\\\\\(string\\\\\\)row-major\\\\\\,\\\\\\ type\\\\\\=\\\\\\(string\\\\\\)float32\\\"\\ \\}\\;\"\n",
+                        "direction": "sink",
+                        "presence": "always"
+                    },
+                    "src": {
+                        "caps": "video/x-raw:\n",
+                        "direction": "src",
+                        "presence": "always"
+                    }
+                },
+                "rank": "secondary"
+            },
+            "yolov8tensordec": {
+                "author": "Daniel Morin <daniel.morin@collabora.com>, Santosh Mahto <santosh.mahto@collabora.com>",
+                "description": "Decode tensors output from the inference of YOLO Object Detection or FastSAM model (Detection)on video frames. This works on YOLO version 8 and later(v11), and FastSAM models.",
+                "hierarchy": [
+                    "GstYoloTensorDecoder",
+                    "GstBaseTransform",
+                    "GstElement",
+                    "GstObject",
+                    "GInitiallyUnowned",
+                    "GObject"
+                ],
+                "klass": "Tensordecoder/Video",
+                "pad-templates": {
+                    "sink": {
+                        "caps": "video/x-raw:\n        tensors: \"tensorgroups\\,\\ yolo-v8-out\\=\\(/set\\)\\{\\ \\(caps\\)\\\"tensor/strided\\\\\\,\\\\\\ tensor-id\\\\\\=\\\\\\(string\\\\\\)yolo-v8-out\\\\\\,\\\\\\ dims\\\\\\=\\\\\\(int\\\\\\)\\\\\\<\\\\\\ 1\\\\\\,\\\\\\ \\\\\\[\\\\\\ 1\\\\\\,\\\\\\ 2147483647\\\\\\ \\\\\\]\\\\\\,\\\\\\ \\\\\\[\\\\\\ 1\\\\\\,\\\\\\ 2147483647\\\\\\ \\\\\\]\\\\\\ \\\\\\>\\\\\\,\\\\\\ dims-order\\\\\\=\\\\\\(string\\\\\\)row-major\\\\\\,\\\\\\ type\\\\\\=\\\\\\(string\\\\\\)float32\\\"\\ \\}\\;\"\n",
+                        "direction": "sink",
+                        "presence": "always"
+                    },
+                    "src": {
+                        "caps": "video/x-raw:\n",
+                        "direction": "src",
+                        "presence": "always"
+                    }
+                },
+                "properties": {
+                    "box-confidence-threshold": {
+                        "blurb": "Boxes with a location confidence level inferior to this threshold will be excluded",
+                        "conditionally-available": false,
+                        "construct": false,
+                        "construct-only": false,
+                        "controllable": false,
+                        "default": "0.4",
+                        "max": "1",
+                        "min": "0",
+                        "mutable": "null",
+                        "readable": true,
+                        "type": "gfloat",
+                        "writable": true
+                    },
+                    "class-confidence-threshold": {
+                        "blurb": "Classes with a confidence level inferior to this threshold will be excluded",
+                        "conditionally-available": false,
+                        "construct": false,
+                        "construct-only": false,
+                        "controllable": false,
+                        "default": "0.4",
+                        "max": "1",
+                        "min": "0",
+                        "mutable": "null",
+                        "readable": true,
+                        "type": "gfloat",
+                        "writable": true
+                    },
+                    "iou-threshold": {
+                        "blurb": "Maximum intersection-over-union between bounding boxes to consider them distinct.",
+                        "conditionally-available": false,
+                        "construct": false,
+                        "construct-only": false,
+                        "controllable": false,
+                        "default": "0.7",
+                        "max": "1",
+                        "min": "0",
+                        "mutable": "null",
+                        "readable": true,
+                        "type": "gfloat",
+                        "writable": true
+                    },
+                    "label-file": {
+                        "blurb": "Label file",
+                        "conditionally-available": false,
+                        "construct": false,
+                        "construct-only": false,
+                        "controllable": false,
+                        "default": "NULL",
+                        "mutable": "null",
+                        "readable": true,
+                        "type": "gchararray",
+                        "writable": true
+                    },
+                    "max-detections": {
+                        "blurb": "Maximum object/masks detections.",
+                        "conditionally-available": false,
+                        "construct": false,
+                        "construct-only": false,
+                        "controllable": false,
+                        "default": "100",
+                        "max": "-1",
+                        "min": "1",
+                        "mutable": "null",
+                        "readable": true,
+                        "type": "guint",
+                        "writable": true
+                    }
+                },
+                "rank": "primary"
             }
         },
         "filename": "gsttensordecoders",
         "license": "LGPL",
-        "other-types": {},
+        "other-types": {
+            "GstYoloTensorDecoder": {
+                "hierarchy": [
+                    "GstYoloTensorDecoder",
+                    "GstBaseTransform",
+                    "GstElement",
+                    "GstObject",
+                    "GInitiallyUnowned",
+                    "GObject"
+                ],
+                "kind": "object",
+                "properties": {
+                    "box-confidence-threshold": {
+                        "blurb": "Boxes with a location confidence level inferior to this threshold will be excluded",
+                        "conditionally-available": false,
+                        "construct": false,
+                        "construct-only": false,
+                        "controllable": false,
+                        "default": "0.4",
+                        "max": "1",
+                        "min": "0",
+                        "mutable": "null",
+                        "readable": true,
+                        "type": "gfloat",
+                        "writable": true
+                    },
+                    "class-confidence-threshold": {
+                        "blurb": "Classes with a confidence level inferior to this threshold will be excluded",
+                        "conditionally-available": false,
+                        "construct": false,
+                        "construct-only": false,
+                        "controllable": false,
+                        "default": "0.4",
+                        "max": "1",
+                        "min": "0",
+                        "mutable": "null",
+                        "readable": true,
+                        "type": "gfloat",
+                        "writable": true
+                    },
+                    "iou-threshold": {
+                        "blurb": "Maximum intersection-over-union between bounding boxes to consider them distinct.",
+                        "conditionally-available": false,
+                        "construct": false,
+                        "construct-only": false,
+                        "controllable": false,
+                        "default": "0.7",
+                        "max": "1",
+                        "min": "0",
+                        "mutable": "null",
+                        "readable": true,
+                        "type": "gfloat",
+                        "writable": true
+                    },
+                    "label-file": {
+                        "blurb": "Label file",
+                        "conditionally-available": false,
+                        "construct": false,
+                        "construct-only": false,
+                        "controllable": false,
+                        "default": "NULL",
+                        "mutable": "null",
+                        "readable": true,
+                        "type": "gchararray",
+                        "writable": true
+                    },
+                    "max-detections": {
+                        "blurb": "Maximum object/masks detections.",
+                        "conditionally-available": false,
+                        "construct": false,
+                        "construct-only": false,
+                        "controllable": false,
+                        "default": "100",
+                        "max": "-1",
+                        "min": "1",
+                        "mutable": "null",
+                        "readable": true,
+                        "type": "guint",
+                        "writable": true
+                    }
+                }
+            }
+        },
         "package": "GStreamer Bad Plug-ins",
         "source": "gst-plugins-bad",
         "tracers": {},
@@ -249854,6 +250247,20 @@
                         "readable": true,
                         "type": "gint64",
                         "writable": true
+                    },
+                    "num-clients": {
+                        "blurb": "The number of clients that are connected currently",
+                        "conditionally-available": false,
+                        "construct": false,
+                        "construct-only": false,
+                        "controllable": false,
+                        "default": "0",
+                        "max": "-1",
+                        "min": "0",
+                        "mutable": "null",
+                        "readable": true,
+                        "type": "guint",
+                        "writable": false
                     },
                     "socket-path": {
                         "blurb": "The path to the control socket used to control the shared memory transport. This may be modified during the NULL->READY transition",
@@ -254663,6 +255070,320 @@
         "tracers": {},
         "url": "Unknown package origin"
     },
+    "vmaf": {
+        "description": "Netflix VMAF quality metric plugin",
+        "elements": {
+            "vmaf": {
+                "author": "Casey Bateman <casey.bateman@hudl.com>, Andoni Morales <amorales@fluendo.com>, Diego Nieto <dnieto@fluendo.com>",
+                "description": "Provides Video Multi-Method Assessment Fusion metric",
+                "hierarchy": [
+                    "GstVmaf",
+                    "GstVideoAggregator",
+                    "GstAggregator",
+                    "GstElement",
+                    "GstObject",
+                    "GInitiallyUnowned",
+                    "GObject"
+                ],
+                "klass": "Filter/Analyzer/Video",
+                "pad-templates": {
+                    "dist_sink": {
+                        "caps": "video/x-raw:\n         format: { I420, NV12, YV12, Y42B, Y444, I420_10LE, I422_10LE, Y444_10LE }\n          width: [ 1, 2147483647 ]\n         height: [ 1, 2147483647 ]\n      framerate: [ 0/1, 2147483647/1 ]\n",
+                        "direction": "sink",
+                        "presence": "always",
+                        "type": "GstVideoAggregatorPad"
+                    },
+                    "ref_sink": {
+                        "caps": "video/x-raw:\n         format: { I420, NV12, YV12, Y42B, Y444, I420_10LE, I422_10LE, Y444_10LE }\n          width: [ 1, 2147483647 ]\n         height: [ 1, 2147483647 ]\n      framerate: [ 0/1, 2147483647/1 ]\n",
+                        "direction": "sink",
+                        "presence": "always",
+                        "type": "GstVideoAggregatorPad"
+                    },
+                    "src": {
+                        "caps": "video/x-raw:\n         format: { I420, NV12, YV12, Y42B, Y444, I420_10LE, I422_10LE, Y444_10LE }\n          width: [ 1, 2147483647 ]\n         height: [ 1, 2147483647 ]\n      framerate: [ 0/1, 2147483647/1 ]\n",
+                        "direction": "src",
+                        "presence": "always",
+                        "type": "GstAggregatorPad"
+                    }
+                },
+                "properties": {
+                    "conf-interval": {
+                        "blurb": "Enable confidence intervals",
+                        "conditionally-available": false,
+                        "construct": false,
+                        "construct-only": false,
+                        "controllable": false,
+                        "default": "false",
+                        "mutable": "null",
+                        "readable": true,
+                        "type": "gboolean",
+                        "writable": true
+                    },
+                    "disable-clip": {
+                        "blurb": "Disable clipping VMAF values",
+                        "conditionally-available": false,
+                        "construct": false,
+                        "construct-only": false,
+                        "controllable": false,
+                        "default": "false",
+                        "mutable": "null",
+                        "readable": true,
+                        "type": "gboolean",
+                        "writable": true
+                    },
+                    "enable-transform": {
+                        "blurb": "Enable transform VMAF scores",
+                        "conditionally-available": false,
+                        "construct": false,
+                        "construct-only": false,
+                        "controllable": false,
+                        "default": "false",
+                        "mutable": "null",
+                        "readable": true,
+                        "type": "gboolean",
+                        "writable": true
+                    },
+                    "frame-message": {
+                        "blurb": "Enable frame level score messaging",
+                        "conditionally-available": false,
+                        "construct": false,
+                        "construct-only": false,
+                        "controllable": false,
+                        "default": "false",
+                        "mutable": "null",
+                        "readable": true,
+                        "type": "gboolean",
+                        "writable": true
+                    },
+                    "log-level": {
+                        "blurb": "VMAF log level",
+                        "conditionally-available": false,
+                        "construct": false,
+                        "construct-only": false,
+                        "controllable": false,
+                        "default": "none (0)",
+                        "mutable": "null",
+                        "readable": true,
+                        "type": "GstVmafLogLevel",
+                        "writable": true
+                    },
+                    "model-filename": {
+                        "blurb": "Model *.pkl abs filename, or file version for built in models",
+                        "conditionally-available": false,
+                        "construct": false,
+                        "construct-only": false,
+                        "controllable": false,
+                        "default": "vmaf_v0.6.1",
+                        "mutable": "null",
+                        "readable": true,
+                        "type": "gchararray",
+                        "writable": true
+                    },
+                    "ms-ssim": {
+                        "blurb": "Estimate MS-SSIM",
+                        "conditionally-available": false,
+                        "construct": false,
+                        "construct-only": false,
+                        "controllable": false,
+                        "default": "false",
+                        "mutable": "null",
+                        "readable": true,
+                        "type": "gboolean",
+                        "writable": true
+                    },
+                    "phone-model": {
+                        "blurb": "Use VMAF phone model",
+                        "conditionally-available": false,
+                        "construct": false,
+                        "construct-only": false,
+                        "controllable": false,
+                        "default": "false",
+                        "mutable": "null",
+                        "readable": true,
+                        "type": "gboolean",
+                        "writable": true
+                    },
+                    "pool-method": {
+                        "blurb": "Pool method for mean",
+                        "conditionally-available": false,
+                        "construct": false,
+                        "construct-only": false,
+                        "controllable": false,
+                        "default": "mean (3)",
+                        "mutable": "null",
+                        "readable": true,
+                        "type": "GstVmafPoolMethod",
+                        "writable": true
+                    },
+                    "psnr": {
+                        "blurb": "Estimate PSNR",
+                        "conditionally-available": false,
+                        "construct": false,
+                        "construct-only": false,
+                        "controllable": false,
+                        "default": "false",
+                        "mutable": "null",
+                        "readable": true,
+                        "type": "gboolean",
+                        "writable": true
+                    },
+                    "results-filename": {
+                        "blurb": "VMAF results filename for scores",
+                        "conditionally-available": false,
+                        "construct": false,
+                        "construct-only": false,
+                        "controllable": false,
+                        "default": "NULL",
+                        "mutable": "null",
+                        "readable": true,
+                        "type": "gchararray",
+                        "writable": true
+                    },
+                    "results-format": {
+                        "blurb": "VMAF results file format used for scores (csv, xml, json)",
+                        "conditionally-available": false,
+                        "construct": false,
+                        "construct-only": false,
+                        "controllable": false,
+                        "default": "none (0)",
+                        "mutable": "null",
+                        "readable": true,
+                        "type": "GstVmafResultsFormat",
+                        "writable": true
+                    },
+                    "ssim": {
+                        "blurb": "Estimate SSIM",
+                        "conditionally-available": false,
+                        "construct": false,
+                        "construct-only": false,
+                        "controllable": false,
+                        "default": "false",
+                        "mutable": "null",
+                        "readable": true,
+                        "type": "gboolean",
+                        "writable": true
+                    },
+                    "subsample": {
+                        "blurb": "Computing on one of every N frames",
+                        "conditionally-available": false,
+                        "construct": false,
+                        "construct-only": false,
+                        "controllable": false,
+                        "default": "1",
+                        "max": "128",
+                        "min": "1",
+                        "mutable": "null",
+                        "readable": true,
+                        "type": "guint",
+                        "writable": true
+                    },
+                    "threads": {
+                        "blurb": "The number of threads",
+                        "conditionally-available": false,
+                        "construct": false,
+                        "construct-only": false,
+                        "controllable": false,
+                        "default": "8",
+                        "max": "2147483647",
+                        "min": "0",
+                        "mutable": "null",
+                        "readable": true,
+                        "type": "guint",
+                        "writable": true
+                    }
+                },
+                "rank": "none"
+            }
+        },
+        "filename": "gstvmaf",
+        "license": "LGPL",
+        "other-types": {
+            "GstVmafLogLevel": {
+                "kind": "enum",
+                "values": [
+                    {
+                        "desc": "No logging",
+                        "name": "none",
+                        "value": "0"
+                    },
+                    {
+                        "desc": "Error",
+                        "name": "error",
+                        "value": "1"
+                    },
+                    {
+                        "desc": "Warning",
+                        "name": "warning",
+                        "value": "2"
+                    },
+                    {
+                        "desc": "Info",
+                        "name": "info",
+                        "value": "3"
+                    },
+                    {
+                        "desc": "Debug",
+                        "name": "debug",
+                        "value": "4"
+                    }
+                ]
+            },
+            "GstVmafPoolMethod": {
+                "kind": "enum",
+                "values": [
+                    {
+                        "desc": "Minimum value",
+                        "name": "min",
+                        "value": "1"
+                    },
+                    {
+                        "desc": "Maximum value",
+                        "name": "max",
+                        "value": "2"
+                    },
+                    {
+                        "desc": "Arithmetic mean",
+                        "name": "mean",
+                        "value": "3"
+                    },
+                    {
+                        "desc": "Harmonic mean",
+                        "name": "harmonic_mean",
+                        "value": "4"
+                    }
+                ]
+            },
+            "GstVmafResultsFormat": {
+                "kind": "enum",
+                "values": [
+                    {
+                        "desc": "None",
+                        "name": "none",
+                        "value": "0"
+                    },
+                    {
+                        "desc": "XML",
+                        "name": "xml",
+                        "value": "1"
+                    },
+                    {
+                        "desc": "Comma Separated File (csv)",
+                        "name": "csv",
+                        "value": "3"
+                    },
+                    {
+                        "desc": "JSON",
+                        "name": "json",
+                        "value": "2"
+                    }
+                ]
+            }
+        },
+        "package": "GStreamer Bad Plug-ins",
+        "source": "gst-plugins-bad",
+        "tracers": {},
+        "url": "Unknown package origin"
+    },
     "vmnc": {
         "description": "VmWare Video Codec plugins",
         "elements": {
@@ -256162,7 +256883,7 @@
                 "long-name": "wayland video sink",
                 "pad-templates": {
                     "sink": {
-                        "caps": "video/x-raw(memory:DMABuf):\n         format: DMA_DRM\n          width: [ 1, 2147483647 ]\n         height: [ 1, 2147483647 ]\n      framerate: [ 0/1, 2147483647/1 ]\nvideo/x-raw:\n         format: { BGR10A2_LE, RGB10A2_LE, AYUV, RGBA, ARGB, BGRA, ABGR, BGR10x2_LE, RGB10x2_LE, P010_10LE, NV12_10LE40, v308, RGBx, xRGB, BGRx, xBGR, RGB, BGR, Y42B, NV16, NV61, YUY2, YVYU, UYVY, I420, YV12, NV12, NV21, Y41B, YUV9, YVU9, BGR16, RGB16 }\n          width: [ 1, 2147483647 ]\n         height: [ 1, 2147483647 ]\n      framerate: [ 0/1, 2147483647/1 ]\n",
+                        "caps": "video/x-raw(memory:DMABuf):\n         format: DMA_DRM\n          width: [ 1, 2147483647 ]\n         height: [ 1, 2147483647 ]\n      framerate: [ 0/1, 2147483647/1 ]\nvideo/x-raw:\n         format: { BGR10A2_LE, RGB10A2_LE, AYUV, RGBA, ARGB, BGRA, ABGR, BGR10x2_LE, RGB10x2_LE, P010_10LE, NV12_10LE40, Y444, v308, RGBx, xRGB, BGRx, xBGR, RGB, BGR, Y42B, NV16, NV61, YUY2, YVYU, UYVY, I420, YV12, NV12, NV21, Y41B, YUV9, YVU9, BGR16, RGB16 }\n          width: [ 1, 2147483647 ]\n         height: [ 1, 2147483647 ]\n      framerate: [ 0/1, 2147483647/1 ]\n",
                         "direction": "sink",
                         "presence": "always"
                     }
@@ -256214,6 +256935,18 @@
                         "mutable": "playing",
                         "readable": true,
                         "type": "gboolean",
+                        "writable": true
+                    },
+                    "fullscreen-output": {
+                        "blurb": "The name of the wayland output to fullscreen to.",
+                        "conditionally-available": false,
+                        "construct": false,
+                        "construct-only": false,
+                        "controllable": false,
+                        "default": "NULL",
+                        "mutable": "null",
+                        "readable": true,
+                        "type": "gchararray",
                         "writable": true
                     },
                     "render-rectangle": {
@@ -256805,6 +257538,17 @@
                             }
                         ],
                         "return-type": "gboolean",
+                        "when": "last"
+                    },
+                    "close": {
+                        "action": true,
+                        "args": [
+                            {
+                                "name": "arg0",
+                                "type": "GstPromise"
+                            }
+                        ],
+                        "return-type": "void",
                         "when": "last"
                     },
                     "create-answer": {

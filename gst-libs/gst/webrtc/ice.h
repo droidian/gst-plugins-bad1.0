@@ -233,6 +233,35 @@ struct _GstWebRTCICECandidateStats
 #define GST_WEBRTC_ICE_CANDIDATE_STATS_TCP_TYPE(c) ((c)->ABI.abi.tcp_type)
 
 /**
+ * GstWebRTCICECandidate:
+ * @candidate: String carrying the candidate-attribute as defined in
+ *   section 15.1 of RFC5245
+ * @component: The assigned network component of the candidate (1 for RTP
+ *   2 for RTCP).
+ * @sdp_mid: The media stream "identification-tag" defined in [RFC5888] for the
+ *   media component this candidate is associated with.
+ * @sdp_mline_index: The index (starting at zero) of the media description in
+ *   the SDP this candidate is associated with.
+ * @stats: The #GstWebRTCICECandidateStats associated to this candidate.
+ *
+ * Since: 1.28
+ */
+struct _GstWebRTCICECandidate {
+  gchar                             *candidate;
+  gint                               component;
+  gchar                             *sdp_mid;
+  gint                               sdp_mline_index; /* Set to -1 if unknown. */
+  GstWebRTCICECandidateStats        *stats;
+
+  gpointer _gst_reserved[GST_PADDING_LARGE];
+};
+
+struct _GstWebRTCICECandidatePair {
+  GstWebRTCICECandidate *local;
+  GstWebRTCICECandidate *remote;
+};
+
+/**
  * GstWebRTCICEOnCandidateFunc:
  * @ice: The #GstWebRTCICE
  * @stream_id: The stream id
@@ -320,17 +349,32 @@ struct _GstWebRTCICEClass {
                                                        GstWebRTCICEStream * stream,
                                                        GstWebRTCICECandidateStats ** local_stats,
                                                        GstWebRTCICECandidateStats ** remote_stats);
-  gpointer _gst_reserved[GST_PADDING];
+
+  /**
+   * GstWebRTCICEClass::close:
+   * @ice: a #GstWebRTCICE
+   * @promise: (transfer full) (nullable): a #GstPromise to be notified when the task is
+   * complete.
+   *
+   * Invoke the close procedure as specified in
+   * https://www.w3.org/TR/webrtc/#dom-rtcpeerconnection-close.
+   *
+   * Since: 1.28
+   */
+  void (*close)                                       (GstWebRTCICE * ice,
+                                                       GstPromise * promise);
+
+  gpointer _gst_reserved[GST_PADDING - 1];
 };
 
 GST_WEBRTC_API
 GstWebRTCICEStream *        gst_webrtc_ice_add_stream               (GstWebRTCICE * ice,
-                                                                     guint session_id);
+                                                                     guint session_id) G_GNUC_WARN_UNUSED_RESULT;
 
 GST_WEBRTC_API
 GstWebRTCICETransport *     gst_webrtc_ice_find_transport           (GstWebRTCICE * ice,
                                                                      GstWebRTCICEStream * stream,
-                                                                     GstWebRTCICEComponent component);
+                                                                     GstWebRTCICEComponent component) G_GNUC_WARN_UNUSED_RESULT;
 
 
 GST_WEBRTC_API
@@ -377,21 +421,21 @@ void                        gst_webrtc_ice_set_stun_server          (GstWebRTCIC
                                                                      const gchar * uri);
 
 GST_WEBRTC_API
-gchar *                     gst_webrtc_ice_get_stun_server          (GstWebRTCICE * ice);
+gchar *                     gst_webrtc_ice_get_stun_server          (GstWebRTCICE * ice) G_GNUC_WARN_UNUSED_RESULT;
 
 GST_WEBRTC_API
 void                        gst_webrtc_ice_set_turn_server          (GstWebRTCICE * ice,
                                                                      const gchar * uri);
 
 GST_WEBRTC_API
-gchar *                     gst_webrtc_ice_get_turn_server          (GstWebRTCICE * ice);
+gchar *                     gst_webrtc_ice_get_turn_server          (GstWebRTCICE * ice) G_GNUC_WARN_UNUSED_RESULT;
 
 GST_WEBRTC_API
 void                        gst_webrtc_ice_set_http_proxy           (GstWebRTCICE * ice,
                                                                      const gchar * uri);
 
 GST_WEBRTC_API
-gchar *                     gst_webrtc_ice_get_http_proxy           (GstWebRTCICE * ice);
+gchar *                     gst_webrtc_ice_get_http_proxy           (GstWebRTCICE * ice) G_GNUC_WARN_UNUSED_RESULT;
 
 GST_WEBRTC_API
 void                        gst_webrtc_ice_set_on_ice_candidate     (GstWebRTCICE * ice,
@@ -406,17 +450,19 @@ void                        gst_webrtc_ice_set_tos                  (GstWebRTCIC
 
 GST_WEBRTC_API
 GstWebRTCICECandidateStats** gst_webrtc_ice_get_local_candidates    (GstWebRTCICE * ice,
-                                                                     GstWebRTCICEStream * stream);
+                                                                     GstWebRTCICEStream * stream) G_GNUC_WARN_UNUSED_RESULT;
 
 GST_WEBRTC_API
 GstWebRTCICECandidateStats** gst_webrtc_ice_get_remote_candidates   (GstWebRTCICE * ice,
-                                                                     GstWebRTCICEStream * stream);
+                                                                     GstWebRTCICEStream * stream) G_GNUC_WARN_UNUSED_RESULT;
 
-GST_WEBRTC_API
+#ifndef GST_DISABLE_DEPRECATED
+GST_WEBRTC_DEPRECATED_FOR(gst_webrtc_ice_transport_get_selected_pair)
 gboolean                    gst_webrtc_ice_get_selected_pair        (GstWebRTCICE * ice,
                                                                      GstWebRTCICEStream * stream,
                                                                      GstWebRTCICECandidateStats ** local_stats,
                                                                      GstWebRTCICECandidateStats ** remote_stats);
+#endif
 
 GST_WEBRTC_API
 void                        gst_webrtc_ice_candidate_stats_free     (GstWebRTCICECandidateStats * stats);
@@ -427,7 +473,29 @@ GType                       gst_webrtc_ice_candidate_stats_get_type (void);
 G_DEFINE_AUTOPTR_CLEANUP_FUNC(GstWebRTCICE, gst_object_unref)
 
 GST_WEBRTC_API
-GstWebRTCICECandidateStats * gst_webrtc_ice_candidate_stats_copy   (GstWebRTCICECandidateStats *stats);
+GstWebRTCICECandidateStats * gst_webrtc_ice_candidate_stats_copy   (GstWebRTCICECandidateStats *stats) G_GNUC_WARN_UNUSED_RESULT;
+
+GST_WEBRTC_API
+void                         gst_webrtc_ice_close                  (GstWebRTCICE * ice,
+                                                                    GstPromise * promise);
+
+GST_WEBRTC_API
+void                        gst_webrtc_ice_candidate_free           (GstWebRTCICECandidate * candidate);
+
+GST_WEBRTC_API
+GType                       gst_webrtc_ice_candidate_get_type       (void);
+
+GST_WEBRTC_API
+GstWebRTCICECandidate *     gst_webrtc_ice_candidate_copy           (GstWebRTCICECandidate * candidate);
+
+GST_WEBRTC_API
+void                        gst_webrtc_ice_candidate_pair_free      (GstWebRTCICECandidatePair * pair);
+
+GST_WEBRTC_API
+GType                       gst_webrtc_ice_candidate_pair_get_type  (void);
+
+GST_WEBRTC_API
+GstWebRTCICECandidatePair * gst_webrtc_ice_candidate_pair_copy      (GstWebRTCICECandidatePair * pair);
 
 G_END_DECLS
 

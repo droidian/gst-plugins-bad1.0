@@ -755,6 +755,7 @@ gst_base_ts_mux_create_or_update_stream (GstBaseTsMux * mux,
       goto not_negotiated;
     }
 
+    /* First check for the cases that have a simplified configuration */
     if (channels <= 2 && mapping_family == 0) {
       opus_channel_config[0] = channels;
       opus_channel_config_len = 1;
@@ -802,11 +803,11 @@ gst_base_ts_mux_create_or_update_stream (GstBaseTsMux * mux,
               channels) == 0) {
         opus_channel_config[0] = channels | 0x80;
         opus_channel_config_len = 1;
-      } else {
-        GST_FIXME_OBJECT (ts_pad, "Opus channel mapping not handled");
-        goto not_negotiated;
       }
-    } else {
+    }
+
+    /* If none of the simple cases matched, write out the full configuration */
+    if (opus_channel_config_len == 0) {
       GstBitWriter writer;
       guint i;
       guint n_bits;
@@ -1706,15 +1707,6 @@ gst_base_ts_mux_aggregate_buffer (GstBaseTsMux * mux,
   if (best->stream->gst_stream_type == GST_STREAM_TYPE_VIDEO) {
     delta = GST_BUFFER_FLAG_IS_SET (buf, GST_BUFFER_FLAG_DELTA_UNIT);
     header = GST_BUFFER_FLAG_IS_SET (buf, GST_BUFFER_FLAG_HEADER);
-  }
-
-  if (best->stream->internal_stream_type == TSMUX_ST_PS_KLV &&
-      gst_buffer_get_size (buf) > (G_MAXUINT16 - 3)) {
-    GST_WARNING_OBJECT (mux, "KLV meta unit too big, splitting not supported");
-
-    gst_buffer_unref (buf);
-    g_mutex_unlock (&mux->lock);
-    return GST_FLOW_OK;
   }
 
   GST_DEBUG_OBJECT (mux, "delta: %d", delta);
@@ -2680,7 +2672,7 @@ gst_base_ts_mux_find_best_pad (GstAggregator * aggregator,
 
     buffer = gst_aggregator_pad_peek_buffer (apad);
     if (!buffer) {
-      if (!timeout && !GST_PAD_IS_EOS (apad)) {
+      if (!timeout && !gst_aggregator_pad_is_eos (apad)) {
         best = NULL;
         best_ts = GST_CLOCK_TIME_NONE;
         break;
@@ -2914,15 +2906,15 @@ gst_base_ts_mux_set_property (GObject * object, guint prop_id,
       break;
     case PROP_PMT_INTERVAL:
       mux->pmt_interval = g_value_get_uint (value);
+      g_mutex_lock (&mux->lock);
       GST_OBJECT_LOCK (mux);
       for (l = GST_ELEMENT_CAST (mux)->sinkpads; l; l = l->next) {
         GstBaseTsMuxPad *ts_pad = GST_BASE_TS_MUX_PAD (l->data);
 
-        g_mutex_lock (&mux->lock);
         tsmux_set_pmt_interval (ts_pad->prog, mux->pmt_interval);
-        g_mutex_unlock (&mux->lock);
       }
       GST_OBJECT_UNLOCK (mux);
+      g_mutex_unlock (&mux->lock);
       break;
     case PROP_ALIGNMENT:
       mux->alignment = g_value_get_int (value);

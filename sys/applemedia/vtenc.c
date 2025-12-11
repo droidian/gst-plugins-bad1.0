@@ -290,7 +290,8 @@ gst_vtenc_rate_control_get_type (void)
 }
 
 static GstStaticCaps sink_caps =
-GST_STATIC_CAPS (GST_VIDEO_CAPS_MAKE ("{ AYUV64, UYVY, NV12, I420 }"));
+GST_STATIC_CAPS (GST_VIDEO_CAPS_MAKE
+    ("{ AYUV64, UYVY, NV12, I420, P010_10LE }"));
 
 static void
 gst_vtenc_base_init (GstVTEncClass * klass)
@@ -364,13 +365,17 @@ gst_vtenc_base_init (GstVTEncClass * klass)
     GValue val = G_VALUE_INIT;
 
     g_value_init (&val, G_TYPE_STRING);
+
     g_value_set_string (&val, "progressive");
     arr = g_value_array_append (arr, &val);
+
     g_value_set_string (&val, "interleaved");
     arr = g_value_array_append (arr, &val);
-    G_GNUC_END_IGNORE_DEPRECATIONS;
+
     gst_structure_set_list (gst_caps_get_structure (src_caps, 0),
         "interlace-mode", arr);
+    g_value_array_free (arr);
+    G_GNUC_END_IGNORE_DEPRECATIONS;
   }
 
   switch (codec_details->format_id) {

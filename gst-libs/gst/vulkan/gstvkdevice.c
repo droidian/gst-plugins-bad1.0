@@ -221,7 +221,7 @@ can_enable_api_version (const struct extension *extension,
           VK_VERSION_MAJOR (extension->min_api_version),
           VK_VERSION_MINOR (extension->min_api_version),
           VK_VERSION_PATCH (extension->min_api_version))) {
-    if (!extension->is_enabled)
+    if (extension->is_enabled && !extension->is_enabled (phy_dev))
       return FALSE;
     if (extension->dependency) {
       return gst_vulkan_physical_device_get_extension_info (phy_dev,
@@ -246,7 +246,18 @@ static const struct extension optional_extensions[] = {
   OPTIONAL_EXTENSION_VERSION (VK_KHR_SWAPCHAIN_EXTENSION_NAME,
       VK_MAKE_VERSION (1, 0, 0), NEVER_VK_VERSION),
   OPTIONAL_EXTENSION_VERSION (VK_KHR_SAMPLER_YCBCR_CONVERSION_EXTENSION_NAME,
+      VK_MAKE_VERSION (1, 0, 0), NEVER_VK_VERSION),
+#if defined(VK_KHR_get_physical_device_properties2)
+  OPTIONAL_EXTENSION_VERSION
+      (VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME,
       VK_MAKE_VERSION (1, 0, 0), VK_MAKE_VERSION (1, 1, 0)),
+#endif
+#if defined(VK_KHR_format_feature_flags2)
+  /* TODO: dependency on VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME
+   * in 1.0 */
+  OPTIONAL_EXTENSION_VERSION (VK_KHR_FORMAT_FEATURE_FLAGS_2_EXTENSION_NAME,
+      VK_MAKE_VERSION (1, 1, 0), VK_MAKE_VERSION (1, 3, 0)),
+#endif
 #if defined(VK_KHR_timeline_semaphore)
   OPTIONAL_EXTENSION_VERSION (VK_KHR_TIMELINE_SEMAPHORE_EXTENSION_NAME,
       VK_MAKE_VERSION (1, 1, 0), VK_MAKE_VERSION (1, 2, 0)),
@@ -271,6 +282,10 @@ static const struct extension optional_extensions[] = {
 # endif
 # if defined(VK_KHR_video_decode_h265)
   OPTIONAL_VIDEO_EXTENSION (VK_KHR_VIDEO_DECODE_H265_EXTENSION_NAME,
+      VK_KHR_VIDEO_DECODE_QUEUE_EXTENSION_NAME, none),
+# endif
+# if defined(VK_KHR_video_decode_av1)
+  OPTIONAL_VIDEO_EXTENSION (VK_KHR_VIDEO_DECODE_AV1_EXTENSION_NAME,
       VK_KHR_VIDEO_DECODE_QUEUE_EXTENSION_NAME, none),
 # endif
 # if defined(VK_KHR_video_encode_queue)

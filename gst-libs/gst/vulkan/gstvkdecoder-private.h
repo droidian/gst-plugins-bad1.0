@@ -35,7 +35,7 @@ GST_VULKAN_API
 GType gst_vulkan_decoder_get_type       (void);
 
 enum {
-  GST_VULKAN_DECODER_FEATURES_VIDEO_MAINTEINANCE2 = 1 << 0,
+  GST_VULKAN_DECODER_FEATURE_INLINE_PARAMS = 1 << 0,
 };
 
 typedef struct _GstVulkanDecoder GstVulkanDecoder;
@@ -108,7 +108,7 @@ struct _GstVulkanDecoder
   gboolean dedicated_dpb;
   gboolean layered_dpb;
 
-  guint32 features;
+
 
   /*< private >*/
   gpointer _reserved        [GST_PADDING];
@@ -139,6 +139,7 @@ union _GstVulkanDecoderParameters
   /*< private >*/
   VkVideoDecodeH264SessionParametersCreateInfoKHR h264;
   VkVideoDecodeH265SessionParametersCreateInfoKHR h265;
+  VkVideoDecodeAV1SessionParametersCreateInfoKHR av1;
 };
 
 G_DEFINE_AUTOPTR_CLEANUP_FUNC (GstVulkanDecoder, gst_object_unref)
@@ -204,5 +205,8 @@ gboolean                gst_vulkan_decoder_append_slice         (GstVulkanDecode
 
 GST_VULKAN_API
 gboolean               gst_vulkan_decoder_wait                  (GstVulkanDecoder * self);
+
+GST_VULKAN_API
+gboolean               gst_vulkan_decoder_has_feature           (GstVulkanDecoder * self, guint32 feature);
 
 G_END_DECLS

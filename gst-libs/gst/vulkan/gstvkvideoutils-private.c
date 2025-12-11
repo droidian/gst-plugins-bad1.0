@@ -43,7 +43,14 @@ static const struct {
       VK_STRUCTURE_TYPE_VIDEO_ENCODE_H265_PROFILE_INFO_KHR },
   { GST_VULKAN_VIDEO_OPERATION_ENCODE, VK_VIDEO_CODEC_OPERATION_ENCODE_AV1_BIT_KHR, "video/x-av1",
       VK_STRUCTURE_TYPE_VIDEO_ENCODE_AV1_PROFILE_INFO_KHR },
+  { GST_VULKAN_VIDEO_OPERATION_DECODE, VK_VIDEO_CODEC_OPERATION_DECODE_AV1_BIT_KHR, "video/x-av1",
+      VK_STRUCTURE_TYPE_VIDEO_DECODE_AV1_PROFILE_INFO_KHR },
 };
+
+#define VK_VIDEO_CHROMA_SUBSAMPLING_ANY                                 \
+  VK_VIDEO_CHROMA_SUBSAMPLING_420_BIT_KHR                               \
+  | VK_VIDEO_CHROMA_SUBSAMPLING_422_BIT_KHR                             \
+  | VK_VIDEO_CHROMA_SUBSAMPLING_444_BIT_KHR
 
 static const struct {
   VkVideoChromaSubsamplingFlagBitsKHR chroma;
@@ -54,20 +61,25 @@ static const struct {
   { VK_VIDEO_CHROMA_SUBSAMPLING_444_BIT_KHR, "4:4:4" },
 };
 
+#define VK_VIDEO_COMPONENT_BIT_DEPTH_ANY    \
+  VK_VIDEO_COMPONENT_BIT_DEPTH_8_BIT_KHR    \
+  | VK_VIDEO_COMPONENT_BIT_DEPTH_10_BIT_KHR \
+  | VK_VIDEO_COMPONENT_BIT_DEPTH_12_BIT_KHR
+
 static const struct {
   VkVideoComponentBitDepthFlagBitsKHR bitdepth;
   int bit_depth;
 } bit_depth_map[] = {
-  {VK_VIDEO_COMPONENT_BIT_DEPTH_8_BIT_KHR, 8},
-  {VK_VIDEO_COMPONENT_BIT_DEPTH_10_BIT_KHR, 10},
-  {VK_VIDEO_COMPONENT_BIT_DEPTH_12_BIT_KHR, 12},
+  { VK_VIDEO_COMPONENT_BIT_DEPTH_8_BIT_KHR, 8 },
+  { VK_VIDEO_COMPONENT_BIT_DEPTH_10_BIT_KHR, 10 },
+  { VK_VIDEO_COMPONENT_BIT_DEPTH_12_BIT_KHR, 12 },
 };
 
 static const struct {
   StdVideoH264ProfileIdc vk_profile;
   const char *profile_str;
 } h264_profile_map[] = {
-  { STD_VIDEO_H264_PROFILE_IDC_BASELINE, "baseline" },
+  { STD_VIDEO_H264_PROFILE_IDC_BASELINE, "constrained-baseline" },
   { STD_VIDEO_H264_PROFILE_IDC_MAIN, "main" },
   { STD_VIDEO_H264_PROFILE_IDC_HIGH, "high" },
   { STD_VIDEO_H264_PROFILE_IDC_HIGH_444_PREDICTIVE, "high-4:4:4" },
@@ -86,14 +98,33 @@ static const struct {
 
 static const struct {
   StdVideoH265ProfileIdc vk_profile;
+  VkVideoChromaSubsamplingFlagsKHR subsampling;
+  VkVideoComponentBitDepthFlagsKHR depth;
   const char *profile_str;
 } h265_profile_map[] = {
-  { STD_VIDEO_H265_PROFILE_IDC_MAIN, "main" },
-  { STD_VIDEO_H265_PROFILE_IDC_MAIN_10, "main-10" },
-  { STD_VIDEO_H265_PROFILE_IDC_MAIN_STILL_PICTURE, "main-still-picture" },
-  { STD_VIDEO_H265_PROFILE_IDC_FORMAT_RANGE_EXTENSIONS,
-      "format-range-extensions" },
-  { STD_VIDEO_H265_PROFILE_IDC_SCC_EXTENSIONS, "scc-extensions" },
+  { STD_VIDEO_H265_PROFILE_IDC_MAIN, VK_VIDEO_CHROMA_SUBSAMPLING_ANY, VK_VIDEO_COMPONENT_BIT_DEPTH_ANY, "main" },
+  { STD_VIDEO_H265_PROFILE_IDC_MAIN_10, VK_VIDEO_CHROMA_SUBSAMPLING_ANY, VK_VIDEO_COMPONENT_BIT_DEPTH_ANY, "main-10" },
+  { STD_VIDEO_H265_PROFILE_IDC_MAIN_STILL_PICTURE, VK_VIDEO_CHROMA_SUBSAMPLING_420_BIT_KHR, VK_VIDEO_COMPONENT_BIT_DEPTH_ANY, "main-still-picture" },
+  { STD_VIDEO_H265_PROFILE_IDC_MAIN_STILL_PICTURE, VK_VIDEO_CHROMA_SUBSAMPLING_422_BIT_KHR, VK_VIDEO_COMPONENT_BIT_DEPTH_ANY, "main-still-picture" },
+  { STD_VIDEO_H265_PROFILE_IDC_MAIN_STILL_PICTURE, VK_VIDEO_CHROMA_SUBSAMPLING_444_BIT_KHR, VK_VIDEO_COMPONENT_BIT_DEPTH_ANY, "main-444-still-picture" },
+  /* { STD_VIDEO_H265_PROFILE_IDC_FORMAT_RANGE_EXTENSIONS, VK_VIDEO_CHROMA_SUBSAMPLING_420_BIT_KHR, VK_VIDEO_COMPONENT_BIT_DEPTH_8_BIT_KHR, "XXX" }, */
+  /* { STD_VIDEO_H265_PROFILE_IDC_FORMAT_RANGE_EXTENSIONS, VK_VIDEO_CHROMA_SUBSAMPLING_420_BIT_KHR, VK_VIDEO_COMPONENT_BIT_DEPTH_10_BIT_KHR, "XXX" }, */
+  { STD_VIDEO_H265_PROFILE_IDC_FORMAT_RANGE_EXTENSIONS, VK_VIDEO_CHROMA_SUBSAMPLING_420_BIT_KHR, VK_VIDEO_COMPONENT_BIT_DEPTH_12_BIT_KHR, "main-12" },
+  { STD_VIDEO_H265_PROFILE_IDC_FORMAT_RANGE_EXTENSIONS, VK_VIDEO_CHROMA_SUBSAMPLING_422_BIT_KHR, VK_VIDEO_COMPONENT_BIT_DEPTH_8_BIT_KHR, "main-422" },
+  { STD_VIDEO_H265_PROFILE_IDC_FORMAT_RANGE_EXTENSIONS, VK_VIDEO_CHROMA_SUBSAMPLING_422_BIT_KHR, VK_VIDEO_COMPONENT_BIT_DEPTH_10_BIT_KHR, "main-422-10" },
+  { STD_VIDEO_H265_PROFILE_IDC_FORMAT_RANGE_EXTENSIONS, VK_VIDEO_CHROMA_SUBSAMPLING_422_BIT_KHR, VK_VIDEO_COMPONENT_BIT_DEPTH_12_BIT_KHR, "main-422-12" },
+  { STD_VIDEO_H265_PROFILE_IDC_FORMAT_RANGE_EXTENSIONS, VK_VIDEO_CHROMA_SUBSAMPLING_444_BIT_KHR, VK_VIDEO_COMPONENT_BIT_DEPTH_8_BIT_KHR, "main-444" },
+  { STD_VIDEO_H265_PROFILE_IDC_FORMAT_RANGE_EXTENSIONS, VK_VIDEO_CHROMA_SUBSAMPLING_444_BIT_KHR, VK_VIDEO_COMPONENT_BIT_DEPTH_10_BIT_KHR, "main-444-10" },
+  { STD_VIDEO_H265_PROFILE_IDC_FORMAT_RANGE_EXTENSIONS, VK_VIDEO_CHROMA_SUBSAMPLING_444_BIT_KHR, VK_VIDEO_COMPONENT_BIT_DEPTH_12_BIT_KHR, "main-444-12" },
+  { STD_VIDEO_H265_PROFILE_IDC_SCC_EXTENSIONS, VK_VIDEO_CHROMA_SUBSAMPLING_420_BIT_KHR, VK_VIDEO_COMPONENT_BIT_DEPTH_8_BIT_KHR, "screen-extended-main" },
+  { STD_VIDEO_H265_PROFILE_IDC_SCC_EXTENSIONS, VK_VIDEO_CHROMA_SUBSAMPLING_420_BIT_KHR, VK_VIDEO_COMPONENT_BIT_DEPTH_10_BIT_KHR, "screen-extended-main-10" },
+  /* { STD_VIDEO_H265_PROFILE_IDC_SCC_EXTENSIONS, VK_VIDEO_CHROMA_SUBSAMPLING_420_BIT_KHR, VK_VIDEO_COMPONENT_BIT_DEPTH_12_BIT_KHR, "XXX" }, */
+  /* { STD_VIDEO_H265_PROFILE_IDC_SCC_EXTENSIONS, VK_VIDEO_CHROMA_SUBSAMPLING_422_BIT_KHR, VK_VIDEO_COMPONENT_BIT_DEPTH_8_BIT_KHR, "XXX" }, */
+  /* { STD_VIDEO_H265_PROFILE_IDC_SCC_EXTENSIONS, VK_VIDEO_CHROMA_SUBSAMPLING_422_BIT_KHR, VK_VIDEO_COMPONENT_BIT_DEPTH_10_BIT_KHR, "XXX" }, */
+  /* { STD_VIDEO_H265_PROFILE_IDC_SCC_EXTENSIONS, VK_VIDEO_CHROMA_SUBSAMPLING_422_BIT_KHR, VK_VIDEO_COMPONENT_BIT_DEPTH_12_BIT_KHR, "XXX" }, */
+  { STD_VIDEO_H265_PROFILE_IDC_SCC_EXTENSIONS, VK_VIDEO_CHROMA_SUBSAMPLING_444_BIT_KHR, VK_VIDEO_COMPONENT_BIT_DEPTH_8_BIT_KHR, "screen-extended-main-444" },
+  { STD_VIDEO_H265_PROFILE_IDC_SCC_EXTENSIONS, VK_VIDEO_CHROMA_SUBSAMPLING_444_BIT_KHR, VK_VIDEO_COMPONENT_BIT_DEPTH_10_BIT_KHR, "screen-extended-main-444-10" },
+  /* { STD_VIDEO_H265_PROFILE_IDC_SCC_EXTENSIONS, VK_VIDEO_CHROMA_SUBSAMPLING_444_BIT_KHR, VK_VIDEO_COMPONENT_BIT_DEPTH_12_BIT_KHR, "XXX" }, */
 };
 
 static const struct {
@@ -115,6 +146,24 @@ static const struct {
 };
 /* *INDENT-ON* */
 
+typedef enum _GstVulkanVideoProfileFeature
+{
+  NO = 0,
+  YES = 1,
+  UNDEFINED = -1,
+} GstVulkanVideoProfileFeature;
+
+static inline gboolean
+h265_subsampling_match (const VkVideoProfileInfoKHR * profile, int i)
+{
+  return (((profile->chromaSubsampling & h265_profile_map[i].subsampling) ==
+          profile->chromaSubsampling)
+      && ((profile->chromaBitDepth & h265_profile_map[i].depth) ==
+          profile->chromaBitDepth)
+      && ((profile->lumaBitDepth & h265_profile_map[i].depth) ==
+          profile->lumaBitDepth));
+}
+
 /**
  * gst_vulkan_video_profile_to_caps: (skip)
  * @profile: #GstVulkanVideoProfile to convert into a #GstCaps
@@ -129,6 +178,7 @@ gst_vulkan_video_profile_to_caps (const GstVulkanVideoProfile * profile)
   const char *mime = NULL, *chroma_sub = NULL;
   const char *profile_str = NULL, *layout = NULL;
   int i, luma = 0, chroma = 0;
+  GstVulkanVideoProfileFeature film_grain = UNDEFINED;
   GstCaps *caps;
 
   g_return_val_if_fail (profile
@@ -163,9 +213,12 @@ gst_vulkan_video_profile_to_caps (const GstVulkanVideoProfile * profile)
           if (profile->codec.h265dec.sType == video_codecs_map[i].stype) {
             int j;
             for (j = 0; j < G_N_ELEMENTS (h265_profile_map); j++) {
-              if (profile->codec.h265dec.stdProfileIdc
-                  == h265_profile_map[j].vk_profile)
+              if ((profile->codec.h265dec.stdProfileIdc
+                      == h265_profile_map[j].vk_profile)
+                  && h265_subsampling_match (&profile->profile, j)) {
                 profile_str = h265_profile_map[j].profile_str;
+                break;
+              }
             }
           }
           break;
@@ -174,8 +227,24 @@ gst_vulkan_video_profile_to_caps (const GstVulkanVideoProfile * profile)
             int j;
             for (j = 0; j < G_N_ELEMENTS (vp9_profile_map); j++) {
               if (profile->codec.vp9dec.stdProfile
-                  == vp9_profile_map[j].vk_profile)
+                  == vp9_profile_map[j].vk_profile) {
                 profile_str = vp9_profile_map[j].profile_str;
+                break;
+              }
+            }
+          }
+          break;
+        case VK_VIDEO_CODEC_OPERATION_DECODE_AV1_BIT_KHR:
+          if (profile->codec.av1dec.sType == video_codecs_map[i].stype) {
+            int j;
+            for (j = 0; j < G_N_ELEMENTS (av1_profile_map); j++) {
+              if (profile->codec.av1dec.stdProfile
+                  == av1_profile_map[j].vk_profile) {
+                profile_str = av1_profile_map[j].profile_str;
+                film_grain = profile->codec.av1dec.filmGrainSupport == VK_TRUE ?
+                    YES : NO;
+                break;
+              }
             }
           }
           break;
@@ -184,8 +253,10 @@ gst_vulkan_video_profile_to_caps (const GstVulkanVideoProfile * profile)
             int j;
             for (j = 0; j < G_N_ELEMENTS (h264_profile_map); j++) {
               if (profile->codec.h264enc.stdProfileIdc
-                  == h264_profile_map[j].vk_profile)
+                  == h264_profile_map[j].vk_profile) {
                 profile_str = h264_profile_map[j].profile_str;
+                break;
+              }
             }
           }
           break;
@@ -193,9 +264,12 @@ gst_vulkan_video_profile_to_caps (const GstVulkanVideoProfile * profile)
           if (profile->codec.h265enc.sType == video_codecs_map[i].stype) {
             int j;
             for (j = 0; j < G_N_ELEMENTS (h265_profile_map); j++) {
-              if (profile->codec.h265enc.stdProfileIdc
-                  == h265_profile_map[j].vk_profile)
+              if ((profile->codec.h265enc.stdProfileIdc
+                      == h265_profile_map[j].vk_profile)
+                  && h265_subsampling_match (&profile->profile, j)) {
                 profile_str = h265_profile_map[j].profile_str;
+                break;
+              }
             }
           }
           break;
@@ -204,8 +278,10 @@ gst_vulkan_video_profile_to_caps (const GstVulkanVideoProfile * profile)
             int j;
             for (j = 0; j < G_N_ELEMENTS (av1_profile_map); j++) {
               if (profile->codec.av1enc.stdProfile
-                  == av1_profile_map[j].vk_profile)
+                  == av1_profile_map[j].vk_profile) {
                 profile_str = av1_profile_map[j].profile_str;
+                break;
+              }
             }
           }
           break;
@@ -217,6 +293,9 @@ gst_vulkan_video_profile_to_caps (const GstVulkanVideoProfile * profile)
     }
   }
   if (i == G_N_ELEMENTS (video_codecs_map))
+    return NULL;
+
+  if (!profile_str)
     return NULL;
 
   for (i = 0; i < G_N_ELEMENTS (video_chroma_map); i++) {
@@ -246,14 +325,17 @@ gst_vulkan_video_profile_to_caps (const GstVulkanVideoProfile * profile)
   if (i == G_N_ELEMENTS (bit_depth_map))
     return NULL;
 
-  caps = gst_caps_new_simple (mime, "chroma-format", G_TYPE_STRING, chroma_sub,
-      "bit-depth-luma", G_TYPE_UINT, luma, "bit-depth-chroma", G_TYPE_UINT,
-      chroma, NULL);
+  caps = gst_caps_new_simple (mime, "profile", G_TYPE_STRING, profile_str,
+      "chroma-format", G_TYPE_STRING, chroma_sub, "bit-depth-luma", G_TYPE_UINT,
+      luma, "bit-depth-chroma", G_TYPE_UINT, chroma, NULL);
 
-  if (profile_str)
-    gst_caps_set_simple (caps, "profile", G_TYPE_STRING, profile_str, NULL);
   if (layout)
     gst_caps_set_simple (caps, "interlace-mode", G_TYPE_STRING, layout, NULL);
+
+  if (film_grain != UNDEFINED) {
+    gst_caps_set_simple (caps, "film-grain", G_TYPE_BOOLEAN,
+        film_grain == YES ? TRUE : FALSE, NULL);
+  }
 
   return caps;
 }
@@ -273,8 +355,8 @@ gst_vulkan_video_profile_from_caps (GstVulkanVideoProfile * profile,
     GstCaps * caps, GstVulkanVideoOperation video_operation)
 {
   const GstStructure *structure;
-  const gchar *mime, *chroma_sub, *profile_str = NULL, *layout = NULL;
-  gint i, luma, chroma;
+  const gchar *mime, *profile_str = NULL, *layout = NULL;
+  gint i;
 
   g_return_val_if_fail (GST_IS_CAPS (caps), FALSE);
   g_return_val_if_fail (profile, FALSE);
@@ -290,6 +372,46 @@ gst_vulkan_video_profile_from_caps (GstVulkanVideoProfile * profile,
   profile->profile.pNext = &profile->usage;
 
   mime = gst_structure_get_name (structure);
+
+  {
+    gint i, luma, chroma;
+    const gchar *chroma_sub;
+
+    chroma_sub = gst_structure_get_string (structure, "chroma-format");
+    if (!chroma_sub)
+      return FALSE;
+    if (!gst_structure_get (structure, "bit-depth-luma", G_TYPE_UINT, &luma,
+            "bit-depth-chroma", G_TYPE_UINT, &chroma, NULL))
+      return FALSE;
+
+    for (i = 0; i < G_N_ELEMENTS (video_chroma_map); i++) {
+      if (g_strcmp0 (chroma_sub, video_chroma_map[i].chroma_str) == 0) {
+        profile->profile.chromaSubsampling = video_chroma_map[i].chroma;
+        break;
+      }
+    }
+    if (i == G_N_ELEMENTS (video_chroma_map))
+      return FALSE;
+
+    for (i = 0; i < G_N_ELEMENTS (bit_depth_map); i++) {
+      if (luma == bit_depth_map[i].bit_depth) {
+        profile->profile.lumaBitDepth = bit_depth_map[i].bitdepth;
+        break;
+      }
+    }
+    if (i == G_N_ELEMENTS (bit_depth_map))
+      return FALSE;
+
+    for (i = 0; i < G_N_ELEMENTS (bit_depth_map); i++) {
+      if (chroma == bit_depth_map[i].bit_depth) {
+        profile->profile.chromaBitDepth = bit_depth_map[i].bitdepth;
+        break;
+      }
+    }
+    if (i == G_N_ELEMENTS (bit_depth_map))
+      return FALSE;
+  }
+
   for (i = 0; i < G_N_ELEMENTS (video_codecs_map); i++) {
     if ((video_codecs_map[i].video_operation == video_operation)
         && (g_strcmp0 (video_codecs_map[i].mime, mime) == 0)) {
@@ -332,8 +454,10 @@ gst_vulkan_video_profile_from_caps (GstVulkanVideoProfile * profile,
           profile->usage.decode.pNext = &profile->codec;
 
           profile_str = gst_structure_get_string (structure, "profile");
+
           for (j = 0; profile_str && j < G_N_ELEMENTS (h265_profile_map); j++) {
-            if (g_strcmp0 (profile_str, h265_profile_map[j].profile_str) == 0) {
+            if ((g_strcmp0 (profile_str, h265_profile_map[j].profile_str) == 0)
+                && h265_subsampling_match (&profile->profile, j)) {
               profile->codec.h265dec.stdProfileIdc =
                   h265_profile_map[j].vk_profile;
               break;
@@ -355,6 +479,29 @@ gst_vulkan_video_profile_from_caps (GstVulkanVideoProfile * profile,
               break;
             }
           }
+          break;
+        }
+        case VK_VIDEO_CODEC_OPERATION_DECODE_AV1_BIT_KHR:{
+          int j;
+          gboolean film_grain;
+
+          profile->codec.av1dec.sType = video_codecs_map[i].stype;
+          profile->codec.av1dec.stdProfile = STD_VIDEO_AV1_PROFILE_INVALID;
+          profile->usage.decode.pNext = &profile->codec;
+
+          profile_str = gst_structure_get_string (structure, "profile");
+          for (j = 0; profile_str && j < G_N_ELEMENTS (av1_profile_map); j++) {
+            if (g_strcmp0 (profile_str, av1_profile_map[j].profile_str) == 0) {
+              profile->codec.av1dec.stdProfile = av1_profile_map[j].vk_profile;
+              break;
+            }
+          }
+
+          if (gst_structure_get_boolean (structure, "film-grain", &film_grain)) {
+            profile->codec.av1dec.filmGrainSupport =
+                film_grain ? VK_TRUE : VK_FALSE;
+          }
+
           break;
         }
         case VK_VIDEO_CODEC_OPERATION_ENCODE_H264_BIT_KHR:{
@@ -385,7 +532,8 @@ gst_vulkan_video_profile_from_caps (GstVulkanVideoProfile * profile,
 
           profile_str = gst_structure_get_string (structure, "profile");
           for (j = 0; profile_str && j < G_N_ELEMENTS (h265_profile_map); j++) {
-            if (g_strcmp0 (profile_str, h265_profile_map[j].profile_str) == 0) {
+            if ((g_strcmp0 (profile_str, h265_profile_map[j].profile_str) == 0)
+                && h265_subsampling_match (&profile->profile, j)) {
               profile->codec.h265enc.stdProfileIdc =
                   h265_profile_map[j].vk_profile;
               break;
@@ -419,39 +567,7 @@ gst_vulkan_video_profile_from_caps (GstVulkanVideoProfile * profile,
   }
   if (i == G_N_ELEMENTS (video_codecs_map))
     return FALSE;
-  chroma_sub = gst_structure_get_string (structure, "chroma-format");
-  if (!chroma_sub)
-    return FALSE;
-  if (!gst_structure_get (structure, "bit-depth-luma", G_TYPE_UINT, &luma,
-          "bit-depth-chroma", G_TYPE_UINT, &chroma, NULL))
-    return FALSE;
 
-  for (i = 0; i < G_N_ELEMENTS (video_chroma_map); i++) {
-    if (g_strcmp0 (chroma_sub, video_chroma_map[i].chroma_str) == 0) {
-      profile->profile.chromaSubsampling = video_chroma_map[i].chroma;
-      break;
-    }
-  }
-  if (i == G_N_ELEMENTS (video_chroma_map))
-    return FALSE;
-
-  for (i = 0; i < G_N_ELEMENTS (bit_depth_map); i++) {
-    if (luma == bit_depth_map[i].bit_depth) {
-      profile->profile.lumaBitDepth = bit_depth_map[i].bitdepth;
-      break;
-    }
-  }
-  if (i == G_N_ELEMENTS (bit_depth_map))
-    return FALSE;
-
-  for (i = 0; i < G_N_ELEMENTS (bit_depth_map); i++) {
-    if (chroma == bit_depth_map[i].bit_depth) {
-      profile->profile.chromaBitDepth = bit_depth_map[i].bitdepth;
-      break;
-    }
-  }
-  if (i == G_N_ELEMENTS (bit_depth_map))
-    return FALSE;
   return TRUE;
 }
 
@@ -525,6 +641,8 @@ gst_vulkan_video_profile_is_equal (const GstVulkanVideoProfile * a,
       return (a->codec.h265dec.stdProfileIdc == b->codec.h265dec.stdProfileIdc);
     case VK_VIDEO_CODEC_OPERATION_DECODE_VP9_BIT_KHR:
       return (a->codec.vp9dec.stdProfile == b->codec.vp9dec.stdProfile);
+    case VK_VIDEO_CODEC_OPERATION_DECODE_AV1_BIT_KHR:
+      return (a->codec.av1dec.stdProfile == b->codec.av1dec.stdProfile);
     default:
       return FALSE;
   }

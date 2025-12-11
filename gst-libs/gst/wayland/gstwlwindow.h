@@ -36,12 +36,19 @@ struct _GstWlWindow
 };
 
 GST_WL_API
-void gst_wl_window_ensure_fullscreen (GstWlWindow * self,
-        gboolean fullscreen);
+void gst_wl_window_ensure_fullscreen (GstWlWindow * self, gboolean fullscreen);
+
+GST_WL_API
+void gst_wl_window_ensure_fullscreen_for_output (GstWlWindow * self,
+        gboolean fullscreen, const gchar * output_name);
 
 GST_WL_API
 GstWlWindow *gst_wl_window_new_toplevel (GstWlDisplay * display,
         const GstVideoInfo * info, gboolean fullscreen, GMutex * render_lock);
+
+GST_WL_API
+GstWlWindow * gst_wl_window_new_toplevel_full (GstWlDisplay * display, const GstVideoInfo * info,
+        gboolean fullscreen,  const gchar * output_name, GMutex * render_lock);
 
 GST_WL_API
 GstWlWindow *gst_wl_window_new_in_surface (GstWlDisplay * display,
@@ -62,6 +69,9 @@ gboolean gst_wl_window_is_toplevel (GstWlWindow * self);
 GST_WL_API
 gboolean gst_wl_window_render (GstWlWindow * self, GstWlBuffer * buffer,
         const GstVideoInfo * info);
+
+GST_WL_API
+gboolean gst_wl_window_flush (GstWlWindow * self);
 
 GST_WL_API
 gboolean gst_wl_window_render_hdr (GstWlWindow * self, GstWlBuffer * buffer,

@@ -24,10 +24,11 @@
 #include "vkh265dec.h"
 
 #include <gst/video/video.h>
-#include <gst/vulkan/vulkan.h>
+#include <gst/codecs/gsth265decoder.h>
 
 #include "gst/vulkan/gstvkdecoder-private.h"
 #include "gst/vulkan/gstvkphysicaldevice-private.h"
+#include "gstvkvideocaps.h"
 #include "gstvulkanelements.h"
 
 GST_DEBUG_CATEGORY_STATIC (gst_vulkan_h265_decoder_debug);
@@ -43,6 +44,8 @@ struct CData
 {
   gchar *description;
   gint device_index;
+  GstCaps *codec;
+  GstCaps *raw;
 };
 
 typedef struct _GstVulkanH265Decoder GstVulkanH265Decoder;
@@ -142,18 +145,6 @@ struct _GstVulkanH265DecoderClass
 
   gint device_index;
 };
-
-static GstStaticPadTemplate gst_vulkan_h265dec_sink_template =
-GST_STATIC_PAD_TEMPLATE ("sink", GST_PAD_SINK, GST_PAD_ALWAYS,
-    GST_STATIC_CAPS ("video/x-h265, "
-        "profile = { (string) main, (string) main-10},"
-        "stream-format = { (string) hvc1, (string) hev1, (string) byte-stream }, "
-        "alignment = (string) au"));
-
-static GstStaticPadTemplate gst_vulkan_h265dec_src_template =
-GST_STATIC_PAD_TEMPLATE ("src", GST_PAD_SRC, GST_PAD_ALWAYS,
-    GST_STATIC_CAPS (GST_VIDEO_CAPS_MAKE_WITH_FEATURES
-        (GST_CAPS_FEATURE_MEMORY_VULKAN_IMAGE, "NV12")));
 
 #define gst_vulkan_h265_decoder_parent_class parent_class
 
@@ -370,6 +361,12 @@ gst_vulkan_h265_decoder_decide_allocation (GstVideoDecoder * decoder,
   gboolean update_pool;
   VkImageUsageFlags usage;
   GstVulkanVideoCapabilities vk_caps;
+
+  if (self->dpb_size == 0) {
+    return
+        GST_VIDEO_DECODER_CLASS (parent_class)->decide_allocation (decoder,
+        query);
+  }
 
   gst_query_parse_allocation (query, &caps, NULL);
   if (!caps)
@@ -974,7 +971,7 @@ _fill_sps (const GstH265SPS * sps, SPS * std_sps)
           _array_2_bitmask (sps->short_term_ref_pic_set[i].UsedByCurrPicS0,
           sps->short_term_ref_pic_set[i].NumDeltaPocs),
       .used_by_curr_pic_s1_flag =
-          _array_2_bitmask (sps->short_term_ref_pic_set[i].UsedByCurrPicS0,
+          _array_2_bitmask (sps->short_term_ref_pic_set[i].UsedByCurrPicS1,
           sps->short_term_ref_pic_set[i].NumDeltaPocs),
       /* Reserved */
       /* Reserved */
@@ -1633,9 +1630,8 @@ gst_vulkan_h265_decoder_end_picture (GstH265Decoder * decoder,
   pic->vk_h265pic.pSliceSegmentOffsets =
       (const guint32 *) pic->base.slice_offs->data;
 
-  if ((self->
-          decoder->features & GST_VULKAN_DECODER_FEATURES_VIDEO_MAINTEINANCE2)
-      != 0)
+  if (gst_vulkan_decoder_has_feature (self->decoder,
+          GST_VULKAN_DECODER_FEATURE_INLINE_PARAMS))
     vk_link_struct (&pic->base.decode_info, &inline_params);
 
   GST_LOG_OBJECT (self, "Decoding frame, %d bytes %d slices",
@@ -1700,6 +1696,8 @@ gst_vulkan_h265_decoder_class_init (gpointer g_klass, gpointer class_data)
   struct CData *cdata = class_data;
   gchar *long_name;
   const gchar *name;
+  GstPadTemplate *sink_pad_template, *src_pad_template;
+  GstCaps *sink_doc_caps, *src_doc_caps;
 
   name = "Vulkan H.265 decoder";
   if (cdata->description)
@@ -1715,11 +1713,27 @@ gst_vulkan_h265_decoder_class_init (gpointer g_klass, gpointer class_data)
 
   parent_class = g_type_class_peek_parent (g_klass);
 
-  gst_element_class_add_static_pad_template (element_class,
-      &gst_vulkan_h265dec_sink_template);
+  sink_doc_caps = gst_caps_from_string ("video/x-h265, "
+      "profile = { (string) main, (string) main-10}, "
+      "stream-format = { (string) hvc1, (string) hev1, (string) byte-stream }, "
+      "alignment = (string) au");
+  src_doc_caps =
+      gst_caps_from_string (GST_VIDEO_CAPS_MAKE_WITH_FEATURES
+      (GST_CAPS_FEATURE_MEMORY_VULKAN_IMAGE, "NV12"));
 
-  gst_element_class_add_static_pad_template (element_class,
-      &gst_vulkan_h265dec_src_template);
+  sink_pad_template =
+      gst_pad_template_new ("sink", GST_PAD_SINK, GST_PAD_ALWAYS, cdata->codec);
+  gst_element_class_add_pad_template (element_class, sink_pad_template);
+
+  src_pad_template =
+      gst_pad_template_new ("src", GST_PAD_SRC, GST_PAD_ALWAYS, cdata->raw);
+  gst_element_class_add_pad_template (element_class, src_pad_template);
+
+  gst_pad_template_set_documentation_caps (sink_pad_template, sink_doc_caps);
+  gst_caps_unref (sink_doc_caps);
+
+  gst_pad_template_set_documentation_caps (src_pad_template, src_doc_caps);
+  gst_caps_unref (src_doc_caps);
 
   element_class->set_context =
       GST_DEBUG_FUNCPTR (gst_vulkan_h265_decoder_set_context);
@@ -1751,6 +1765,8 @@ gst_vulkan_h265_decoder_class_init (gpointer g_klass, gpointer class_data)
 
   g_free (long_name);
   g_free (cdata->description);
+  gst_clear_caps (&cdata->codec);
+  gst_clear_caps (&cdata->raw);
   g_free (cdata);
 }
 
@@ -1769,12 +1785,26 @@ gst_vulkan_h265_decoder_register (GstPlugin * plugin, GstVulkanDevice * device,
   struct CData *cdata;
   gboolean ret;
   gchar *type_name, *feature_name;
+  GstCaps *codec = NULL, *raw = NULL;
 
+  g_return_val_if_fail (GST_IS_PLUGIN (plugin), FALSE);
+  g_return_val_if_fail (GST_IS_VULKAN_DEVICE (device), FALSE);
+
+  if (!gst_vulkan_physical_device_codec_caps (device->physical_device,
+          VK_VIDEO_CODEC_OPERATION_DECODE_H265_BIT_KHR, &codec, &raw)) {
+    gst_plugin_add_status_warning (plugin,
+        "Unable to query H.265 decoder properties");
+    return FALSE;
+  }
   cdata = g_new (struct CData, 1);
   cdata->description = NULL;
   cdata->device_index = device->physical_device->device_index;
+  cdata->codec = codec;
+  cdata->raw = raw;
 
-  g_return_val_if_fail (GST_IS_PLUGIN (plugin), FALSE);
+  /* class data will be leaked if the element never gets instantiated */
+  GST_MINI_OBJECT_FLAG_SET (cdata->codec, GST_MINI_OBJECT_FLAG_MAY_BE_LEAKED);
+  GST_MINI_OBJECT_FLAG_SET (cdata->raw, GST_MINI_OBJECT_FLAG_MAY_BE_LEAKED);
 
   gst_vulkan_create_feature_name (device, "GstVulkanH265Decoder",
       "GstVulkanH265Device%dDecoder", &type_name, "vulkanh265dec",

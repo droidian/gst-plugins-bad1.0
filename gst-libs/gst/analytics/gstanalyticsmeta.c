@@ -357,12 +357,12 @@ static gboolean
 gst_analytics_relation_meta_transform (GstBuffer * transbuf,
     GstMeta * meta, GstBuffer * buffer, GQuark type, gpointer data)
 {
-
   GST_CAT_TRACE (GST_CAT_AN_RELATION, "meta transform %s",
       g_quark_to_string (type));
 
   if (GST_META_TRANSFORM_IS_COPY (type) ||
-      GST_VIDEO_META_TRANSFORM_IS_SCALE (type)) {
+      GST_VIDEO_META_TRANSFORM_IS_SCALE (type) ||
+      GST_VIDEO_META_TRANSFORM_IS_MATRIX (type)) {
     GstAnalyticsRelationMeta *rmeta = (GstAnalyticsRelationMeta *) meta;
     GstAnalyticsRelationMeta *new = (GstAnalyticsRelationMeta *)
         gst_buffer_get_meta (transbuf, GST_ANALYTICS_RELATION_META_API_TYPE);
@@ -723,6 +723,8 @@ gst_analytics_relation_meta_exist (const GstAnalyticsRelationMeta * rmeta,
   adj_mat = rmeta->adj_mat;
   if (max_relation_span < 0) {
     span = G_MAXSIZE;
+  } else {
+    span = max_relation_span;
   }
   // If we're only considering the direct relation (@max_relation_span <= 1) we can directly read the
   // adjacency-matrix,

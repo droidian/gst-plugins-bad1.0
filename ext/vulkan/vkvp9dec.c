@@ -37,21 +37,14 @@
 #include "vkvp9dec.h"
 
 #include <gst/video/video.h>
-#include <gst/vulkan/vulkan.h>
-#include <vk_video/vulkan_video_codec_vp9std.h>
-#include <vk_video/vulkan_video_codec_vp9std_decode.h>
-#include <vulkan/vulkan_core.h>
-#include "glib.h"
-#include "gst/codecparsers/gstvp9parser.h"
-#include "gst/codecs/gstvp9picture.h"
-#include "gst/gstpad.h"
-#include "gst/vulkan/gstvkdecoder-private.h"
+#include <gst/codecs/gstvp9decoder.h>
 
+#include "gst/vulkan/gstvkdecoder-private.h"
+#include "gstvkvideocaps.h"
 #include "gstvulkanelements.h"
 
 GST_DEBUG_CATEGORY_STATIC (gst_vulkan_vp9_decoder_debug);
 #define GST_CAT_DEFAULT gst_vulkan_vp9_decoder_debug
-
 
 #define GST_VULKAN_VP9_DECODER(obj)            ((GstVulkanVp9Decoder *) obj)
 #define GST_VULKAN_VP9_DECODER_GET_CLASS(obj)  (G_TYPE_INSTANCE_GET_CLASS ((obj), G_TYPE_FROM_INSTANCE (obj), GstVulkanVp9DecoderClass))
@@ -65,6 +58,8 @@ struct CData
 {
   gchar *description;
   gint device_index;
+  GstCaps *codec;
+  GstCaps *raw;
 };
 
 typedef struct _GstVulkanVp9Decoder GstVulkanVp9Decoder;
@@ -122,17 +117,6 @@ struct _GstVulkanVp9DecoderClass
 
   gint device_index;
 };
-
-static GstStaticPadTemplate gst_vulkan_vp9dec_sink_template =
-GST_STATIC_PAD_TEMPLATE (GST_VIDEO_DECODER_SINK_NAME,
-    GST_PAD_SINK, GST_PAD_ALWAYS,
-    GST_STATIC_CAPS ("video/x-vp9, "
-        "profile = (string) { 0, 1, 2, 3 }, " "alignment = (string) frame"));
-
-static GstStaticPadTemplate gst_vulkan_vp9dec_src_template =
-GST_STATIC_PAD_TEMPLATE ("src", GST_PAD_SRC, GST_PAD_ALWAYS,
-    GST_STATIC_CAPS (GST_VIDEO_CAPS_MAKE_WITH_FEATURES
-        (GST_CAPS_FEATURE_MEMORY_VULKAN_IMAGE, "NV12")));
 
 #define gst_vulkan_vp9_decoder_parent_class parent_class
 
@@ -348,6 +332,12 @@ gst_vulkan_vp9_decoder_decide_allocation (GstVideoDecoder * decoder,
   gboolean update_pool;
   VkImageUsageFlags usage;
   GstVulkanVideoCapabilities vk_caps;
+
+  if (self->dpb_size == 0) {
+    return
+        GST_VIDEO_DECODER_CLASS (parent_class)->decide_allocation (decoder,
+        query);
+  }
 
   gst_query_parse_allocation (query, &caps, NULL);
   if (!caps)
@@ -591,7 +581,7 @@ gst_vulkan_vp9_decoder_new_sequence (GstVp9Decoder * decoder,
     /* *INDENT-ON* */
   };
 
-  self->dpb_size = MAX (self->dpb_size, max_dpb_size);
+  self->dpb_size = CLAMP (max_dpb_size, 0, GST_VULKAN_VP9_MAX_DPB_SLOTS);
 
   g_clear_pointer (&self->input_state, gst_video_codec_state_unref);
   self->input_state = gst_video_codec_state_ref (decoder->input_state);
@@ -660,10 +650,15 @@ static GstFlowReturn
 _check_resolution_change (GstVulkanVp9Decoder * self, GstVp9Picture * picture)
 {
   const GstVp9FrameHeader *frame_hdr = &picture->frame_hdr;
-  GstVideoInfo *info = &self->output_state->info;
+  if (!self->output_state) {
+    GST_DEBUG_OBJECT (self, "output_state not yet initialized");
+    return GST_FLOW_OK;
+  }
 
-  if (self->resolution_changed || self->coded_width != frame_hdr->width
+  if (self->resolution_changed
+      || self->coded_width != frame_hdr->width
       || self->coded_height != frame_hdr->height) {
+    GstVideoInfo *info = &self->output_state->info;
     GST_VIDEO_INFO_WIDTH (info) = self->coded_width = frame_hdr->width;
     GST_VIDEO_INFO_HEIGHT (info) = self->coded_height = frame_hdr->height;
 
@@ -765,10 +760,6 @@ static gint32
 _find_next_slot_idx (GstVulkanVp9Decoder * self)
 {
   gint32 i;
-
-  g_return_val_if_fail (self != NULL, -1);
-  g_return_val_if_fail (self->dpb_size > 0, -1);
-  g_return_val_if_fail (self->dpb_size <= GST_VULKAN_VP9_MAX_DPB_SLOTS, -1);
 
   for (i = 0; i < self->dpb_size; i++) {
     if (!(self->free_slot_mask & (1 << i))) {
@@ -1088,6 +1079,8 @@ gst_vulkan_vp9_decoder_class_init (gpointer g_klass, gpointer class_data)
   struct CData *cdata = class_data;
   gchar *long_name;
   const gchar *name;
+  GstPadTemplate *sink_pad_template, *src_pad_template;
+  GstCaps *sink_doc_caps, *src_doc_caps;
 
   name = "Vulkan VP9 decoder";
   if (cdata->description)
@@ -1103,11 +1096,25 @@ gst_vulkan_vp9_decoder_class_init (gpointer g_klass, gpointer class_data)
 
   parent_class = g_type_class_peek_parent (g_klass);
 
-  gst_element_class_add_static_pad_template (element_class,
-      &gst_vulkan_vp9dec_sink_template);
+  sink_doc_caps = gst_caps_from_string ("video/x-vp9, "
+      "profile = (string) { 0, 1, 2, 3 }, alignment = (string) frame");
+  src_doc_caps =
+      gst_caps_from_string (GST_VIDEO_CAPS_MAKE_WITH_FEATURES
+      (GST_CAPS_FEATURE_MEMORY_VULKAN_IMAGE, "NV12"));
 
-  gst_element_class_add_static_pad_template (element_class,
-      &gst_vulkan_vp9dec_src_template);
+  sink_pad_template =
+      gst_pad_template_new ("sink", GST_PAD_SINK, GST_PAD_ALWAYS, cdata->codec);
+  gst_element_class_add_pad_template (element_class, sink_pad_template);
+
+  src_pad_template =
+      gst_pad_template_new ("src", GST_PAD_SRC, GST_PAD_ALWAYS, cdata->raw);
+  gst_element_class_add_pad_template (element_class, src_pad_template);
+
+  gst_pad_template_set_documentation_caps (sink_pad_template, sink_doc_caps);
+  gst_caps_unref (sink_doc_caps);
+
+  gst_pad_template_set_documentation_caps (src_pad_template, src_doc_caps);
+  gst_caps_unref (src_doc_caps);
 
   element_class->set_context =
       GST_DEBUG_FUNCPTR (gst_vulkan_vp9_decoder_set_context);
@@ -1157,12 +1164,27 @@ gst_vulkan_vp9_decoder_register (GstPlugin * plugin, GstVulkanDevice * device,
   struct CData *cdata;
   gboolean ret;
   gchar *type_name, *feature_name;
+  GstCaps *codec = NULL, *raw = NULL;
+
+  g_return_val_if_fail (GST_IS_PLUGIN (plugin), FALSE);
+  g_return_val_if_fail (GST_IS_VULKAN_DEVICE (device), FALSE);
+
+  if (!gst_vulkan_physical_device_codec_caps (device->physical_device,
+          VK_VIDEO_CODEC_OPERATION_DECODE_VP9_BIT_KHR, &codec, &raw)) {
+    gst_plugin_add_status_warning (plugin,
+        "Unable to query VP9 decoder properties");
+    return FALSE;
+  }
 
   cdata = g_new (struct CData, 1);
   cdata->description = NULL;
   cdata->device_index = device->physical_device->device_index;
+  cdata->codec = codec;
+  cdata->raw = raw;
 
-  g_return_val_if_fail (GST_IS_PLUGIN (plugin), FALSE);
+  /* class data will be leaked if the element never gets instantiated */
+  GST_MINI_OBJECT_FLAG_SET (cdata->codec, GST_MINI_OBJECT_FLAG_MAY_BE_LEAKED);
+  GST_MINI_OBJECT_FLAG_SET (cdata->raw, GST_MINI_OBJECT_FLAG_MAY_BE_LEAKED);
 
   gst_vulkan_create_feature_name (device, "GstVulkanVp9Decoder",
       "GstVulkanVp9Device%dDecoder", &type_name, "vulkanvp9dec",

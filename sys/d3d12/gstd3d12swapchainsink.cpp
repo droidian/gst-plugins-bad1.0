@@ -35,7 +35,7 @@
 
 #include "gstd3d12swapchainsink.h"
 #include "gstd3d12pluginutils.h"
-#include "gstd3d12overlaycompositor.h"
+#include "gstd3d12overlayblender.h"
 #include <directx/d3dx12.h>
 #include <mutex>
 #include <wrl.h>
@@ -219,7 +219,7 @@ struct GstD3D12SwapChainSinkPrivate
   GstBuffer *msaa_buf = nullptr;
   GstCaps *caps = nullptr;
   GstD3D12Converter *conv = nullptr;
-  GstD3D12OverlayCompositor *comp = nullptr;
+  GstD3D12OverlayBlender *comp = nullptr;
   guint64 fence_val = 0;
   bool caps_updated = false;
   bool first_present = true;
@@ -758,7 +758,7 @@ gst_d3d12_swapchain_sink_ensure_swapchain (GstD3D12SwapChainSink * self)
   GstVideoInfo info;
   gst_video_info_set_format (&info,
       GST_VIDEO_FORMAT_RGBA, priv->width, priv->height);
-  priv->comp = gst_d3d12_overlay_compositor_new (self->device, &info);
+  priv->comp = gst_d3d12_overlay_blender_new (self->device, &info);
 
   return gst_d3d12_swapchain_sink_resize_unlocked (self,
       priv->width, priv->height);
@@ -1053,13 +1053,13 @@ gst_d3d12_swapchain_sink_render (GstD3D12SwapChainSink * self)
         "saturation", priv->saturation, "brightness", priv->brightness,
         "contrast", priv->contrast, "max-mip-levels", priv->mip_levels,
         nullptr);
-    gst_d3d12_overlay_compositor_update_viewport (priv->comp, &priv->viewport);
+    gst_d3d12_overlay_blender_update_viewport (priv->comp, &priv->viewport);
 
     priv->first_present = false;
     priv->output_updated = false;
   }
 
-  gst_d3d12_overlay_compositor_upload (priv->comp, priv->cached_buf);
+  gst_d3d12_overlay_blender_upload (priv->comp, priv->cached_buf);
 
   GstD3D12CmdAlloc *gst_ca;
   if (!gst_d3d12_cmd_alloc_pool_acquire (priv->ca_pool, &gst_ca)) {
@@ -1160,7 +1160,7 @@ gst_d3d12_swapchain_sink_render (GstD3D12SwapChainSink * self)
     }
   }
 
-  if (!gst_d3d12_overlay_compositor_draw (priv->comp,
+  if (!gst_d3d12_overlay_blender_draw (priv->comp,
           conv_outbuf, fence_data, cl.Get ())) {
     GST_ERROR_OBJECT (self, "Couldn't build overlay command");
     gst_d3d12_fence_data_unref (fence_data);
@@ -1323,27 +1323,10 @@ gst_d3d12_swapchain_sink_set_buffer (GstD3D12SwapChainSink * self,
       return FALSE;
     }
 
-    GstVideoFrame in_frame, out_frame;
-    if (!gst_video_frame_map (&in_frame, &priv->info, buffer, GST_MAP_READ)) {
-      GST_ERROR_OBJECT (self, "Couldn't map input frame");
+    if (!gst_d3d12_buffer_copy_into (upload, buffer, &priv->info)) {
+      GST_ERROR_OBJECT (self, "Couldn't upload buffer");
       gst_buffer_unref (upload);
-      return FALSE;
-    }
-
-    if (!gst_video_frame_map (&out_frame, &priv->info, upload, GST_MAP_WRITE)) {
-      GST_ERROR_OBJECT (self, "Couldn't map upload frame");
-      gst_video_frame_unmap (&in_frame);
-      gst_buffer_unref (upload);
-      return FALSE;
-    }
-
-    auto copy_ret = gst_video_frame_copy (&out_frame, &in_frame);
-    gst_video_frame_unmap (&out_frame);
-    gst_video_frame_unmap (&in_frame);
-    if (!copy_ret) {
-      GST_ERROR_OBJECT (self, "Couldn't copy frame");
-      gst_buffer_unref (upload);
-      return FALSE;
+      return GST_FLOW_ERROR;
     }
 
     gst_buffer_foreach_meta (buffer,
@@ -1380,6 +1363,8 @@ gst_d3d12_swapchain_sink_resize_internal (GstD3D12SwapChainSink * self,
 
     gst_d3d12_cmd_queue_execute_command_lists (priv->cq,
         0, nullptr, &priv->fence_val);
+
+    priv->did_redraw = TRUE;
   }
 }
 

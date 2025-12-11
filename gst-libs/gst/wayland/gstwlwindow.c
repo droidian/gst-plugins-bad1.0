@@ -65,11 +65,20 @@ typedef struct _GstWlWindowPrivate
   /* the size and position of the video_subsurface */
   GstVideoRectangle video_rectangle;
 
-  /* the size of the video in the buffers */
+  /* the size of the video in the buffers (unpadded) */
   gint video_width, video_height;
+
+  /* the size of the video in the buffers (padded) */
+  gint buffer_width, buffer_height;
+
+  /* default window dimension used when the compositor does not chose a size */
+  gint default_width, default_height;
 
   /* video width scaled according to par */
   gint scaled_width;
+
+  /* the crop rectangle */
+  GstVideoRectangle crop;
 
   enum wl_output_transform buffer_transform;
 
@@ -107,6 +116,8 @@ static guint signals[LAST_SIGNAL] = { 0 };
 
 static void gst_wl_window_finalize (GObject * gobject);
 
+static void gst_wl_window_update_geometry (GstWlWindow * self);
+
 static void gst_wl_window_update_borders (GstWlWindow * self);
 
 static void gst_wl_window_commit_buffer (GstWlWindow * self,
@@ -131,6 +142,7 @@ handle_xdg_toplevel_configure (void *data, struct xdg_toplevel *xdg_toplevel,
     int32_t width, int32_t height, struct wl_array *states)
 {
   GstWlWindow *self = data;
+  GstWlWindowPrivate *priv = gst_wl_window_get_instance_private (self);
   const uint32_t *state;
 
   GST_DEBUG_OBJECT (self, "XDG toplevel got a \"configure\" event, [ %d, %d ].",
@@ -139,17 +151,29 @@ handle_xdg_toplevel_configure (void *data, struct xdg_toplevel *xdg_toplevel,
   wl_array_for_each (state, states) {
     switch (*state) {
       case XDG_TOPLEVEL_STATE_FULLSCREEN:
+        GST_DEBUG_OBJECT (self, "XDG top-level now FULLSCREEN");
+        break;
       case XDG_TOPLEVEL_STATE_MAXIMIZED:
+        GST_DEBUG_OBJECT (self, "XDG top-level now MAXIMIXED");
+        break;
       case XDG_TOPLEVEL_STATE_RESIZING:
+        GST_DEBUG_OBJECT (self, "XDG top-level being RESIZED");
+        break;
       case XDG_TOPLEVEL_STATE_ACTIVATED:
+        GST_DEBUG_OBJECT (self, "XDG top-level being ACTIVATED");
         break;
     }
   }
 
-  if (width <= 0 || height <= 0)
-    return;
+  if (width <= 0 || height <= 0) {
+    width = priv->default_width;
+    height = priv->default_height;
+  }
 
+  g_mutex_lock (&priv->configure_mutex);
+  priv->configured = FALSE;
   gst_wl_window_set_render_rectangle (self, 0, 0, width, height);
+  g_mutex_unlock (&priv->configure_mutex);
 }
 
 static const struct xdg_toplevel_listener xdg_toplevel_listener = {
@@ -169,6 +193,7 @@ handle_xdg_surface_configure (void *data, struct xdg_surface *xdg_surface,
   g_mutex_lock (&priv->configure_mutex);
   priv->configured = TRUE;
   g_cond_signal (&priv->configure_cond);
+  gst_wl_window_update_geometry (self);
   g_mutex_unlock (&priv->configure_mutex);
 }
 
@@ -300,23 +325,69 @@ gst_wl_window_new_internal (GstWlDisplay * display, GMutex * render_lock)
   return self;
 }
 
+/**
+ * gst_wl_window_ensure_fullscreen_for_output:
+ * @self: A #GstWlWindow
+ * @fullscreen: %TRUE to set fullscreen, %FALSE to unset it
+ * @output_nane: (nullable): The name of the wl_output to fullscreen to
+ *
+ * Ensure the window fullscreen state matches the desired state. If a
+ * output_name is provided, and this output exists, the window will be set to
+ * fullscreen on that screen. Otherwise the compisitor will decide.
+ *
+ * Since: 1.28
+ */
+void
+gst_wl_window_ensure_fullscreen_for_output (GstWlWindow * self,
+    gboolean fullscreen, const gchar * output_name)
+{
+  GstWlWindowPrivate *priv;
+  GstWlOutput *output = NULL;
+  struct wl_output *wl_output = NULL;
+
+  g_return_if_fail (self);
+  priv = gst_wl_window_get_instance_private (self);
+
+  if (!fullscreen) {
+    xdg_toplevel_unset_fullscreen (priv->xdg_toplevel);
+    wl_display_flush (gst_wl_display_get_display (priv->display));
+    return;
+  }
+
+  if (output_name) {
+    output = gst_wl_display_get_output_by_name (priv->display, output_name);
+    if (output)
+      wl_output = gst_wl_output_get_wl_output (output);
+    else
+      GST_WARNING ("Could not find any output named '%s'", output_name);
+  }
+
+  xdg_toplevel_set_fullscreen (priv->xdg_toplevel, wl_output);
+  wl_display_flush (gst_wl_display_get_display (priv->display));
+
+  // Unref last for thread safety
+  if (output)
+    g_object_unref (output);
+}
+
+/**
+ * gst_wl_window_ensure_fullscreen:
+ * @self: A #GstWlWindow
+ * @fullscreen: %TRUE to set fullscreen, %FALSE to unset it
+ *
+ * Same as gst_wl_window_ensure_fullscreen_for_output() without specifying an
+ * output.
+ */
 void
 gst_wl_window_ensure_fullscreen (GstWlWindow * self, gboolean fullscreen)
 {
-  GstWlWindowPrivate *priv;
-
-  g_return_if_fail (self);
-
-  priv = gst_wl_window_get_instance_private (self);
-  if (fullscreen)
-    xdg_toplevel_set_fullscreen (priv->xdg_toplevel, NULL);
-  else
-    xdg_toplevel_unset_fullscreen (priv->xdg_toplevel);
+  gst_wl_window_ensure_fullscreen_for_output (self, fullscreen, NULL);
 }
 
 GstWlWindow *
-gst_wl_window_new_toplevel (GstWlDisplay * display, const GstVideoInfo * info,
-    gboolean fullscreen, GMutex * render_lock)
+gst_wl_window_new_toplevel_full (GstWlDisplay * display,
+    const GstVideoInfo * info, gboolean fullscreen, const gchar * output_name,
+    GMutex * render_lock)
 {
   GstWlWindow *self;
   GstWlWindowPrivate *priv;
@@ -356,15 +427,26 @@ gst_wl_window_new_toplevel (GstWlDisplay * display, const GstVideoInfo * info,
       xdg_toplevel_set_app_id (priv->xdg_toplevel, "org.gstreamer.wayland");
     }
 
-    gst_wl_window_ensure_fullscreen (self, fullscreen);
+    gst_wl_window_ensure_fullscreen_for_output (self, fullscreen, output_name);
 
     /* Finally, commit the xdg_surface state as toplevel */
     priv->configured = FALSE;
+
+    /* set the initial size to be the same as the reported video size */
+    priv->default_width =
+        gst_util_uint64_scale_int_round (info->width, info->par_n, info->par_d);
+    priv->default_height = info->height;
+    gst_wl_window_set_render_rectangle (self, 0, 0, priv->default_width,
+        priv->default_height);
+
+    GST_INFO_OBJECT (self, "Configured default rectangle to %ix%i",
+        priv->default_width, priv->default_height);
+
     wl_surface_commit (priv->area_surface);
     wl_display_flush (gst_wl_display_get_display (display));
 
     g_mutex_lock (&priv->configure_mutex);
-    timeout = g_get_monotonic_time () + 100 * G_TIME_SPAN_MILLISECOND;
+    timeout = g_get_monotonic_time () + 5 * G_TIME_SPAN_SECOND;
     while (!priv->configured) {
       if (!g_cond_wait_until (&priv->configure_cond, &priv->configure_mutex,
               timeout)) {
@@ -375,28 +457,39 @@ gst_wl_window_new_toplevel (GstWlDisplay * display, const GstVideoInfo * info,
     }
     g_mutex_unlock (&priv->configure_mutex);
   } else if (fullscreen_shell) {
+    GstWlOutput *output = NULL;
+    struct wl_output *wl_output = NULL;
+    if (output_name) {
+      output = gst_wl_display_get_output_by_name (priv->display, output_name);
+      wl_output = gst_wl_output_get_wl_output (output);
+    }
+
     zwp_fullscreen_shell_v1_present_surface (fullscreen_shell,
-        priv->area_surface, ZWP_FULLSCREEN_SHELL_V1_PRESENT_METHOD_ZOOM, NULL);
+        priv->area_surface, ZWP_FULLSCREEN_SHELL_V1_PRESENT_METHOD_ZOOM,
+        wl_output);
+
+    if (output)
+      gst_object_unref (output);
   } else {
     GST_ERROR_OBJECT (self,
         "Unable to use either xdg_wm_base or zwp_fullscreen_shell.");
     goto error;
   }
 
-  /* render_rectangle is already set via toplevel_configure in
-   * xdg_shell fullscreen mode */
-  if (!(xdg_wm_base && fullscreen)) {
-    /* set the initial size to be the same as the reported video size */
-    gint width =
-        gst_util_uint64_scale_int_round (info->width, info->par_n, info->par_d);
-    gst_wl_window_set_render_rectangle (self, 0, 0, width, info->height);
-  }
 
   return self;
 
 error:
   g_object_unref (self);
   return NULL;
+}
+
+GstWlWindow *
+gst_wl_window_new_toplevel (GstWlDisplay * display, const GstVideoInfo * info,
+    gboolean fullscreen, GMutex * render_lock)
+{
+  return gst_wl_window_new_toplevel_full (display, info, fullscreen, NULL,
+      render_lock);
 }
 
 GstWlWindow *
@@ -472,15 +565,19 @@ gst_wl_window_is_toplevel (GstWlWindow * self)
 }
 
 static void
-gst_wl_window_resize_video_surface (GstWlWindow * self, gboolean commit)
+gst_wl_window_resize_video_surface (GstWlWindow * self)
 {
   GstWlWindowPrivate *priv = gst_wl_window_get_instance_private (self);
   GstVideoRectangle src = { 0, };
+  GstVideoRectangle wp_src = { 0, };
   GstVideoRectangle dst = { 0, };
   GstVideoRectangle res;
-  int wp_src_width;
-  int wp_src_height;
 
+  /* viewport coordinates will be based on the trasnformed surface */
+  wl_surface_set_buffer_transform (priv->video_surface_wrapper,
+      priv->buffer_transform);
+
+  /* adjust the width/height base on the rotation */
   switch (priv->buffer_transform) {
     case WL_OUTPUT_TRANSFORM_NORMAL:
     case WL_OUTPUT_TRANSFORM_180:
@@ -488,8 +585,8 @@ gst_wl_window_resize_video_surface (GstWlWindow * self, gboolean commit)
     case WL_OUTPUT_TRANSFORM_FLIPPED_180:
       src.w = priv->scaled_width;
       src.h = priv->video_height;
-      wp_src_width = priv->video_width;
-      wp_src_height = priv->video_height;
+      wp_src.w = priv->crop.w;
+      wp_src.h = priv->crop.h;
       break;
     case WL_OUTPUT_TRANSFORM_90:
     case WL_OUTPUT_TRANSFORM_270:
@@ -497,9 +594,48 @@ gst_wl_window_resize_video_surface (GstWlWindow * self, gboolean commit)
     case WL_OUTPUT_TRANSFORM_FLIPPED_270:
       src.w = priv->video_height;
       src.h = priv->scaled_width;
-      wp_src_width = priv->video_height;
-      wp_src_height = priv->video_width;
+      wp_src.w = priv->crop.h;
+      wp_src.h = priv->crop.w;
       break;
+    default:
+      g_assert_not_reached ();
+  }
+
+  /* apply the x/y crop based on the transformation */
+  switch (priv->buffer_transform) {
+    case WL_OUTPUT_TRANSFORM_NORMAL:
+      wp_src.x = priv->crop.x;
+      wp_src.y = priv->crop.y;
+      break;
+    case WL_OUTPUT_TRANSFORM_180:
+      wp_src.x = priv->buffer_width - (priv->crop.w + priv->crop.x);
+      wp_src.y = priv->buffer_height - (priv->crop.h + priv->crop.y);
+      break;
+    case WL_OUTPUT_TRANSFORM_FLIPPED:
+      wp_src.x = priv->buffer_width - (priv->crop.w + priv->crop.x);
+      wp_src.y = priv->crop.y;
+      break;
+    case WL_OUTPUT_TRANSFORM_FLIPPED_180:
+      wp_src.x = priv->crop.x;
+      wp_src.y = priv->buffer_height - (priv->crop.h + priv->crop.y);
+      break;
+    case WL_OUTPUT_TRANSFORM_90:
+      wp_src.x = priv->buffer_height - (priv->crop.h + priv->crop.y);
+      wp_src.y = priv->crop.x;
+      break;
+    case WL_OUTPUT_TRANSFORM_270:
+      wp_src.x = priv->crop.y;
+      wp_src.y = priv->buffer_width - (priv->crop.w + priv->crop.x);
+      break;
+    case WL_OUTPUT_TRANSFORM_FLIPPED_270:
+      wp_src.x = priv->buffer_height - (priv->crop.h + priv->crop.y);
+      wp_src.y = priv->buffer_width - (priv->crop.w + priv->crop.x);
+      break;
+    case WL_OUTPUT_TRANSFORM_FLIPPED_90:
+      wp_src.x = priv->crop.y;
+      wp_src.y = priv->crop.x;
+      break;
+
     default:
       g_assert_not_reached ();
   }
@@ -513,20 +649,20 @@ gst_wl_window_resize_video_surface (GstWlWindow * self, gboolean commit)
       res = dst;
     else
       gst_video_center_rect (&src, &dst, &res, TRUE);
-    wp_viewport_set_source (priv->video_viewport, wl_fixed_from_int (0),
-        wl_fixed_from_int (0), wl_fixed_from_int (wp_src_width),
-        wl_fixed_from_int (wp_src_height));
+    wp_viewport_set_source (priv->video_viewport, wl_fixed_from_int (wp_src.x),
+        wl_fixed_from_int (wp_src.y), wl_fixed_from_int (wp_src.w),
+        wl_fixed_from_int (wp_src.h));
+
+    /* The protocol does not allow for a size set to 0 */
+    res.w = MAX (res.w, 1);
+    res.h = MAX (res.h, 1);
+
     wp_viewport_set_destination (priv->video_viewport, res.w, res.h);
   } else {
     gst_video_center_rect (&src, &dst, &res, FALSE);
   }
 
   wl_subsurface_set_position (priv->video_subsurface, res.x, res.y);
-  wl_surface_set_buffer_transform (priv->video_surface_wrapper,
-      priv->buffer_transform);
-
-  if (commit)
-    wl_surface_commit (priv->video_surface_wrapper);
 
   priv->video_rectangle = res;
 }
@@ -582,6 +718,20 @@ static const struct wl_callback_listener frame_callback_listener = {
   frame_redraw_callback
 };
 
+static gboolean
+gst_wl_window_crop_rectangle_changed (GstWlWindow * self,
+    const GstVideoRectangle * pending_crop)
+{
+  GstWlWindowPrivate *priv = gst_wl_window_get_instance_private (self);
+
+  if (priv->crop.x == pending_crop->x
+      && priv->crop.y == pending_crop->y
+      && priv->crop.w == pending_crop->w && priv->crop.h == pending_crop->h)
+    return FALSE;
+
+  return TRUE;
+}
+
 static void
 gst_wl_window_commit_buffer (GstWlWindow * self, GstWlBuffer * buffer)
 {
@@ -590,15 +740,51 @@ gst_wl_window_commit_buffer (GstWlWindow * self, GstWlBuffer * buffer)
   GstVideoMasteringDisplayInfo *minfo = priv->next_minfo;
   GstVideoContentLightLevel *linfo = priv->next_linfo;
   struct wl_callback *callback;
+  gboolean needs_layout_update = FALSE;
+  GstVideoMeta *vmeta = gst_wl_buffer_get_video_meta (buffer);
+  GstVideoCropMeta *cmeta = gst_wl_buffer_get_video_crop_meta (buffer);
+  GstVideoRectangle crop = priv->crop;
 
   if (G_UNLIKELY (info)) {
     priv->scaled_width =
         gst_util_uint64_scale_int_round (info->width, info->par_n, info->par_d);
-    priv->video_width = info->width;
-    priv->video_height = info->height;
+    priv->video_width = priv->buffer_width = info->width;
+    priv->video_height = priv->buffer_height = info->height;
 
+    /* we don't have video_width/height saved initially, so if we didn't have a
+     * crop meta the width/height needs to be fixed from its reset value of 0 */
+    if (crop.w == 0)
+      crop.w = priv->video_width;
+    if (crop.h == 0)
+      crop.h = priv->video_height;
+
+    needs_layout_update = TRUE;
+  }
+
+  if (vmeta) {
+    if (priv->buffer_width != vmeta->width
+        || priv->buffer_height != vmeta->height) {
+      priv->buffer_width = vmeta->width;
+      priv->buffer_height = vmeta->height;
+      needs_layout_update = TRUE;
+    }
+  }
+
+  if (cmeta) {
+    crop.x = cmeta->x;
+    crop.y = cmeta->y;
+    crop.w = cmeta->width;
+    crop.h = cmeta->height;
+  }
+
+  if (gst_wl_window_crop_rectangle_changed (self, &crop)) {
+    priv->crop = crop;
+    needs_layout_update = TRUE;
+  }
+
+  if (G_UNLIKELY (needs_layout_update)) {
     wl_subsurface_set_sync (priv->video_subsurface);
-    gst_wl_window_resize_video_surface (self, FALSE);
+    gst_wl_window_resize_video_surface (self);
     gst_wl_window_set_opaque (self, info);
 
     gst_wl_window_set_colorimetry (self, &info->colorimetry, minfo, linfo);
@@ -629,7 +815,7 @@ gst_wl_window_commit_buffer (GstWlWindow * self, GstWlBuffer * buffer)
     priv->clear_window = FALSE;
   }
 
-  if (G_UNLIKELY (info)) {
+  if (G_UNLIKELY (needs_layout_update)) {
     /* commit also the parent (area_surface) in order to change
      * the position of the video_subsurface */
     wl_surface_commit (priv->area_surface_wrapper);
@@ -722,6 +908,34 @@ gst_wl_window_render_hdr (GstWlWindow * self, GstWlBuffer * buffer,
   return ret;
 }
 
+/**
+ * gst_wl_window_flush:
+ * @self: a #GstWlWindow
+ *
+ * Releases and drops the currently staged buffer associated with the window,
+ * if one exists. This function is thread-safe and will set the staged buffer
+ * pointer to NULL after unreferencing it.
+ *
+ * Returns: %TRUE if flush successful, %FALSE otherwise.
+ *
+ * Since: 1.28
+ */
+gboolean
+gst_wl_window_flush (GstWlWindow * self)
+{
+  GstWlWindowPrivate *priv = gst_wl_window_get_instance_private (self);
+
+  g_mutex_lock (&priv->window_lock);
+  if (priv->staged_buffer) {
+    GST_LOG_OBJECT (self, "drop buffer %p", priv->staged_buffer);
+    gst_wl_buffer_unref_buffer (priv->staged_buffer);
+    priv->staged_buffer = NULL;
+  }
+  g_mutex_unlock (&priv->window_lock);
+
+  return TRUE;
+}
+
 /* Update the buffer used to draw black borders. When we have viewporter
  * support, this is a scaled up 1x1 image, and without we need an black image
  * the size of the rendering areay. */
@@ -810,7 +1024,8 @@ gst_wl_window_update_geometry (GstWlWindow * self)
 
   if (priv->scaled_width != 0) {
     wl_subsurface_set_sync (priv->video_subsurface);
-    gst_wl_window_resize_video_surface (self, TRUE);
+    gst_wl_window_resize_video_surface (self);
+    wl_surface_commit (priv->video_surface_wrapper);
   }
 
   wl_surface_commit (priv->area_surface_wrapper);

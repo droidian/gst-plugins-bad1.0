@@ -241,6 +241,10 @@ gst_va_memory_pool_surface_inc (GstVaMemoryPool * self)
 
 /*=========================== GstVaDmabufAllocator ===========================*/
 
+#define GST_VA_DMABUF_ALLOCATOR(obj)            (G_TYPE_CHECK_INSTANCE_CAST((obj), GST_TYPE_VA_DMABUF_ALLOCATOR, GstVaDmabufAllocator))
+#define GST_VA_DMABUF_ALLOCATOR_CLASS(klass)    (G_TYPE_CHECK_CLASS_CAST((klass), GST_TYPE_VA_DMABUF_ALLOCATOR, GstVaDmabufAllocatorClass))
+#define GST_VA_DMABUF_ALLOCATOR_GET_CLASS(obj)  (G_TYPE_INSTANCE_GET_CLASS((obj), GST_TYPE_VA_DMABUF_ALLOCATOR, GstVaDmabufAllocatorClass))
+
 /**
  * GstVaDmabufAllocator:
  *
@@ -715,7 +719,8 @@ gst_va_dmabuf_allocator_setup_buffer_full (GstAllocator * allocator,
     /* prime descriptor reports the total size of the object, including regions
      * which aren't part surface's space. Let's just grab the surface's size: */
     gsize size = _get_fd_size (fd);
-    GstMemory *mem = gst_dmabuf_allocator_alloc (allocator, fd, size);
+    GstMemory *mem = gst_dmabuf_allocator_alloc_with_flags (allocator, fd,
+        size, GST_FD_MEMORY_FLAG_KEEP_MAPPED);
 
     if (desc.objects[i].size < size) {
       GST_WARNING_OBJECT (self, "driver bug: fd size (%" G_GSIZE_FORMAT
@@ -1190,6 +1195,10 @@ gst_va_dmabuf_memories_setup (GstVaDisplay * display,
 }
 
 /*===================== GstVaAllocator / GstVaMemory =========================*/
+
+#define GST_VA_ALLOCATOR(obj)            (G_TYPE_CHECK_INSTANCE_CAST((obj), GST_TYPE_VA_ALLOCATOR, GstVaAllocator))
+#define GST_VA_ALLOCATOR_CLASS(klass)    (G_TYPE_CHECK_CLASS_CAST((klass), GST_TYPE_VA_ALLOCATOR, GstVaAllocatorClass))
+#define GST_VA_ALLOCATOR_GET_CLASS(obj)  (G_TYPE_INSTANCE_GET_CLASS((obj), GST_TYPE_VA_ALLOCATOR, GstVaAllocatorClass))
 
 /**
  * GstVaAllocator:
