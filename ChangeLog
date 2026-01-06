@@ -1,3 +1,595 @@
+=== release 1.27.90 ===
+
+2026-01-05 20:15:10 +0000  Tim-Philipp Müller <tim@centricular.com>
+
+	* NEWS:
+	* RELEASE:
+	* gst-plugins-bad.doap:
+	* meson.build:
+	  Release 1.27.90
+
+2026-01-05 18:08:00 +0900  jeongmin kwak <jeongmin.kwak@lge.com>
+
+	* gst-libs/gst/codecs/gstvp8decoder.c:
+	  vp8decoder: Fix incorrect variable in warning message
+	  The warning message for unrecognized copy_buffer_to_golden was
+	  incorrectly printing copy_buffer_to_alternate instead of
+	  copy_buffer_to_golden. This was a copy-paste error that would
+	  display the wrong field value when debugging invalid VP8 streams.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/10494>
+
+2026-01-04 21:58:36 +0100  Christian Gräfe <cgraefe83@gmail.com>
+
+	* docs/plugins/gst_plugins_cache.json:
+	* ext/qroverlay/gstdebugqroverlay.c:
+	* ext/qroverlay/gstqroverlay.c:
+	  qroverlay: use proper klass
+	  klass was not really keywords but a description
+	  use base type "Video"
+	  and functional type "Overlay" (not defined yet in the docu, but also used by other elements)
+	  also fix the long-name of debugqroverlay
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/10493>
+
+2025-12-30 18:53:26 -0500  Doug Nazar <nazard@nazar.ca>
+
+	* ext/assrender/gstassrender.c:
+	* ext/sndfile/gstsfsrc.c:
+	* ext/ttml/gstttmlrender.c:
+	* gst/dvdspu/gstdvdspu.c:
+	* gst/segmentclip/gstsegmentclip.c:
+	* tools/element-templates/sinkpad:
+	  gst: Properly unref pad template caps
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/10477>
+
+2025-12-31 09:08:15 +0200  Sebastian Dröge <sebastian@centricular.com>
+
+	* ext/mpeg2enc/gstmpeg2enc.cc:
+	  mpeg2enc: Fix indentation
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/10476>
+
+2025-12-30 17:53:22 -0500  Doug Nazar <nazard@nazar.ca>
+
+	* tests/check/elements/audiovisualizer.c:
+	* tests/check/elements/mpegtsmux.c:
+	  tests: Fix several memory leaks
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/10476>
+
+2025-12-30 17:51:50 -0500  Doug Nazar <nazard@nazar.ca>
+
+	* ext/mpeg2enc/gstmpeg2enc.cc:
+	  mpeg2enc: Fix several memory leaks
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/10476>
+
+2025-12-26 15:38:07 +0900  jeongmin kwak <jeongmin.kwak@lge.com>
+
+	* ext/onnx/gstonnxinference.c:
+	  onnxinference: Fix integer overflow in buffer allocation
+	  Use g_size_checked_mul() to safely calculate the buffer size
+	  (width * height * channels * element_size) to prevent integer
+	  overflow which could lead to undersized buffer allocation and
+	  heap corruption.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/10449>
+
+2025-12-24 11:28:53 -0500  Olivier Crête <olivier.crete@collabora.com>
+
+	* gst-libs/gst/analytics/gstanalyticsmeta.c:
+	* gst-libs/gst/analytics/gstanalyticsobjectdetectionmtd.c:
+	* gst-libs/gst/analytics/gstanalyticssegmentationmtd.c:
+	  analyticsmeta: Export debug category to the Mtd for better debug messages
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/10443>
+
+2025-12-24 11:18:25 -0500  Olivier Crête <olivier.crete@collabora.com>
+
+	* gst-libs/gst/analytics/gstanalyticsmeta.c:
+	  analyticsmeta: Set debug category as default
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/10443>
+
+2025-12-24 11:08:10 -0500  Olivier Crête <olivier.crete@collabora.com>
+
+	* gst-libs/gst/analytics/gstanalyticsobjectdetectionmtd.c:
+	  objectdetectionmtd: Reject transformations that aren't 90deg based or symetries
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/10443>
+
+2025-12-24 10:37:50 -0500  Olivier Crête <olivier.crete@collabora.com>
+
+	* gst-libs/gst/analytics/gstanalyticssegmentationmtd.c:
+	  segmentationmtd: Drop meta on rotations/flips
+	  We don't have any code to do this kind of transformation.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/10443>
+
+2025-12-23 16:20:16 -0500  Olivier Crête <olivier.crete@collabora.com>
+
+	* gst-libs/gst/analytics/gstanalyticsmeta.c:
+	  analyticsrelationmeta: Skip Mtd that can't be transformed
+	  Also do the relationship copying in the end.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/10443>
+
+2025-12-26 14:32:08 +0900  jeongmin kwak <jeongmin.kwak@lge.com>
+
+	* gst/geometrictransform/gstgeometrictransform.c:
+	  geometrictransform: Fix integer overflow in map allocation
+	  Use g_size_checked_mul() to safely calculate the map size
+	  (width * height * 2 * sizeof(gdouble)) to prevent integer
+	  overflow which could lead to undersized buffer allocation
+	  and subsequent heap corruption when the map is populated.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/10448>
+
+2025-12-26 10:26:38 +0900  jeongmin kwak <jeongmin.kwak@lge.com>
+
+	* gst/geometrictransform/gstkaleidoscope.c:
+	  kaleidoscope: Fix potential division by zero in geometric transform
+	  Avoid division by zero when cos(theta) is close to zero. When theta
+	  approaches ±π/2 after the triangle function calculation, cos(theta)
+	  becomes zero, which would cause undefined behavior. Check that
+	  cos(theta) is sufficiently far from zero before performing the
+	  division.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/10438>
+
+2025-12-22 21:56:05 +0100  Philippe Normand <philn@igalia.com>
+
+	* ext/webrtc/gstwebrtcbin.c:
+	  webrtcbin: Check transport before setting state when closing
+	  `webrtc_transceiver_get_dtls_transport()` can return NULL so that needs to be
+	  checked by the caller.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/10432>
+
+2025-12-22 16:23:10 +0200  Sebastian Dröge <sebastian@centricular.com>
+
+	* gst-libs/gst/webrtc/nice/nice.c:
+	* gst/mpegtsmux/gstbasetsmuxjpegxs.h:
+	* gst/tensordecoders/gstclassifiertensordecoder.c:
+	  gst: Remove various wrongly added includes
+	  These were most likely added by clangd automatically.
+	  Please use `-header-insertion=never` with clangd!
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/8519>
+
+2025-12-17 11:36:14 +0100  Johan Sternerup <johast@axis.com>
+
+	* gst-libs/gst/webrtc/nice/meson.build:
+	* gst-libs/gst/webrtc/nice/nice.c:
+	  webrtcnice: Depend on libnice 0.1.23
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/8519>
+
+2025-04-16 14:48:57 +0200  Johan Sternerup <johast@axis.com>
+
+	* gst-libs/gst/webrtc/nice/meson.build:
+	* gst-libs/gst/webrtc/nice/nice.c:
+	  webrtcnice: Close agent and do it with force
+	  Call nice_agent_close_async() to make sure all outstanding resolve tasks have
+	  finished, which means we avoid a potential leak of a GMainContext with
+	  an associated file descriptor. We only do this if
+	  NICE_AGENT_OPTION_CLOSE_FORCED is available and can be used, because
+	  otherwise the closing procedure can take quite a long time while waiting
+	  for turn server responses.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/8519>
+
+2025-04-28 13:44:12 +0200  Johan Sternerup <johast@axis.com>
+
+	* gst-libs/gst/webrtc/nice/nice.c:
+	  webrtcnice: Wait for completion of proxy and mdns resolve tasks
+	  This commit ensures all outstanding name resolving for mdns and proxy is
+	  finished before the nice agent thread is shut down. This is important
+	  because the DNS resolving is performed by GThreadedResolver, which uses
+	  a GTask taking a strong reference to the agent main context in order to
+	  be able finish the task and run the final callback within the agent main
+	  context. Consequently, the main context cannot be disposed until the
+	  GTask has finished. Leaking a GMainContext is particularly bad because
+	  it involves leaking the file descriptor used for polling events.
+	  GThreadedResolver takes a strong reference to the GTask. it hands this
+	  reference over to an internal worker thread that ultimately calls libc's
+	  `getaddrinfo()`. This function can hang for an undefined amount of time
+	  depending on network or network driver conditions. This makes it
+	  impossible to completely control the lifetime of our GTask/GMainContext,
+	  but what we can do is to make sure that in case of a long hang or early
+	  shutdown of the agent, the GTask has already finished so that when
+	  `getaddrinfo()` returns the only work left to do is to drop the
+	  reference to GTask (and possibly GMainContext).
+	  GThreadedResolver already sets up two mechanisms for finishing the task
+	  earlier than `getaddrinfo()`, one timeout source and a cancellation
+	  source. The cancellation source was previously created by
+	  GThreadedResolver, but we're now passing it ourselves so that we can
+	  explicitly invoke cancellation. There is one quirk though. Both the
+	  timeout source and the cancellation source are associated with the gio
+	  global worker context. Thus, cancellation will happen in the thread
+	  driving the worker context and there it will conclude that the final
+	  agent callback must be invoked within the agent main context. This
+	  detour means we cannot simply cancel and expect the GTask to be
+	  finalized without also explicitly waiting for the finalization.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/8519>
+
+2025-12-18 18:23:56 -0500  Nicolas Dufresne <nicolas.dufresne@collabora.com>
+
+	* gst-libs/gst/codecs/gsth265decoder.c:
+	* gst-libs/gst/codecs/gsth266decoder.c:
+	  codecs: h265/h266dec: Do not try to output failed frames
+	  "end_picture()" virtual function may fail due to various reason, one of them
+	  being that a flush is happening. Since the picture failed, the subclass may have
+	  flushed any picture data from it, and will likely throw an error or crash when
+	  trying to output.
+	  These two decoder simply didn't care unlike all the other. Use similar technique
+	  as used in h264dec, which is to mark the frame as not for output.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/10421>
+
+2025-12-18 15:38:55 -0500  Nicolas Dufresne <nicolas.dufresne@collabora.com>
+
+	* sys/v4l2codecs/gstv4l2codecav1dec.c:
+	* sys/v4l2codecs/gstv4l2codecvp9dec.c:
+	  v4l2codecs: av1/vp9: Properly propagate flow ret such as FLUSHING
+	  Some of the decoder would simply turn any flow return into an ERROR, which
+	  can be noisy when the original flow return is FLUSHING due to a normal flush
+	  condition.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/10421>
+
+2025-12-18 15:37:38 -0500  Nicolas Dufresne <nicolas.dufresne@collabora.com>
+
+	* sys/v4l2codecs/gstv4l2codecav1dec.c:
+	* sys/v4l2codecs/gstv4l2codecvp8dec.c:
+	  v4l2codecs: av1/vp9: Fix request leak on error
+	  The request was not being freed property if there was an error. Typically a
+	  flush / seek operation could cause this.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/10421>
+
+2025-12-18 15:35:07 -0500  Nicolas Dufresne <nicolas.dufresne@collabora.com>
+
+	* sys/v4l2codecs/gstv4l2codech264dec.c:
+	* sys/v4l2codecs/gstv4l2codech265dec.c:
+	* sys/v4l2codecs/gstv4l2codecmpeg2dec.c:
+	* sys/v4l2codecs/gstv4l2codecvp8dec.c:
+	  v4l2codecs: Assert and return on missing request
+	  The base class isn't supposed to output a picture that has never been
+	  requested or for which the request has been removed by the flush operation.
+	  Make sure to crash this kind of programming error with an assert, while
+	  protecting against crash in this case.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/10421>
+
+2025-12-18 15:46:24 +0900  jeongmin kwak <jeongmin.kwak@lge.com>
+
+	* ext/hls/gsthlsdemux.c:
+	  hlsdemux: Mark discontinuity on seek
+	  When seeking across an EXT-X-DISCONTINUITY tag, set the internal
+	  stream discont flag. This ensures the next buffer is correctly marked
+	  with GST_BUFFER_FLAG_DISCONT, signaling a timeline reset to
+	  downstream elements.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/10402>
+
+2025-12-17 13:17:52 -0600  Brad Reitmeyer <brad.reitmeyer@resi.io>
+
+	* sys/decklink/gstdecklinkvideosink.cpp:
+	  decklinkvideosink: Fix frame duration to be based on the decklink clock
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/10401>
+
+2025-12-21 22:12:43 -0500  Daniel Morin <daniel.morin@collabora.com>
+
+	* ext/onnx/gstonnxinference.c:
+	  onnx: remove invalid properties
+	  - input-tensor-offset and input-tensor-scale have been removed
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/10427>
+
+2025-12-19 15:40:26 +0530  Nirbheek Chauhan <nirbheek@centricular.com>
+
+	* ext/rsvg/meson.build:
+	  meson: Solve some cyclic dependencies caused by test-only deps
+	  gstreamer => gobject-introspection => cairo => fontconfig => freetype2 => harfbuzz => cairo
+	  gst-plugins-base => libdrm => cairo => fontconfig => freetype2 => harfbuzz => cairo
+	  gst-plugins-good => cairo => librsvg => cairo
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/10422>
+
+2025-12-19 11:16:27 +0100  Adrien Plazas <aplazas@gnome.org>
+
+	* gst-libs/gst/play/gstplay.c:
+	* gst-libs/gst/play/gstplay.h:
+	  gstplay: Add gapless looping
+	  This adds the GstPlayLoop enumeration and the loop configuration
+	  accessor methods. It allows gapless looping over the current track.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/10418>
+
+2025-12-14 11:59:43 -0500  Daniel Morin <daniel.morin@collabora.com>
+
+	* docs/plugins/gst_plugins_cache.json:
+	  doc: update gst-plugins-bad doc cache
+	  - doc cache updated
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/10380>
+
+2025-12-13 11:37:04 -0500  Daniel Morin <daniel.morin@collabora.com>
+
+	* gst/tensordecoders/gstssdtensordec.c:
+	* gst/tensordecoders/gstssdtensordec.h:
+	* gst/tensordecoders/gsttensordecoders.c:
+	  tensordecoder: ssdtensordec backward compat with oldname
+	  - Also register old name "ssdobjectdetector" for backward compatibility.
+	  - warn about Deprecated in instance_init
+	  - better annotation related to deprecated
+	  Co-authored-by: Sebastian Dröge <sebastian@centricular.com>
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/10380>
+
+2025-12-18 18:07:17 +0200  Sebastian Dröge <sebastian@centricular.com>
+
+	* gst/librfb/gstrfbsrc.h:
+	  video: Include gstvideodmabufpool.h from video.h
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/10411>
+
+2025-12-16 16:41:57 +0100  Víctor Manuel Jáquez Leal <vjaquez@igalia.com>
+
+	* gst/jpegformat/gstjpegparse.c:
+	* gst/jpegformat/gstjpegparse.h:
+	  jpegparse: enable MPF support to JPEG parser
+	  Parse Multi Picture Format APP2 segments to handle multiple images in a
+	  single JPEG stream. Ignore non-primary images and adjust frame logic for
+	  correct framing.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/10301>
+
+2025-12-04 18:24:24 +0100  Víctor Manuel Jáquez Leal <vjaquez@igalia.com>
+
+	* gst/jpegformat/gstjpegparse.c:
+	  jpegparse: add MPF parsing support
+	  Parse APP2 segments containing Multi-Picture Format data according to CIPA DC-x
+	  007-2009 specification. This enables handling of JPEG files with multiple
+	  embedded images like panoramas or stereoscopic pairs.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/10301>
+
+2025-12-17 14:39:07 +0100  Víctor Manuel Jáquez Leal <vjaquez@igalia.com>
+
+	* gst/jpegformat/gstjpegparse.c:
+	  jpegparse: add synthetic header/footer for XMP
+	  Add synthetic xpacket XML header and footer if missing in XMP data in APP1
+	  segment, since they are needed for the parsing function
+	  gst_tag_list_from_xmp_buffer().
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/10301>
+
+2025-12-17 14:47:38 +0100  Víctor Manuel Jáquez Leal <vjaquez@igalia.com>
+
+	* gst/jpegformat/gstjpegparse.c:
+	  jpegparse: add metadata state flag
+	  This ensures metadata from APP segments and comments is accounted for,
+	  preventing the loose of those segments.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/10301>
+
+2025-12-18 17:47:14 +0200  Sebastian Dröge <sebastian@centricular.com>
+
+	* gst-libs/gst/analytics/modelinfo.c:
+	  modelinfo: Add some missing annotations
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/10410>
+
+2025-12-17 14:24:31 +0200  Sebastian Dröge <sebastian@centricular.com>
+
+	* gst/mxf/mxfdemux.c:
+	* gst/mxf/mxfdemux.h:
+	  mxfdemux: Simplify timestamp tracking
+	  Apart from keeping less state around this also calculates more accurate
+	  timestamps because of tracking everything in terms of edit units instead of
+	  nanoseconds.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/10396>
+
+2025-12-17 11:57:01 +0200  Sebastian Dröge <sebastian@centricular.com>
+
+	* gst/mxf/mxfdemux.h:
+	  mxfdemux: Switch edit unit position tracking to unsigned integers
+	  These can never become negative and the only negative number in use is
+	  -1 for "unset", which maps equally well to G_MAXUINT64.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/10396>
+
+2025-12-17 18:58:14 +0200  Sebastian Dröge <sebastian@centricular.com>
+
+	* gst/aiff/aiffparse.c:
+	* gst/aiff/aiffparse.h:
+	  aiffparse: Remove segment closing on non-flushing seeks
+	  That's a 0.10 leftover and not necessary anymore, and can confuse downstream
+	  elements unnecessarily.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/10399>
+
+2025-12-17 18:53:26 +0200  Sebastian Dröge <sebastian@centricular.com>
+
+	* gst/mxf/mxfdemux.c:
+	* gst/mxf/mxfdemux.h:
+	  mxfdemux: Remove segment closing on non-flushing seeks
+	  That's a 0.10 leftover and not necessary anymore, and can confuse downstream
+	  elements unnecessarily.
+	  Fixes https://gitlab.freedesktop.org/gstreamer/gstreamer/-/issues/4803
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/10399>
+
+2025-12-17 10:23:25 +0900  jeongmin kwak <jeongmin.kwak@lge.com>
+
+	* ext/aes/gstaesdec.c:
+	  aesdec: use gsize for buffer sizes and fix log format
+	  Replace casts with gsize in gst_aes_dec_prepare_output_buffer() and use
+	  G_GSIZE_FORMAT for logging to avoid truncation and warnings.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/10239>
+
+2025-11-28 14:40:49 +0900  jeongmin kwak <jeongmin.kwak@lge.com>
+
+	* ext/aes/gstaesenc.c:
+	  aesenc: use gsize for buffer sizes and fix log format
+	  Replace casts with gsize in gst_aes_enc_prepare_output_buffer() and use
+	  G_GSIZE_FORMAT for logging to avoid truncation and warnings.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/10239>
+
+2025-12-17 11:07:18 +0900  jeongmin kwak <jeongmin.kwak@lge.com>
+
+	* ext/hls/gsthlssink.c:
+	  hlssink: Guard NULL structure and use gst_structure_has_name()
+	  Prevent NULL dereference by checking gst_message_get_structure()
+	  result before accessing fields. Replace strcmp() with
+	  gst_structure_has_name() for safe structure name comparison.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/10393>
+
+2025-12-11 21:53:04 -0500  Aaron Boxer <aaron.boxer@collabora.com>
+
+	* gst-libs/gst/play/gstplay.c:
+	  play: do not call gst_pb_utils_get_codec_description if caps are not fixed
+	  this avoids throwing a (harmless) exception when stream selection is
+	  called before pipeline is linked
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/10341>
+
+2025-12-15 17:57:49 -0500  Daniel Morin <daniel.morin@collabora.com>
+
+	* docs/plugins/gst_plugins_cache.json:
+	  docs: Update gir / plugins docs cache
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/10384>
+
+2025-12-15 15:08:02 -0500  Daniel Morin <daniel.morin@collabora.com>
+
+	* ext/onnx/gstonnxinference.c:
+	* ext/tflite/gsttfliteinference.c:
+	* gst/tensordecoders/gstclassifiertensordecoder.c:
+	* gst/tensordecoders/gstfacedetectortensordecoder.c:
+	* gst/tensordecoders/gstssdtensordec.c:
+	* gst/tensordecoders/gstyolosegtensordecoder.c:
+	* gst/tensordecoders/gstyolotensordecoder.c:
+	  gst: Rename GstValueSet to GstValueUniqueList
+	  GObject-Introspection has an issue with GstSet because anything that starts with
+	  'gst_value_set' becomes something that belongs to 'GstSet' but we have
+	  gst_value_set_bitmask and gst_value_set_SOMETHING (), which all would become
+	  methods of GstSet.
+	  To avoid this, rename GstSet (aka GstValueSet) to GstUniqueList (aka
+	  GstValueUniqueList).
+	  Fixes https://gitlab.freedesktop.org/gstreamer/gstreamer/-/issues/4813
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/10384>
+
+2025-12-16 13:05:19 +0100  François Laignel <francois@centricular.com>
+
+	* gst/mxf/mxfdemux.c:
+	  mxfdemux: send event SegmentDone for segment seeks
+	  ... instead of sending an EOS event in that case.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/10331>
+
+2025-12-10 15:54:50 +0100  Jakub Adam <jakub.adam@collabora.com>
+
+	* ext/vmaf/meson.build:
+	  meson: fix building -bad tests with disabled vmaf
+	  Fixes an error from Meson:
+	  subprojects/gst-plugins-bad/tests/check/meson.build:175:85: ERROR:
+	  Unknown variable "libvmaf_dep".
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/10353>
+
+2025-12-13 11:29:03 +0200  Sebastian Dröge <sebastian@centricular.com>
+
+	* ext/fdkaac/gstfdkaacdec.c:
+	  fdkaacdec: Invalidate channel_types/indices when setting a known config
+	  Otherwise switching from an unknown config (which is then mapped one by one) to
+	  a known config and then back to the same unknown config makes it use invalid
+	  cached channel positions.
+	  Fixes https://gitlab.freedesktop.org/gstreamer/gstreamer/-/issues/4791
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/10370>
+
+2025-11-26 20:09:20 +0100  Jakub Adam <jakub.adam@collabora.com>
+
+	* ext/dtls/gstdtlsdec.c:
+	  dtlsdec: mark generated cert agent with GST_OBJECT_FLAG_MAY_BE_LEAKED
+	  So that it is ignored by the leaks tracer.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/10366>
+
+2025-12-12 15:41:42 +0900  Seungha Yang <seungha@centricular.com>
+
+	* sys/win32ipc/gstwin32ipcbasesink.cpp:
+	  win32ipcbasesink: Serialize metas from uploaded buffer
+	  Use metas attached to the uploaded buffer instead of the original one,
+	  as the uploaded buffer may have different memory-layout-related metas
+	  such as video meta
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/10362>
+
+2025-12-10 16:30:55 +0900  Seungha Yang <seungha@centricular.com>
+
+	* sys/win32ipc/gstwin32ipcsink.cpp:
+	  win32ipcsink: Preserve original buffer flags in raw-video fallback path
+	  Copy all metadat including buffer flags from the original buffer so
+	  that clients receive the intended information
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/10343>
+
+2025-12-09 11:12:12 +0100  Hyunjun Ko <zzoon@igalia.com>
+
+	* gst-libs/gst/vulkan/gstvkformat.c:
+	  vkformat: Add VK_FORMAT_G10X6_B10X6R10X6_2PLANE_420_UNORM_3PACK16 format
+	  Add support for VK_FORMAT_G10X6_B10X6R10X6_2PLANE_420_UNORM_3PACK16,
+	  which is the Vulkan equivalent of P010.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/10333>
+
+2025-12-10 20:53:29 -0500  Daniel Morin <daniel.morin@collabora.com>
+
+	* docs/plugins/gst_plugins_cache.json:
+	  doc: gst-plugins-bad doc cache update
+	  - cache update
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/10340>
+
+2025-12-09 15:03:34 -0500  Daniel Morin <daniel.morin@collabora.com>
+
+	* gst/tensordecoders/gstssdtensordec.c:
+	* gst/tensordecoders/gstssdtensordec.h:
+	* gst/tensordecoders/gsttensordecoders.c:
+	* gst/tensordecoders/meson.build:
+	  tensordecoder: rename ssdobjectdetector to ssdtensordec
+	  - renamed ssdobjectdetector to ssdtensordec
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/10340>
+
+2025-12-08 12:58:44 -0500  Daniel Morin <daniel.morin@collabora.com>
+
+	* docs/plugins/gst_plugins_cache.json:
+	  gst-python: make python linter happy with test_analytics
+	  - Change to be confirm fory PEP8
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/10244>
+
+2025-12-08 00:09:47 -0500  Daniel Morin <daniel.morin@collabora.com>
+
+	* gst/tensordecoders/gstyolosegtensordecoder.c:
+	* gst/tensordecoders/gstyolotensordecoder.c:
+	  tensordecoders: yolo tensordecoders
+	  - Change to dims-order from row-majot to col-major as they are col-major and
+	  with new modelinfo improvement we can communicate this from inference.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/10244>
+
+2025-11-30 22:42:09 -0500  Daniel Morin <daniel.morin@collabora.com>
+
+	* ext/onnx/gstonnxinference.c:
+	  onnx: refactor to use ModelInfo
+	  - Retrieve model metadata from modelInfo instead of from ONNX.
+	  - Validate modelInfo match ONNX, when available
+	  - Get means and stddev from ModelInfo
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/10244>
+
+2025-12-03 22:24:27 -0500  Daniel Morin <daniel.morin@collabora.com>
+
+	* ext/tflite/gsttfliteinference.c:
+	* ext/tflite/meson.build:
+	* ext/tflite/modelinfo.c:
+	* ext/tflite/modelinfo.h:
+	  tflite: adapt to analytics modelinfo moved
+	  - use modelinfo from analytics
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/10244>
+
+2025-12-03 22:23:32 -0500  Daniel Morin <daniel.morin@collabora.com>
+
+	* gst-libs/gst/analytics/analytics.h:
+	* gst-libs/gst/analytics/meson.build:
+	* gst-libs/gst/analytics/modelinfo.c:
+	* gst-libs/gst/analytics/modelinfo.h:
+	  analytics: move modelinfo to analytics lib
+	  - moved to analytics and added dims-order setting
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/10244>
+
+2025-12-09 22:01:48 -0500  Daniel Morin <daniel.morin@collabora.com>
+
+	* gst/tensordecoders/gstioutracker.h:
+	  tensordecoder: fix typo in header
+	  - gstreamer-ssdobjectdetector -> gstreamer-ioutracker
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/10342>
+
+2025-12-09 17:30:58 +0100  Mathieu Duponchelle <mathieu@centricular.com>
+
+	* gst-libs/gst/webrtc/nice/nice.c:
+	* gst-libs/gst/webrtc/nice/nicetransport.c:
+	* gst-libs/gst/webrtc/nice/niceutils.h:
+	  webrtc/nice: fix crashes on gathering stats for relay candidates
+	  libnice does not have TURN information for remote relay candidates,
+	  but the `nice_candidate_relay_address` returns void and doesn't
+	  check if the `turn` field is set, unlike
+	  `nice_candidate_stun_server_address`.
+	  As a consequence, we must only call the API for local candidates.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/10336>
+
+2025-12-09 19:13:20 +0000  Tim-Philipp Müller <tim@centricular.com>
+
+	* meson.build:
+	  Back to development after 1.27.50
+
 === release 1.27.50 ===
 
 2025-12-09 19:08:48 +0000  Tim-Philipp Müller <tim@centricular.com>

@@ -28,6 +28,9 @@
 #include <gst/video/video.h>
 #include <math.h>
 
+GST_DEBUG_CATEGORY_EXTERN (gst_analytics_relation_meta_debug);
+#define GST_CAT_DEFAULT gst_analytics_relation_meta_debug
+
 /**
  * SECTION:gstanalyticsobjectdetectionmtd
  * @title: GstAnalyticsODMtd
@@ -81,6 +84,28 @@ gst_analytics_od_mtd_meta_transform (GstBuffer * transbuf,
         gst_analytics_relation_meta_get_mtd_data (transmtd->meta,
         transmtd->id);
     GstVideoRectangle rect = { oddata->x, oddata->y, oddata->w, oddata->h };
+
+    gboolean is_diagonal = trans->matrix[0][1] == 0 && trans->matrix[1][0] == 0;
+    gboolean is_antidiagonal = trans->matrix[0][0] == 0 &&
+        trans->matrix[1][1] == 0;
+
+    if (!is_diagonal && !is_antidiagonal) {
+      GST_WARNING ("Transformation not possible from buffer %" GST_PTR_FORMAT
+          " to buffer %" GST_PTR_FORMAT, buffer, transbuf);
+      return FALSE;
+    } else if (is_diagonal) {
+      if (trans->matrix[0][0] == 0 || trans->matrix[1][1] == 0) {
+        GST_WARNING ("Transformation not possible from buffer %" GST_PTR_FORMAT
+            " to buffer %" GST_PTR_FORMAT, buffer, transbuf);
+        return FALSE;
+      }
+    } else {
+      if (trans->matrix[0][1] == 0 || trans->matrix[1][0] == 0) {
+        GST_WARNING ("Transformation not possible from buffer %" GST_PTR_FORMAT
+            " to buffer %" GST_PTR_FORMAT, buffer, transbuf);
+        return FALSE;
+      }
+    }
 
     if (!gst_video_meta_transform_matrix_rectangle (trans, &rect))
       return FALSE;
