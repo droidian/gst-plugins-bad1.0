@@ -16,5 +16,4 @@ usr/lib/*/libgstwebrtc-1.0.so.*
 usr/lib/*/libgstanalytics-1.0.so.*
 usr/lib/*/libgstdxva-1.0.so.*
 usr/lib/*/libgstmse-1.0.so.*
-usr/lib/*/libgsthip.so.*
 usr/share/gstreamer-1.0/encoding-profiles

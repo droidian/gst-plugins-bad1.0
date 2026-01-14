@@ -44,7 +44,6 @@ usr/lib/*/gstreamer-1.0/libgstgdp.so
 usr/lib/*/gstreamer-1.0/libgstgeometrictransform.so
 usr/lib/*/gstreamer-1.0/libgstgme.so
 usr/lib/*/gstreamer-1.0/libgstgsm.so
-usr/lib/*/gstreamer-1.0/libgsthip.so
 usr/lib/*/gstreamer-1.0/libgsthls.so
 usr/lib/*/gstreamer-1.0/libgstid3tag.so
 usr/lib/*/gstreamer-1.0/libgstinter.so
