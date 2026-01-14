@@ -149,9 +149,6 @@ ifeq ($(DEB_HOST_ARCH_OS),linux)
 ifeq ($(DEB_HOST_ARCH),amd64)
 	dh_install -pgstreamer1.0-plugins-bad debian/tmp/usr/lib/$(DEB_HOST_MULTIARCH)/gstreamer-1.0/libgstqsv.so
 endif
-endif
-
-ifneq ($(DEB_HOST_ARCH_OS),hurd)
 	dh_install -pgstreamer1.0-plugins-bad debian/tmp/usr/lib/$(DEB_HOST_MULTIARCH)/gstreamer-1.0/libgstresindvd.so
 	dh_install -pgstreamer1.0-plugins-bad debian/tmp/usr/lib/$(DEB_HOST_MULTIARCH)/gstreamer-1.0/libgstnvcodec.so
 	dh_install -pgstreamer1.0-plugins-bad debian/tmp/usr/lib/$(DEB_HOST_MULTIARCH)/gstreamer-1.0/libgstavtp.so
