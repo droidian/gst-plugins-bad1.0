@@ -1,3 +1,10 @@
+gst-plugins-bad1.0 (1.27.90-2) experimental; urgency=medium
+
+  * d/: do not enable hip elements on hurd
+  * d/rules: not hurd is linux
+
+ -- Marc Leeman <marc.leeman@gmail.com>  Wed, 14 Jan 2026 16:31:29 +0100
+
 gst-plugins-bad1.0 (1.27.90-1) experimental; urgency=medium
 
   * New upstream version 1.27.90
