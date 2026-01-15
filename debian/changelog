@@ -1,3 +1,21 @@
+gst-plugins-bad1.0 (1.27.90-3) experimental; urgency=medium
+
+  [ Simon McVittie ]
+  * d/control: Add Build-Depends on systematic names for gir1.2-*-dev packages
+  * d/control: Replace libgirepository1.0-dev B-D with gobject-introspection
+  * gir1.2-gst-plugins-bad-1.0: Add ${gir:Provides}
+  * libgstreamer-plugins-bad1.0-dev: Add ${gir:Provides}
+  * libgstreamer-plugins-bad1.0-dev: Add ${gir:Depends}
+
+  [ Marc Leeman ]
+  * d/control: bump meson version to match meson.build
+
+  [ Jeremy Bícha ]
+  * Update gir Build-Depends
+  * Clean up build warnings
+
+ -- Marc Leeman <marc.leeman@gmail.com>  Thu, 15 Jan 2026 08:48:25 +0100
+
 gst-plugins-bad1.0 (1.27.90-2) experimental; urgency=medium
 
   * d/: do not enable hip elements on hurd
