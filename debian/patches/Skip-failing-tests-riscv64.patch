@@ -8,10 +8,10 @@ so maybe extending its timeout would be a better fix
  tests/check/meson.build | 4 ++--
  1 file changed, 2 insertions(+), 2 deletions(-)
 
-diff --git a/tests/check/meson.build b/tests/check/meson.build
-index 38e7b70..9760756 100644
---- a/tests/check/meson.build
-+++ b/tests/check/meson.build
+Index: gst-plugins-bad1.0/tests/check/meson.build
+===================================================================
+--- gst-plugins-bad1.0.orig/tests/check/meson.build
++++ gst-plugins-bad1.0/tests/check/meson.build
 @@ -30,7 +30,7 @@ base_tests = [
    [['elements/aesdec.c'], not aes_dep.found(), [aes_dep]],
    [['elements/aiffparse.c'], get_option('aiff').disabled()],
@@ -21,7 +21,7 @@ index 38e7b70..9760756 100644
    [['elements/autoconvert.c'], get_option('autoconvert').disabled()],
    [['elements/autovideoconvert.c'], get_option('autoconvert').disabled()],
    [['elements/avwait.c'], get_option('timecode').disabled()],
-@@ -146,7 +146,7 @@ if host_machine.system() != 'windows'
+@@ -148,7 +148,7 @@ if host_machine.system() != 'windows'
      [['elements/avtpcrfsync.c'], true, [avtp_dep], ['../../ext/avtp/gstavtpcrfutil.c', '../../ext/avtp/gstavtpcrfbase.c']],
      [['elements/avtpcrfutil.c'], not avtp_dep.found(), [avtp_dep], ['../../ext/avtp/gstavtpcrfutil.c', '../../ext/avtp/gstavtpcrfbase.c']],
      [['elements/avtpcvfpay.c'], not avtp_dep.found(), [avtp_dep]],
