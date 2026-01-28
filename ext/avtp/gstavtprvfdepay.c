@@ -50,8 +50,8 @@ GST_DEBUG_CATEGORY_STATIC (avtprvfdepay_debug);
 
 /* prototypes */
 
-static GstFlowReturn gst_avtp_rvf_depay_chain (GstPad * pad, GstObject * parent,
-    GstBuffer * buffer);
+static GstFlowReturn gst_avtp_rvf_depay_process (GstAvtpBaseDepayload *
+    basedepay, GstBuffer * buffer);
 
 static gboolean gst_avtp_rvf_depay_push_caps (GstAvtpVfDepayBase * avtpvfdepay);
 
@@ -91,7 +91,8 @@ gst_avtp_rvf_depay_class_init (GstAvtpRvfDepayClass * klass)
       "Extracts raw video from RVF AVTPDUs",
       "Adrian Fiergolski <Adrian.Fiergolski@fastree3d.com>");
 
-  avtpbasedepayload_class->chain = GST_DEBUG_FUNCPTR (gst_avtp_rvf_depay_chain);
+  avtpbasedepayload_class->process =
+      GST_DEBUG_FUNCPTR (gst_avtp_rvf_depay_process);
 
   avtpvfdepaybase_class->depay_push_caps =
       GST_DEBUG_FUNCPTR (gst_avtp_rvf_depay_push_caps);
@@ -247,7 +248,7 @@ gst_avtp_rvf_depay_validate_avtpdu (GstAvtpRvfDepay * avtprvfdepay,
   gboolean result = FALSE;
   guint64 val;
   guint val32;
-  gint r;
+  gint r GST_UNUSED_ASSERT;
 
   if (G_UNLIKELY (map->size < AVTP_RVF_HEADER_SIZE)) {
     GST_DEBUG_OBJECT (avtprvfdepay,
@@ -537,7 +538,7 @@ gst_avtp_rvf_depay_get_avtp_timestamp (GstAvtpRvfDepay * avtprvfdepay,
 {
   struct avtp_stream_pdu *pdu;
   guint64 avtp_time, tv;
-  gint res;
+  gint res GST_UNUSED_ASSERT;
 
   pdu = (struct avtp_stream_pdu *) map->data;
 
@@ -559,7 +560,7 @@ is_first_fragment (GstAvtpRvfDepay * avtprvfdepay, GstMapInfo * map)
 {
   struct avtp_stream_pdu *pdu;
   guint64 num_lines, line_number, i_seq_num;
-  gint res;
+  gint res GST_UNUSED_ASSERT;
 
   pdu = (struct avtp_stream_pdu *) map->data;
 
@@ -588,7 +589,7 @@ is_last_fragment (GstAvtpRvfDepay * avtprvfdepay, GstMapInfo * map)
 {
   struct avtp_stream_pdu *pdu;
   guint64 val;
-  gint res;
+  gint res GST_UNUSED_ASSERT;
 
   pdu = (struct avtp_stream_pdu *) map->data;
 
@@ -604,7 +605,7 @@ gst_avtp_rvf_depay_get_fragment_size (GstAvtpRvfDepay * avtprvfdepay,
 {
   struct avtp_stream_pdu *pdu;
   guint64 val;
-  gint res;
+  gint res GST_UNUSED_ASSERT;
 
   pdu = (struct avtp_stream_pdu *) map->data;
 
@@ -682,9 +683,10 @@ gst_avtp_rvf_depay_handle_single_fragment (GstAvtpRvfDepay * avtprvfdepay,
 }
 
 static GstFlowReturn
-gst_avtp_rvf_depay_chain (GstPad * pad, GstObject * parent, GstBuffer * buffer)
+gst_avtp_rvf_depay_process (GstAvtpBaseDepayload * basedepay,
+    GstBuffer * buffer)
 {
-  GstAvtpRvfDepay *avtprvfdepay = GST_AVTP_RVF_DEPAY (parent);
+  GstAvtpRvfDepay *avtprvfdepay = GST_AVTP_RVF_DEPAY (basedepay);
   GstFlowReturn ret = GST_FLOW_OK;
   gboolean lost_packet;
   GstMapInfo map;

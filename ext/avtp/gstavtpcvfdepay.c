@@ -49,8 +49,8 @@ GST_DEBUG_CATEGORY_STATIC (avtpcvfdepay_debug);
 
 /* prototypes */
 
-static GstFlowReturn gst_avtp_cvf_depay_chain (GstPad * pad, GstObject * parent,
-    GstBuffer * buffer);
+static GstFlowReturn gst_avtp_cvf_depay_process (GstAvtpBaseDepayload *
+    avtpbasedepayload, GstBuffer * buffer);
 static gboolean gst_avtp_cvf_depay_push_caps (GstAvtpVfDepayBase * avtpvfdepay);
 
 #define AVTP_CVF_H264_HEADER_SIZE (sizeof(struct avtp_stream_pdu) + sizeof(guint32))
@@ -102,7 +102,7 @@ gst_avtp_cvf_depay_class_init (GstAvtpCvfDepayClass * klass)
       "Extracts compressed video from CVF AVTPDUs",
       "Ederson de Souza <ederson.desouza@intel.com>");
 
-  avtpbasedepayload_class->chain = GST_DEBUG_FUNCPTR (gst_avtp_cvf_depay_chain);
+  avtpbasedepayload_class->process = gst_avtp_cvf_depay_process;
 
   avtpvfdepaybase_class->depay_push_caps =
       GST_DEBUG_FUNCPTR (gst_avtp_cvf_depay_push_caps);
@@ -187,7 +187,7 @@ gst_avtp_cvf_depay_validate_avtpdu (GstAvtpCvfDepay * avtpcvfdepay,
   gboolean result = FALSE;
   guint64 val;
   guint val32;
-  gint r;
+  gint r GST_UNUSED_ASSERT;
 
   if (G_UNLIKELY (map->size < AVTP_CVF_H264_HEADER_SIZE)) {
     GST_DEBUG_OBJECT (avtpcvfdepay,
@@ -301,9 +301,10 @@ static void
 gst_avtp_cvf_depay_get_avtp_timestamps (GstAvtpCvfDepay * avtpcvfdepay,
     GstMapInfo * map, GstClockTime * pts, GstClockTime * dts)
 {
+  GstAvtpBaseDepayload *base = GST_AVTP_BASE_DEPAYLOAD (avtpcvfdepay);
   struct avtp_stream_pdu *pdu;
   guint64 avtp_time, h264_time, tv, ptv;
-  gint res;
+  gint res GST_UNUSED_ASSERT;
 
   *pts = GST_CLOCK_TIME_NONE;
   *dts = GST_CLOCK_TIME_NONE;
@@ -317,7 +318,8 @@ gst_avtp_cvf_depay_get_avtp_timestamps (GstAvtpCvfDepay * avtpcvfdepay,
     res = avtp_cvf_pdu_get (pdu, AVTP_CVF_FIELD_TIMESTAMP, &avtp_time);
     g_assert (res == 0);
 
-    *dts = avtp_time;
+    *dts = gst_avtp_base_depayload_tstamp_to_ptime (base, avtp_time,
+        base->last_dts);
   }
 
   res = avtp_cvf_pdu_get (pdu, AVTP_CVF_FIELD_H264_PTV, &ptv);
@@ -327,7 +329,8 @@ gst_avtp_cvf_depay_get_avtp_timestamps (GstAvtpCvfDepay * avtpcvfdepay,
     res = avtp_cvf_pdu_get (pdu, AVTP_CVF_FIELD_H264_TIMESTAMP, &h264_time);
     g_assert (res == 0);
 
-    *pts = h264_time;
+    *pts = gst_avtp_base_depayload_tstamp_to_ptime (base, h264_time,
+        base->last_dts);
   }
 }
 
@@ -364,7 +367,7 @@ gst_avtp_cvf_depay_get_M (GstAvtpCvfDepay * avtpcvfdepay, GstMapInfo * map,
 {
   struct avtp_stream_pdu *pdu;
   guint64 val;
-  gint res;
+  gint res GST_UNUSED_ASSERT;
 
   pdu = (struct avtp_stream_pdu *) map->data;
 
@@ -380,7 +383,7 @@ gst_avtp_cvf_depay_get_nalu_size (GstAvtpCvfDepay * avtpcvfdepay,
 {
   struct avtp_stream_pdu *pdu;
   guint64 val;
-  gint res;
+  gint res GST_UNUSED_ASSERT;
 
   pdu = (struct avtp_stream_pdu *) map->data;
 
@@ -574,9 +577,10 @@ gst_avtp_cvf_depay_handle_single_nal (GstAvtpCvfDepay * avtpcvfdepay,
 }
 
 static GstFlowReturn
-gst_avtp_cvf_depay_chain (GstPad * pad, GstObject * parent, GstBuffer * buffer)
+gst_avtp_cvf_depay_process (GstAvtpBaseDepayload * avtpbasedepayload,
+    GstBuffer * buffer)
 {
-  GstAvtpCvfDepay *avtpcvfdepay = GST_AVTP_CVF_DEPAY (parent);
+  GstAvtpCvfDepay *avtpcvfdepay = GST_AVTP_CVF_DEPAY (avtpbasedepayload);
   GstFlowReturn ret = GST_FLOW_OK;
   gboolean lost_packet;
   GstMapInfo map;

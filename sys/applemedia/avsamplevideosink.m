@@ -100,7 +100,7 @@ gst_av_sample_video_sink_class_init (GstAVSampleVideoSinkClass * klass)
           "The CoreAnimation layer that can be placed in the render tree",
           G_PARAM_READABLE | G_PARAM_STATIC_STRINGS));
 
-  gst_element_class_set_metadata (element_class, "AV Sample video sink",
+  gst_element_class_set_static_metadata (element_class, "AV Sample video sink",
       "Sink/Video", "A videosink based on AVSampleBuffers",
       "Matthew Waters <matthew@centricular.com>");
 
@@ -290,6 +290,8 @@ _cv_pixel_format_type_from_video_format (GstVideoFormat format)
       return kCVPixelFormatType_24BGR;
     case GST_VIDEO_FORMAT_NV12:
       return kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange;
+    case GST_VIDEO_FORMAT_P010_10LE:
+      return kCVPixelFormatType_420YpCbCr10BiPlanarVideoRange;
     case GST_VIDEO_FORMAT_I420:
       return kCVPixelFormatType_420YpCbCr8Planar;
     case GST_VIDEO_FORMAT_YUY2:
@@ -329,6 +331,8 @@ _pixel_format_description_to_video_format (CFDictionaryRef attrs)
       return GST_VIDEO_FORMAT_BGR;
     case kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange:
       return GST_VIDEO_FORMAT_NV12;
+    case kCVPixelFormatType_420YpCbCr10BiPlanarVideoRange:
+      return GST_VIDEO_FORMAT_P010_10LE;
     case kCVPixelFormatType_420YpCbCr8Planar:
       return GST_VIDEO_FORMAT_I420;
     case kCVPixelFormatType_422YpCbCr8_yuvs:
