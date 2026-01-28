@@ -1556,6 +1556,15 @@ struct _GstH265SliceHdr
    * Since: 1.22
    */
   guint long_term_ref_pic_set_size;
+
+  /**
+   * _GstH265SliceHdr.pps_id:
+   *
+   * PPS id
+   *
+   * Since: 1.28
+   */
+  guint pps_id;
 };
 
 struct _GstH265PicTiming
@@ -2117,6 +2126,10 @@ GstH265ParserResult gst_h265_parser_update_sps      (GstH265Parser   * parser,
 GST_CODEC_PARSERS_API
 GstH265ParserResult gst_h265_parser_update_pps      (GstH265Parser   * parser,
                                                      GstH265PPS      * pps);
+
+GST_CODEC_PARSERS_API
+GstH265ParserResult gst_h265_parser_link_slice_hdr  (GstH265Parser * parser,
+                                                     GstH265SliceHdr * slice);
 
 GST_CODEC_PARSERS_API
 void                gst_h265_parser_free            (GstH265Parser  * parser);

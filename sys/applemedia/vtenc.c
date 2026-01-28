@@ -290,7 +290,8 @@ gst_vtenc_rate_control_get_type (void)
 }
 
 static GstStaticCaps sink_caps =
-GST_STATIC_CAPS (GST_VIDEO_CAPS_MAKE ("{ AYUV64, UYVY, NV12, I420 }"));
+GST_STATIC_CAPS (GST_VIDEO_CAPS_MAKE
+    ("{ AYUV64, UYVY, NV12, I420, P010_10LE }"));
 
 static void
 gst_vtenc_base_init (GstVTEncClass * klass)
@@ -918,7 +919,7 @@ gst_vtenc_h264_parse_profile_level_key (GstVTEnc * self, const gchar * profile,
     profile = "main";
   if (level_arg == NULL)
     level_arg = "AutoLevel";
-  strncpy (level, level_arg, sizeof (level));
+  strlcpy (level, level_arg, sizeof (level));
 
   if (!strcmp (profile, "constrained-baseline") ||
       !strcmp (profile, "baseline")) {
