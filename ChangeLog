@@ -1,3 +1,298 @@
+=== release 1.26.10 ===
+
+2025-12-25 15:44:26 +0100  Tim-Philipp Müller <tim@centricular.com>
+
+	* NEWS:
+	* RELEASE:
+	* gst-plugins-bad.doap:
+	* meson.build:
+	  Release 1.26.10
+
+2025-12-18 18:23:56 -0500  Nicolas Dufresne <nicolas.dufresne@collabora.com>
+
+	* gst-libs/gst/codecs/gsth265decoder.c:
+	* gst-libs/gst/codecs/gsth266decoder.c:
+	  codecs: h265/h266dec: Do not try to output failed frames
+	  "end_picture()" virtual function may fail due to various reason, one of them
+	  being that a flush is happening. Since the picture failed, the subclass may have
+	  flushed any picture data from it, and will likely throw an error or crash when
+	  trying to output.
+	  These two decoder simply didn't care unlike all the other. Use similar technique
+	  as used in h264dec, which is to mark the frame as not for output.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/10431>
+
+2025-12-18 15:38:55 -0500  Nicolas Dufresne <nicolas.dufresne@collabora.com>
+
+	* sys/v4l2codecs/gstv4l2codecav1dec.c:
+	* sys/v4l2codecs/gstv4l2codecvp9dec.c:
+	  v4l2codecs: av1/vp9: Properly propagate flow ret such as FLUSHING
+	  Some of the decoder would simply turn any flow return into an ERROR, which
+	  can be noisy when the original flow return is FLUSHING due to a normal flush
+	  condition.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/10431>
+
+2025-12-18 15:37:38 -0500  Nicolas Dufresne <nicolas.dufresne@collabora.com>
+
+	* sys/v4l2codecs/gstv4l2codecav1dec.c:
+	* sys/v4l2codecs/gstv4l2codecvp8dec.c:
+	  v4l2codecs: av1/vp9: Fix request leak on error
+	  The request was not being freed property if there was an error. Typically a
+	  flush / seek operation could cause this.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/10431>
+
+2025-12-18 15:35:07 -0500  Nicolas Dufresne <nicolas.dufresne@collabora.com>
+
+	* sys/v4l2codecs/gstv4l2codech264dec.c:
+	* sys/v4l2codecs/gstv4l2codech265dec.c:
+	* sys/v4l2codecs/gstv4l2codecmpeg2dec.c:
+	* sys/v4l2codecs/gstv4l2codecvp8dec.c:
+	  v4l2codecs: Assert and return on missing request
+	  The base class isn't supposed to output a picture that has never been
+	  requested or for which the request has been removed by the flush operation.
+	  Make sure to crash this kind of programming error with an assert, while
+	  protecting against crash in this case.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/10431>
+
+2025-12-17 14:24:31 +0200  Sebastian Dröge <sebastian@centricular.com>
+
+	* gst/mxf/mxfdemux.c:
+	* gst/mxf/mxfdemux.h:
+	  mxfdemux: Simplify timestamp tracking
+	  Apart from keeping less state around this also calculates more accurate
+	  timestamps because of tracking everything in terms of edit units instead of
+	  nanoseconds.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/10406>
+
+2025-12-17 11:57:01 +0200  Sebastian Dröge <sebastian@centricular.com>
+
+	* gst/mxf/mxfdemux.h:
+	  mxfdemux: Switch edit unit position tracking to unsigned integers
+	  These can never become negative and the only negative number in use is
+	  -1 for "unset", which maps equally well to G_MAXUINT64.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/10406>
+
+2025-12-11 21:53:04 -0500  Aaron Boxer <aaron.boxer@collabora.com>
+
+	* gst-libs/gst/play/gstplay.c:
+	  play: do not call gst_pb_utils_get_codec_description if caps are not fixed
+	  this avoids throwing a (harmless) exception when stream selection is
+	  called before pipeline is linked
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/10394>
+
+2025-12-17 18:58:14 +0200  Sebastian Dröge <sebastian@centricular.com>
+
+	* gst/aiff/aiffparse.c:
+	* gst/aiff/aiffparse.h:
+	  aiffparse: Remove segment closing on non-flushing seeks
+	  That's a 0.10 leftover and not necessary anymore, and can confuse downstream
+	  elements unnecessarily.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/10400>
+
+2025-12-17 18:53:26 +0200  Sebastian Dröge <sebastian@centricular.com>
+
+	* gst/mxf/mxfdemux.c:
+	* gst/mxf/mxfdemux.h:
+	  mxfdemux: Remove segment closing on non-flushing seeks
+	  That's a 0.10 leftover and not necessary anymore, and can confuse downstream
+	  elements unnecessarily.
+	  Fixes https://gitlab.freedesktop.org/gstreamer/gstreamer/-/issues/4803
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/10400>
+
+2025-12-17 10:23:25 +0900  jeongmin kwak <jeongmin.kwak@lge.com>
+
+	* ext/aes/gstaesdec.c:
+	  aesdec: use gsize for buffer sizes and fix log format
+	  Replace casts with gsize in gst_aes_dec_prepare_output_buffer() and use
+	  G_GSIZE_FORMAT for logging to avoid truncation and warnings.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/10398>
+
+2025-11-28 14:40:49 +0900  jeongmin kwak <jeongmin.kwak@lge.com>
+
+	* ext/aes/gstaesenc.c:
+	  aesenc: use gsize for buffer sizes and fix log format
+	  Replace casts with gsize in gst_aes_enc_prepare_output_buffer() and use
+	  G_GSIZE_FORMAT for logging to avoid truncation and warnings.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/10398>
+
+2025-12-17 11:07:18 +0900  jeongmin kwak <jeongmin.kwak@lge.com>
+
+	* ext/hls/gsthlssink.c:
+	  hlssink: Guard NULL structure and use gst_structure_has_name()
+	  Prevent NULL dereference by checking gst_message_get_structure()
+	  result before accessing fields. Replace strcmp() with
+	  gst_structure_has_name() for safe structure name comparison.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/10395>
+
+2025-12-16 13:05:19 +0100  François Laignel <francois@centricular.com>
+
+	* gst/mxf/mxfdemux.c:
+	  mxfdemux: send event SegmentDone for segment seeks
+	  ... instead of sending an EOS event in that case.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/10391>
+
+2025-12-13 11:29:03 +0200  Sebastian Dröge <sebastian@centricular.com>
+
+	* ext/fdkaac/gstfdkaacdec.c:
+	  fdkaacdec: Invalidate channel_types/indices when setting a known config
+	  Otherwise switching from an unknown config (which is then mapped one by one) to
+	  a known config and then back to the same unknown config makes it use invalid
+	  cached channel positions.
+	  Fixes https://gitlab.freedesktop.org/gstreamer/gstreamer/-/issues/4791
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/10373>
+
+2025-11-26 20:09:20 +0100  Jakub Adam <jakub.adam@collabora.com>
+
+	* ext/dtls/gstdtlsdec.c:
+	  dtlsdec: mark generated cert agent with GST_OBJECT_FLAG_MAY_BE_LEAKED
+	  So that it is ignored by the leaks tracer.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/10371>
+
+2025-12-09 11:12:12 +0100  Hyunjun Ko <zzoon@igalia.com>
+
+	* gst-libs/gst/vulkan/gstvkformat.c:
+	  vkformat: Add VK_FORMAT_G10X6_B10X6R10X6_2PLANE_420_UNORM_3PACK16 format
+	  Add support for VK_FORMAT_G10X6_B10X6R10X6_2PLANE_420_UNORM_3PACK16,
+	  which is the Vulkan equivalent of P010.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/10360>
+
+2025-12-04 16:40:25 -0600  Brad Reitmeyer <brad.reitmeyer@resi.io>
+
+	* sys/decklink/gstdecklinkvideosink.cpp:
+	  decklinkvideosink: Fix frame completion callbacks for firmware 14.3+
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/10322>
+
+2025-12-06 10:25:21 +0000  Philippe Normand <philn@igalia.com>
+
+	* ext/webrtc/transportstream.c:
+	* gst-libs/gst/webrtc/nice/nice.c:
+	  webrtc: Keep a ref of the ICEStream in the TransportStream
+	  By doing so we avoid potential race conditions. The libnice ICE implementation
+	  was then adapted to comply with the transfer-full return value of the
+	  `gst_webrtc_ice_add_stream()` vfunc.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/10318>
+
+2025-12-05 09:19:34 +0200  Sebastian Dröge <sebastian@centricular.com>
+
+	* sys/va/gstvabasedec.c:
+	  vabasedec: Don't assert when negotiating based on a gap event before the first buffer
+	  Instead fall back to the video decoder base class `decide_allocation()` until
+	  the minimum number of required buffers is known, which is usually the case after
+	  the codec parameters (sequence header) are read.
+	  While the minimum number of buffers is known ahead of time for some codecs like AV1,
+	  we still only set it once the codec parameters are parsed as otherwise an unused
+	  VA buffer pool will already be created together with surface allocations for the
+	  gap event. This pool will be deallocated again shortly afterwards, just to
+	  create a new pool with the correct configuration.
+	  Fixes https://gitlab.freedesktop.org/gstreamer/gstreamer/-/issues/4779
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/10302>
+
+2025-12-04 12:57:26 +0800  Yun Liu <yun.m.liu@intel.com>
+
+	* gst-libs/gst/analytics/meson.build:
+	  analytics: Fix build on MSVC by using libm dependency
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/10288>
+
+2025-10-08 02:31:50 -0400  Doug Nazar <nazard@nazar.ca>
+
+	* ext/curl/gstcurlbasesink.c:
+	* ext/curl/gstcurldefaults.h:
+	* ext/curl/gstcurlhttpsink.c:
+	* ext/curl/gstcurlhttpsrc.c:
+	  curl: Ensure set_opt() is called with a long value
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/10274>
+
+2025-03-16 20:23:48 -0400  Doug Nazar <nazard@nazar.ca>
+
+	* ext/curl/gstcurlhttpsrc.c:
+	  curl: Fix pushing incorrect buffers after seek
+	  We must stop any existing transfer when seeking or we may push buffers
+	  from the old request that downstream isn't expecting, causing decode errors.
+	  Fixes: https://gitlab.freedesktop.org/gstreamer/gst-plugins-base/-/issues/579
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/10274>
+
+2025-03-16 20:17:58 -0400  Doug Nazar <nazard@nazar.ca>
+
+	* ext/curl/gstcurlhttpsrc.c:
+	  curl: Cleanup logging of received headers
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/10274>
+
+2021-05-11 23:54:49 -0400  Doug Nazar <nazard@nazar.ca>
+
+	* ext/curl/gstcurlhttpsrc.c:
+	  curl: Fix content size reported
+	  During a range request, the Content-Length header only reports the
+	  length transfered. The Content-Range header should report the total
+	  length if known. The current code would inconsistently use either
+	  or race and use the wrong length.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/10274>
+
+2025-06-12 11:45:33 -0300  L. E. Segovia <amy@amyspark.me>
+
+	* ext/curl/gstcurlhttpsrc.c:
+	  curl: Recover missing comment
+	  See https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/8974#note_2955585
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/10274>
+
+2025-05-13 12:22:08 +0000  L. E. Segovia <amy@centricular.com>
+
+	* ext/curl/gstcurlhttpsrc.c:
+	  curl: Fix wrong format specifier for macOS
+	  > ../ext/curl/gstcurlhttpsrc.c:1331:11: error: format specifies type
+	  > unsigned long long' but the argument has type 'curl_off_t' (aka 'long') [-Werror,-Wformat]
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/10274>
+
+2021-05-11 23:58:54 -0400  Doug Nazar <nazard@nazar.ca>
+
+	* ext/curl/gstcurlhttpsrc.c:
+	* ext/curl/gstcurlhttpsrc.h:
+	  curl: remove unused content_type field
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/10274>
+
+2021-05-08 21:23:46 -0400  Doug Nazar <nazard@nazar.ca>
+
+	* ext/curl/gstcurlhttpsrc.c:
+	* tests/check/elements/curlhttpsrc.c:
+	  curl: Reset request status on uri change
+	  We need to stop the current transfer and start a new one if the uri
+	  was changed. Also fix the 'test_range_get' to do 20 requests, instead
+	  of one request and 19 seeks past EOS.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/10274>
+
+2025-12-02 17:52:34 +0200  Sebastian Dröge <sebastian@centricular.com>
+
+	* gst/midi/midiparse.c:
+	  midiparse: Fix a couple of potential out-of-bounds reads
+	  Also use an unsigned integer for parsing variable length integers as shifting
+	  bits out of the sign bit is undefined behaviour.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/10280>
+
+2025-11-28 15:12:37 +0200  Vivia Nikolaidou <vivia@ahiru.eu>
+
+	* gst/mxf/mxfmpeg.c:
+	  mxfmpeg: Add custom Sony picture essence coding UL
+	  Sony seems to use 06.0e.2b.34.04.01.01.03.0e.06.41.02 as prefix for
+	  their custom picture essence codings, and specifically the MPEG one
+	  potentially uses the same semantics.
+	  This comes from a file with:
+	  picture essence coding 06.0e.2b.34.04.01.01.03.0e.06.41.02.01.04.03.01
+	  codec 00.00.00.00.00.00.00.00.00.00.00.00.00.00.00.00
+	  essence container 06.0e.2b.34.04.01.01.02.0d.01.03.01.02.04.60.01
+	  which seemed to be XDCAM, aka decodable as MPEG-2.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/10271>
+
+2022-04-01 05:54:29 +1100  Jan Schmidt <jan@centricular.com>
+
+	* gst/mpegtsmux/gstbasetsmux.c:
+	  mpegtsmux: Fix potential deadlock changing pmt-interval
+	  The object lock is the innermost lock. Don't take
+	  the mux->lock while holding it.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/10272>
+
+2025-12-01 17:32:18 +0000  Tim-Philipp Müller <tim@centricular.com>
+
+	* meson.build:
+	  Back to development after 1.26.9
+
 === release 1.26.9 ===
 
 2025-12-01 17:27:07 +0000  Tim-Philipp Müller <tim@centricular.com>

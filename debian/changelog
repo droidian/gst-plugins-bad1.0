@@ -1,3 +1,15 @@
+gst-plugins-bad1.0 (1.26.10-2) unstable; urgency=medium
+
+  * re-upload bad to unstable
+
+ -- Marc Leeman <marc.leeman@gmail.com>  Thu, 08 Jan 2026 11:02:48 +0100
+
+gst-plugins-bad1.0 (1.26.10-1) unstable; urgency=medium
+
+  * New upstream version 1.26.10
+
+ -- Marc Leeman <marc.leeman@gmail.com>  Fri, 26 Dec 2025 18:11:00 +0100
+
 gst-plugins-bad1.0 (1.26.9-1) unstable; urgency=medium
 
   * d/control: bump Standards-Version to 4.7.2

@@ -119,8 +119,8 @@ struct _GstMXFDemuxEssenceTrack
   MXFUMID source_package_uid;
 
   /* Position and duration in edit units */
-  gint64 position;
-  gint64 duration;
+  guint64 position;
+  guint64 duration;
 
   GArray *offsets;
 
@@ -196,10 +196,8 @@ struct _GstMXFDemuxPad
   guint32 track_id;
   gboolean need_segment;
 
-  GstClockTime position;
-  gdouble position_accumulated_error;
   /* Current position in the material track (in edit units) */
-  gint64 current_material_track_position;
+  guint64 current_material_track_position;
 
   gboolean eos, discont;
 
@@ -214,15 +212,15 @@ struct _GstMXFDemuxPad
   MXFMetadataSourceClip *current_component;
 
   /* Position in the material track where this component started */
-  gint64 current_component_start_position;
+  guint64 current_component_start_position;
 
   /* Position/duration in the source track */
-  gint64 current_component_start;
-  gint64 current_component_duration;
+  guint64 current_component_start;
+  guint64 current_component_duration;
 
   /* Current essence track and position (in edit units) */
   GstMXFDemuxEssenceTrack *current_essence_track;
-  gint64 current_essence_track_position;
+  guint64 current_essence_track_position;
 };
 
 struct _GstMXFDemuxPadClass
@@ -249,8 +247,6 @@ struct _GstMXFDemux
 
   GstSegment segment;
   guint32 seqnum;
-
-  GstEvent *close_seg_event;
 
   guint64 offset;
 
