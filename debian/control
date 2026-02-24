@@ -1,6 +1,5 @@
 Source: gst-plugins-bad1.0
 Section: libs
-Priority: optional
 Maintainer: Maintainers of GStreamer packages <gst-plugins-bad1.0@packages.debian.org>
 Uploaders: Sebastian Dröge <slomo@debian.org>,
            Sjoerd Simons <sjoerd@debian.org>,
@@ -117,7 +116,7 @@ Build-Depends: debhelper-compat (= 13),
                xvfb
 Build-Conflicts: libopenaptx-dev
 Rules-Requires-Root: no
-Standards-Version: 4.7.2
+Standards-Version: 4.7.3
 Vcs-Git: https://salsa.debian.org/gstreamer-team/gst-plugins-bad1.0.git
 Vcs-Browser: https://salsa.debian.org/gstreamer-team/gst-plugins-bad1.0/
 Homepage: https://gstreamer.freedesktop.org
