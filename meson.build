@@ -1,5 +1,5 @@
 project('gst-plugins-bad', 'c', 'cpp',
-  version : '1.28.0',
+  version : '1.28.1',
   meson_version : '>= 1.4',
   default_options : [ 'warning_level=1',
                       'buildtype=debugoptimized' ])
@@ -43,8 +43,16 @@ gst_libraries = []
 cc = meson.get_compiler('c')
 cxx = meson.get_compiler('cpp')
 host_system = host_machine.system()
+subsystem = ''
+if host_system == 'ios'
+  warning('Setting system = \'ios\' in the cross file is deprecated, please use subsystem names')
+  host_system = 'darwin'
+  subsystem = 'ios'
+elif host_system == 'darwin'
+  subsystem = host_machine.subsystem()
+endif
 
-if host_system in ['ios', 'darwin']
+if host_system == 'darwin'
   have_objc = add_languages('objc', native: false)
   have_objcpp = add_languages('objcpp', native: false)
 else
@@ -288,11 +296,8 @@ cdata.set_quoted('GST_PACKAGE_ORIGIN', get_option('package-origin'))
 # FIXME: This should be exposed as a configuration option
 if host_system == 'linux'
   cdata.set_quoted('DEFAULT_VIDEOSRC', 'v4l2src')
-elif ['darwin', 'ios'].contains(host_system)
+elif host_system == 'darwin'
   cdata.set_quoted('DEFAULT_VIDEOSRC', 'avfvideosrc')
-  cdata.set_quoted('GST_EXTRA_MODULE_SUFFIX', '.dylib')
-  # Yes, we set this for iOS too. Same as Autotools.
-  cdata.set('HAVE_OSX', 1)
 else
   cdata.set_quoted('DEFAULT_VIDEOSRC', 'videotestsrc')
 endif
@@ -407,7 +412,7 @@ if x11_dep.found()
 endif
 
 # Optional dep of msdk and va
-if host_system not in ['darwin', 'ios', 'android', 'windows', 'gnu']
+if host_system not in ['darwin', 'android', 'windows', 'gnu']
   libdrm_dep = dependency('libdrm', version : '>=2.4.50',
     required : get_option('drm').enabled() or get_option('msdk').enabled(),
   )
@@ -456,28 +461,10 @@ else
   winsock2 = []
 endif
 
-if ['darwin', 'ios'].contains(host_system)
+if host_system == 'darwin'
   if not have_objc
     error('Building on MacOS/iOS/etc requires an ObjC compiler')
   endif
-  if host_system == 'ios'
-    cdata.set('HAVE_IOS', 1)
-  endif
-
-  avfoundation_dep = dependency('AVFoundation', required : false)
-  if avfoundation_dep.found()
-      cdata.set('HAVE_AVFOUNDATION', 1)
-  endif
-
-  videotoolbox_dep = dependency('VideoToolbox', required : false)
-  if videotoolbox_dep.found()
-      cdata.set('HAVE_VIDEOTOOLBOX', 1)
-  endif
-
-#  FIXME: framework.version() returns 'unknown'
-#  if videotoolbox_dep.version().version_compare('>=10.9.6')
-#    cdata.set('HAVE_VIDEOTOOLBOX_10_9_6', 1)
-#  endif
 endif
 
 have_orcc = false
@@ -642,6 +629,16 @@ endif
 configure_file(output : 'config.h', configuration : cdata)
 
 meson.add_dist_script('scripts/gen-changelog.py', meson.project_name(), '1.26.0', meson.project_version())
+
+# dist common files from monorepo root
+if not meson.is_subproject()
+  meson.add_dist_script('scripts/dist-common-files.py', meson.project_version())
+endif
+
+# dist common files from monorepo root
+if not meson.is_subproject()
+  meson.add_dist_script('scripts/dist-common-files.py', meson.project_version())
+endif
 
 subdir('docs')
 

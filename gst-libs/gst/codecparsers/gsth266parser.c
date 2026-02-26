@@ -1460,7 +1460,8 @@ gst_h266_parser_parse_pic_timing (GstH266PicTiming * pt,
 
   if (bp->du_hrd_params_present_flag &&
       bp->du_cpb_params_in_pic_timing_sei_flag) {
-    READ_UE (nr, pt->num_decoding_units_minus1);
+    READ_UE_MAX (nr, pt->num_decoding_units_minus1,
+        GST_H266_MAX_DECODING_UNITS_IN_PIC_TIMING - 1);
     if (pt->num_decoding_units_minus1 > 0) {
       READ_UINT8 (nr, pt->du_common_cpb_removal_delay_flag, 1);
       if (pt->du_common_cpb_removal_delay_flag) {
@@ -1732,7 +1733,7 @@ error:
 }
 
 /**
- * gst_h266_parser_new:
+ * gst_h266_parser_new: (skip)
  *
  * Creates a new #GstH266Parser. It should be freed with
  * gst_h266_parser_free after use.
@@ -1984,7 +1985,7 @@ gst_h266_parser_identify_nalu_vvc (GstH266Parser * parser,
  * @offset: the offset from which to parse @data
  * @size: the size of @data
  * @nal_length_size: the size in bytes of the VVC nal length prefix.
- * @nalus: a caller allocated #GArray of #GstH266NalUnit where to store parsed nal headers
+ * @nalus: (element-type GstH266NalUnit): a caller allocated #GArray of #GstH266NalUnit where to store parsed nal headers
  * @consumed: the size of consumed bytes
  *
  * Parses @data for packetized (e.g., vvc1/vvi1) bitstream and
@@ -3841,15 +3842,28 @@ gst_h266_parser_parse_picture_partition (GstH266SPS * sps,
               goto error;
             }
 
-            tile_idx += pps->tile_idx_delta_val[i];
+            gint new_tile_idx = (gint) tile_idx + pps->tile_idx_delta_val[i];
+            if (new_tile_idx < 0 ||
+                new_tile_idx >= (gint) pps->num_tiles_in_pic) {
+              GST_WARNING ("tile_idx %d out of bounds.", new_tile_idx);
+              goto error;
+            }
+            tile_idx = new_tile_idx;
           } else {
             pps->tile_idx_delta_val[i] = 0;
 
-            tile_idx += pps->slice_width_in_tiles_minus1[i] + 1;
-            if (tile_idx % pps->num_tile_columns == 0) {
-              tile_idx += pps->slice_height_in_tiles_minus1[i] *
+            gint new_tile_idx = (gint) tile_idx +
+                pps->slice_width_in_tiles_minus1[i] + 1;
+            if (new_tile_idx % pps->num_tile_columns == 0) {
+              new_tile_idx += pps->slice_height_in_tiles_minus1[i] *
                   pps->num_tile_columns;
             }
+            if (new_tile_idx < 0 ||
+                new_tile_idx >= (gint) pps->num_tiles_in_pic) {
+              GST_WARNING ("tile_idx %d out of bounds.", new_tile_idx);
+              goto error;
+            }
+            tile_idx = new_tile_idx;
           }
         }
       }
@@ -4598,7 +4612,7 @@ gst_h266_parse_aps (GstH266Parser * parser, GstH266NalUnit * nalu,
   READ_UINT8 (&nr, params_type, 3);
   aps->params_type = params_type;
   READ_UINT8 (&nr, aps->aps_id, 5);
-  CHECK_ALLOWED_MAX (aps->aps_id, GST_H266_MAX_APS_COUNT);
+  CHECK_ALLOWED_MAX (aps->aps_id, GST_H266_MAX_APS_COUNT - 1);
   READ_UINT8 (&nr, aps->chroma_present_flag, 1);
 
   switch (aps->params_type) {
@@ -5348,7 +5362,7 @@ error_with_ret:
  * gst_h266_parser_parse_picture_hdr:
  * @parser: a #GstH266Parser
  * @nalu: The picture header #GstH266NalUnit to parse
- * @ph: The #GstH266PicHdr to fill.
+ * @picture: The #GstH266PicHdr to fill.
  *
  * Parses @data, and fills the @ph structure.
  *
@@ -5440,7 +5454,7 @@ error:
  * gst_h266_parser_parse_slice_hdr:
  * @parser: a #GstH266Parser
  * @nalu: The slice #GstH266NalUnit to parse
- * @sh: The #GstH266SliceHdr to fill.
+ * @slice: The #GstH266SliceHdr to fill.
  *
  * Parses @data, and fills the @sh structure.
  *
@@ -6116,9 +6130,9 @@ error:
 
 /**
  * gst_h266_parser_parse_sei:
- * @nalparser: a #GstH266Parser
+ * @parser: a #GstH266Parser
  * @nalu: The `GST_H266_NAL_*_SEI` #GstH266NalUnit to parse
- * @messages: The GArray of #GstH266SEIMessage to fill. The caller must free
+ * @messages: (element-type GstH266SEIMessage): The GArray of #GstH266SEIMessage to fill. The caller must free
  *  it when done.
  *
  * Parses @data, create and fills the @messages array.
