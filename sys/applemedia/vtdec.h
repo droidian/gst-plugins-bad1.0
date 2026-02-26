@@ -24,6 +24,7 @@
 #include <gst/base/gstqueuearray.h>
 #include <gst/video/video.h>
 #include <gst/video/gstvideodecoder.h>
+#include <TargetConditionals.h>
 #include <CoreMedia/CoreMedia.h>
 #include <VideoToolbox/VideoToolbox.h>
 #include "videotexturecache.h"
@@ -47,6 +48,13 @@ typedef struct _GstVtdecClass GstVtdecClass;
 
 #define GST_VTDEC_DPB_MAX_SIZE 16
 
+typedef enum
+{
+    NoneSupported   = 0,
+    Av1Supported    = 1 << 0,
+    Vp9Supported    = 1 << 1,
+} SupplementalSupport;
+
 struct _GstVtdec
 {
   GstVideoDecoder base_vtdec;
@@ -62,10 +70,13 @@ struct _GstVtdec
   GMutex queue_mutex;
   GCond queue_cond;
 
-  GstFlowReturn downstream_ret;
+  /* protected by queue_mutex */
   gboolean is_flushing;
   gboolean is_draining;
   gboolean pause_task;
+  
+  /* protected by the STREAM_LOCK */
+  GstFlowReturn downstream_ret;
 
 #if defined(APPLEMEDIA_MOLTENVK)
   GstVulkanInstance *instance;
@@ -73,6 +84,7 @@ struct _GstVtdec
 #endif
 
   gboolean require_hardware;
+  SupplementalSupport codec_support;
 
   gboolean av1_needs_sequence_header;  /* TRUE if we need to wait for sequence header OBU before creating session */
   GstBuffer *av1_sequence_header_obu;  /* Store the sequence header OBU for format description */
@@ -87,8 +99,12 @@ struct _GstVtdecClass
 };
 
 GType gst_vtdec_get_type (void);
+GST_ELEMENT_REGISTER_DECLARE (vtdec);
+#if !TARGET_OS_WATCH
+GST_ELEMENT_REGISTER_DECLARE (vtdec_hw);
+#endif
 
-void gst_vtdec_register_elements (GstPlugin * plugin);
+gboolean gst_vtdec_register_elements (GstPlugin * plugin);
 
 G_END_DECLS
 

@@ -741,8 +741,6 @@ gst_wl_window_commit_buffer (GstWlWindow * self, GstWlBuffer * buffer)
   GstVideoContentLightLevel *linfo = priv->next_linfo;
   struct wl_callback *callback;
   gboolean needs_layout_update = FALSE;
-  GstVideoMeta *vmeta = gst_wl_buffer_get_video_meta (buffer);
-  GstVideoCropMeta *cmeta = gst_wl_buffer_get_video_crop_meta (buffer);
   GstVideoRectangle crop = priv->crop;
 
   if (G_UNLIKELY (info)) {
@@ -761,20 +759,23 @@ gst_wl_window_commit_buffer (GstWlWindow * self, GstWlBuffer * buffer)
     needs_layout_update = TRUE;
   }
 
-  if (vmeta) {
-    if (priv->buffer_width != vmeta->width
-        || priv->buffer_height != vmeta->height) {
+  if (G_LIKELY (buffer)) {
+    GstVideoMeta *vmeta = gst_wl_buffer_get_video_meta (buffer);
+    GstVideoCropMeta *cmeta = gst_wl_buffer_get_video_crop_meta (buffer);
+
+    if (vmeta && (priv->buffer_width != vmeta->width
+            || priv->buffer_height != vmeta->height)) {
       priv->buffer_width = vmeta->width;
       priv->buffer_height = vmeta->height;
       needs_layout_update = TRUE;
     }
-  }
 
-  if (cmeta) {
-    crop.x = cmeta->x;
-    crop.y = cmeta->y;
-    crop.w = cmeta->width;
-    crop.h = cmeta->height;
+    if (cmeta) {
+      crop.x = cmeta->x;
+      crop.y = cmeta->y;
+      crop.w = cmeta->width;
+      crop.h = cmeta->height;
+    }
   }
 
   if (gst_wl_window_crop_rectangle_changed (self, &crop)) {
@@ -1286,10 +1287,10 @@ gst_wl_window_set_image_description (GstWlWindow * self,
 
     /* We can't set the light level if we don't know the luminance range */
     if (linfo) {
-      guint maxFALL = CLAMP (min_luminance + 1,
-          linfo->max_frame_average_light_level, max_luminance);
+      guint maxFALL = CLAMP (linfo->max_frame_average_light_level,
+          min_luminance + 1, max_luminance);
       guint maxCLL =
-          CLAMP (maxFALL, linfo->max_content_light_level, max_luminance);
+          CLAMP (linfo->max_content_light_level, maxFALL, max_luminance);
       wp_image_description_creator_params_v1_set_max_cll (params, maxCLL);
       wp_image_description_creator_params_v1_set_max_fall (params, maxFALL);
     }
