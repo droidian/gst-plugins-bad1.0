@@ -1,3 +1,11 @@
+gst-plugins-bad1.0 (1.28.1-2) unstable; urgency=medium
+
+  * Revert "Build the ONNX neural network plugin"
+  * Overdue closing of security bug with release of new upstream 1.28.1
+    (Closes: #1130059)
+
+ -- Marc Leeman <marc.leeman@gmail.com>  Tue, 10 Mar 2026 10:53:38 +0100
+
 gst-plugins-bad1.0 (1.28.1-1) unstable; urgency=medium
 
   * d/control: update to Standards-Version 4.7.3
