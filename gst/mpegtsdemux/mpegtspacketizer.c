@@ -1511,6 +1511,9 @@ calculate_skew (MpegTSPacketizer2 * packetizer,
     delta = 0;
   }
 
+  if (!packetizer->skew_correction)
+    goto no_skew;
+
   pos = pcr->window_pos;
 
   if (G_UNLIKELY (pcr->window_filling)) {

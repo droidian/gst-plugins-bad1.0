@@ -1,3 +1,48 @@
+gst-plugins-bad1.0 (1.28.1-2) unstable; urgency=medium
+
+  * Revert "Build the ONNX neural network plugin"
+  * Overdue closing of security bug with release of new upstream 1.28.1
+    (Closes: #1130059)
+
+ -- Marc Leeman <marc.leeman@gmail.com>  Tue, 10 Mar 2026 10:53:38 +0100
+
+gst-plugins-bad1.0 (1.28.1-1) unstable; urgency=medium
+
+  * d/control: update to Standards-Version 4.7.3
+  * New upstream version 1.28.1
+
+ -- Marc Leeman <marc.leeman@gmail.com>  Thu, 26 Feb 2026 11:16:23 +0100
+
+gst-plugins-bad1.0 (1.28.0-1) unstable; urgency=medium
+
+  [ Marc Leeman ]
+  * d/rules: disable tflite
+  * d/rules: disable wpe2
+  * d/install: gsty4m moved to good
+  * d/install: install libgsthip.so
+  * d/control: remove  superfluous-file-pattern gst/y4m/gsty4mdec.[ch]
+  * d/control: bump minimal version after new symbols
+  * d/control: libvulkan-dev minimal 1.4.317
+  * d/copyright: superfluous-file-pattern gst/inter/gstintertest.c
+  * d/patches: refresh Skip-failing-tests
+  * d/rules: disable mpeghdec, not in debian
+  * d/rules: disable vmaf, not in debian
+  * d/patches: avoid vmaf_dep in checks when vmaf is disabled
+  * d/rules: disable vulkan, dependency sdl3 not in debian
+  * d/control: remove libvulkan-dev because of sdl3 dep
+  * d/install: install libgsthip
+  * d/: do not enable hip elements on hurd
+  * d/rules: not hurd is linux
+  * New upstream version 1.28.0
+  * Revert "d/gbp.conf: adjust for experimental"
+  * d/control: update dependencies to 1.28.0
+  * d/patches: refresh
+
+  [ Dylan Aïssi ]
+  * Build the TensorFlow Lite (LiteRT) plugin
+
+ -- Marc Leeman <marc.leeman@gmail.com>  Wed, 28 Jan 2026 14:22:06 +0100
+
 gst-plugins-bad1.0 (1.26.10-2) unstable; urgency=medium
 
   * re-upload bad to unstable

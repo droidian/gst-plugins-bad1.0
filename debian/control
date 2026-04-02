@@ -1,6 +1,5 @@
 Source: gst-plugins-bad1.0
 Section: libs
-Priority: optional
 Maintainer: Maintainers of GStreamer packages <gst-plugins-bad1.0@packages.debian.org>
 Uploaders: Sebastian Dröge <slomo@debian.org>,
            Sjoerd Simons <sjoerd@debian.org>,
@@ -20,8 +19,8 @@ Build-Depends: debhelper-compat (= 13),
                gir1.2-vulkan-1.0-dev,
                glslc,
                gobject-introspection (>= 1.80),
-               gstreamer1.0-plugins-base (>= 1.26.0),
-               gstreamer1.0-plugins-good (>= 1.26.0) <!nocheck>,
+               gstreamer1.0-plugins-base (>= 1.28.0),
+               gstreamer1.0-plugins-good (>= 1.28.0) <!nocheck>,
                gstreamer1.0-tools,
                ladspa-sdk,
                libaom-dev,
@@ -48,8 +47,8 @@ Build-Depends: debhelper-compat (= 13),
                libgme-dev,
                libgnutls28-dev (>= 2.11.3),
                libgsm1-dev,
-               libgstreamer-plugins-base1.0-dev (>= 1.26.0),
-               libgstreamer1.0-dev (>= 1.26.0),
+               libgstreamer-plugins-base1.0-dev (>= 1.28.0),
+               libgstreamer1.0-dev (>= 1.28.0),
                libgtk-3-dev (>= 3.15.0),
                libgudev-1.0-dev (>= 143) [linux-any],
                libjson-glib-dev,
@@ -65,7 +64,6 @@ Build-Depends: debhelper-compat (= 13),
                libmpcdec-dev,
                libneon27-dev,
                libnice-dev (>= 0.1.20),
-               libonnxruntime-dev [amd64 arm64 armhf riscv64],
                libopenal-dev (>= 1:1.14),
                libopencv-dev (>= 3.0.0) [amd64 arm64 armel armhf mips64el ppc64el riscv64 s390x alpha powerpc ppc64 sparc64],
                libopenexr-dev,
@@ -89,11 +87,11 @@ Build-Depends: debhelper-compat (= 13),
                libssh2-1-dev (>= 1.4.3),
                libssl-dev (>= 1.1),
                libsvtav1enc-dev,
+               libtensorflow-lite-dev [linux-any],
                libusb-1.0-0-dev [linux-any],
                libva-dev (>= 1.8) [linux-any],
                libvo-aacenc-dev,
                libvo-amrwbenc-dev,
-               libvulkan-dev [linux-any],
                libwayland-dev (>= 1.11.0) [linux-any],
                libwebp-dev (>= 0.2.1),
                libwebrtc-audio-processing-dev (>= 0.2),
@@ -117,7 +115,7 @@ Build-Depends: debhelper-compat (= 13),
                xvfb
 Build-Conflicts: libopenaptx-dev
 Rules-Requires-Root: no
-Standards-Version: 4.7.2
+Standards-Version: 4.7.3
 Vcs-Git: https://salsa.debian.org/gstreamer-team/gst-plugins-bad1.0.git
 Vcs-Browser: https://salsa.debian.org/gstreamer-team/gst-plugins-bad1.0/
 Homepage: https://gstreamer.freedesktop.org
@@ -146,8 +144,8 @@ Description: GStreamer helper programs from the "bad" set
 Package: gstreamer1.0-plugins-bad
 Architecture: any
 Multi-Arch: same
-Depends: gstreamer1.0-plugins-base (>= 1.26.0),
-         gstreamer1.0-plugins-good (>= 1.26.0),
+Depends: gstreamer1.0-plugins-base (>= 1.28.0),
+         gstreamer1.0-plugins-good (>= 1.28.0),
          libgstreamer-plugins-bad1.0-0 (= ${binary:Version}),
          ${misc:Depends},
          ${shlibs:Depends}

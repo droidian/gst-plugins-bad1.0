@@ -38,6 +38,12 @@ conf_flags += -Dnvcomp=disabled
 conf_flags += -Dnvdswrapper=disabled
 conf_flags += -Dlcevcdecoder=disabled -Dlcevcencoder=disabled
 conf_flags += -Dsvtjpegxs=disabled
+conf_flags += -Dtflite-edgetpu=disabled
+conf_flags += -Dwpe2=disabled
+conf_flags += -Dmpeghdec=disabled
+conf_flags += -Dvmaf=disabled
+# Removed dependency on onnx because of bug #1126427
+conf_flags += -Donnx=disabled
 # Unmaintained library
 conf_flags += -Dmsdk=disabled
 # Only available on Windows
@@ -48,6 +54,9 @@ conf_flags += -Dfdkaac=disabled
 conf_flags += -Ddirectfb=disabled
 # Debian is not android
 conf_flags += -Dandroidmedia=disabled
+
+# vulkan now has a dependency on sdl3 that is not in debian
+conf_flags += -Dvulkan=disabled
 
 ifeq (,$(filter $(DEB_HOST_ARCH),amd64 arm64 armel armhf i386 mips64el ppc64el riscv64 s390x alpha hppa hurd-i386 m68k powerpc ppc64 sparc64))
 conf_flags += -Dzxing=disabled
@@ -78,12 +87,15 @@ conf_flags += -Dbluez=disabled -Ddc1394=disabled -Dfbdev=disabled -Dsbc=disabled
 conf_flags += -Dva=disabled -Dv4l2codecs=disabled -Dwpe=disabled -Duvch264=disabled
 conf_flags += -Dvulkan=disabled -Dwayland=disabled -Ddvb=disabled
 conf_flags += -Dopenni2=disabled -Dsctp=disabled -Dwebrtc=disabled
+conf_flags += -Dtflite=disabled
 endif
 
 ifeq ($(DEB_HOST_ARCH_OS),hurd)
 conf_flags += -Dresindvd=disabled -Dnvcodec=disabled -Dgl=disabled -Dudev=disabled
 conf_flags += -Duvcgadget=disabled -Davtp=disabled
 conf_flags += -Dwebrtcdsp=disabled
+# set the option explicitly to disabled on hurd (it is not compiled)
+conf_flags += -Dhip=disabled
 endif
 
 # Droidian: disable uvch264 for now
@@ -121,8 +133,9 @@ ifeq ($(DEB_HOST_ARCH_OS),linux)
 	dh_install -plibgstreamer-plugins-bad1.0-0 debian/tmp/usr/lib/$(DEB_HOST_MULTIARCH)/libgstwayland-1.0.so.* usr/lib/$(DEB_HOST_MULTIARCH)
 	dh_install -pgstreamer1.0-plugins-bad debian/tmp/usr/lib/$(DEB_HOST_MULTIARCH)/gstreamer-1.0/libgstkms.so
 	dh_install -plibgstreamer-plugins-bad1.0-0 debian/tmp/usr/lib/$(DEB_HOST_MULTIARCH)/libgstcuda-1.0.so.* usr/lib/$(DEB_HOST_MULTIARCH)
-	dh_install -pgstreamer1.0-plugins-bad debian/tmp/usr/lib/$(DEB_HOST_MULTIARCH)/gstreamer-1.0/libgstvulkan.so
-	dh_install -plibgstreamer-plugins-bad1.0-0 debian/tmp/usr/lib/$(DEB_HOST_MULTIARCH)/libgstvulkan-1.0.so.* usr/lib/$(DEB_HOST_MULTIARCH)
+	# disable until sdl3 is available
+	#dh_install -pgstreamer1.0-plugins-bad debian/tmp/usr/lib/$(DEB_HOST_MULTIARCH)/gstreamer-1.0/libgstvulkan.so
+	#dh_install -plibgstreamer-plugins-bad1.0-0 debian/tmp/usr/lib/$(DEB_HOST_MULTIARCH)/libgstvulkan-1.0.so.* usr/lib/$(DEB_HOST_MULTIARCH)
 	dh_install -pgstreamer1.0-plugins-bad debian/tmp/usr/lib/$(DEB_HOST_MULTIARCH)/gstreamer-1.0/libgstva.so
 	dh_install -plibgstreamer-plugins-bad1.0-0 debian/tmp/usr/lib/$(DEB_HOST_MULTIARCH)/libgstva-1.0.so.* usr/lib/$(DEB_HOST_MULTIARCH)
 	dh_install -pgstreamer1.0-plugins-bad debian/tmp/usr/lib/$(DEB_HOST_MULTIARCH)/gstreamer-1.0/libgstv4l2codecs.so
@@ -130,12 +143,12 @@ ifeq ($(DEB_HOST_ARCH_OS),linux)
 	dh_install -pgstreamer1.0-plugins-bad debian/tmp/usr/lib/$(DEB_HOST_MULTIARCH)/gstreamer-1.0/libgstsctp.so
 	dh_install -pgstreamer1.0-plugins-bad debian/tmp/usr/lib/$(DEB_HOST_MULTIARCH)/gstreamer-1.0/libgstwebrtc.so
 	dh_install -plibgstreamer-plugins-bad1.0-0 debian/tmp/usr/lib/$(DEB_HOST_MULTIARCH)/libgstwebrtcnice-1.0.so.* usr/lib/$(DEB_HOST_MULTIARCH)
+	dh_install -pgstreamer1.0-plugins-bad debian/tmp/usr/lib/$(DEB_HOST_MULTIARCH)/gstreamer-1.0/libgsttflite.so
+	dh_install -plibgstreamer-plugins-bad1.0-0 debian/tmp/usr/lib/$(DEB_HOST_MULTIARCH)/libgsthip.so.* usr/lib/$(DEB_HOST_MULTIARCH)
+	dh_install -pgstreamer1.0-plugins-bad debian/tmp/usr/lib/$(DEB_HOST_MULTIARCH)/gstreamer-1.0/libgsthip.so
 ifeq ($(DEB_HOST_ARCH),amd64)
 	dh_install -pgstreamer1.0-plugins-bad debian/tmp/usr/lib/$(DEB_HOST_MULTIARCH)/gstreamer-1.0/libgstqsv.so
 endif
-endif
-
-ifneq ($(DEB_HOST_ARCH_OS),hurd)
 	dh_install -pgstreamer1.0-plugins-bad debian/tmp/usr/lib/$(DEB_HOST_MULTIARCH)/gstreamer-1.0/libgstresindvd.so
 	dh_install -pgstreamer1.0-plugins-bad debian/tmp/usr/lib/$(DEB_HOST_MULTIARCH)/gstreamer-1.0/libgstnvcodec.so
 	dh_install -pgstreamer1.0-plugins-bad debian/tmp/usr/lib/$(DEB_HOST_MULTIARCH)/gstreamer-1.0/libgstavtp.so
@@ -147,10 +160,6 @@ endif
 #ifneq (,$(filter $(DEB_HOST_ARCH),amd64 arm64 armel armhf i386 mips64el ppc64el riscv64 s390x alpha hppa hurd-i386 m68k powerpc ppc64 sparc64))
 #	dh_install -pgstreamer1.0-plugins-bad debian/tmp/usr/lib/$(DEB_HOST_MULTIARCH)/gstreamer-1.0/libgstzxing.so
 #endif
-
-ifneq (,$(filter $(DEB_HOST_ARCH),amd64 arm64 armhf riscv64))
-	dh_install -pgstreamer1.0-plugins-bad debian/tmp/usr/lib/$(DEB_HOST_MULTIARCH)/gstreamer-1.0/libgstonnx.so
-endif
 
 ifeq ($(DEB_HOST_ARCH_ENDIAN),little)
 	dh_install -pgstreamer1.0-plugins-bad debian/tmp/usr/lib/$(DEB_HOST_MULTIARCH)/gstreamer-1.0/libgstldac.so

@@ -675,7 +675,7 @@ gst_h266_ref_pic_lists (GstH266RefPicLists * rpls, NalReader * nr,
     const GstH266SPS * sps, const GstH266PPS * pps)
 {
   const GstH266RefPicListStruct *ref_list;
-  gint i, j, num_ltrp_entries;
+  gint i, j, num_ltrp_entries GST_UNUSED_ASSERT;
 
   GST_LOG ("parsing \"ref_pic_lists\"");
 
@@ -1460,7 +1460,8 @@ gst_h266_parser_parse_pic_timing (GstH266PicTiming * pt,
 
   if (bp->du_hrd_params_present_flag &&
       bp->du_cpb_params_in_pic_timing_sei_flag) {
-    READ_UE (nr, pt->num_decoding_units_minus1);
+    READ_UE_MAX (nr, pt->num_decoding_units_minus1,
+        GST_H266_MAX_DECODING_UNITS_IN_PIC_TIMING - 1);
     if (pt->num_decoding_units_minus1 > 0) {
       READ_UINT8 (nr, pt->du_common_cpb_removal_delay_flag, 1);
       if (pt->du_common_cpb_removal_delay_flag) {
@@ -1510,6 +1511,55 @@ gst_h266_parser_parse_pic_timing (GstH266PicTiming * pt,
 error:
   GST_WARNING ("error parsing \"Picture timing\"");
   return GST_H266_PARSER_ERROR;
+}
+
+static GstH266ParserResult
+gst_h266_parser_parse_registered_user_data (GstH266Parser * parser,
+    GstH266RegisteredUserData * rud, NalReader * nr, guint payload_size)
+{
+  guint8 *data = NULL;
+  guint i;
+
+  rud->data = NULL;
+  rud->size = 0;
+
+  if (payload_size < 2) {
+    GST_WARNING ("Too small payload size %d", payload_size);
+    return GST_H266_PARSER_BROKEN_DATA;
+  }
+
+  READ_UINT8 (nr, rud->country_code, 8);
+  --payload_size;
+
+  if (rud->country_code == 0xFF) {
+    READ_UINT8 (nr, rud->country_code_extension, 8);
+    --payload_size;
+  } else {
+    rud->country_code_extension = 0;
+  }
+
+  if (payload_size < 1) {
+    GST_WARNING ("No more remaining payload data to store");
+    return GST_H266_PARSER_BROKEN_DATA;
+  }
+
+  data = g_malloc (payload_size);
+  for (i = 0; i < payload_size; ++i) {
+    READ_UINT8 (nr, data[i], 8);
+  }
+
+  GST_MEMDUMP ("SEI user data", data, payload_size);
+
+  rud->data = data;
+  rud->size = payload_size;
+  return GST_H266_PARSER_OK;
+
+error:
+  {
+    GST_WARNING ("error parsing \"Registered User Data\"");
+    g_free (data);
+    return GST_H266_PARSER_ERROR;
+  }
 }
 
 static GstH266ParserResult
@@ -1683,7 +1733,7 @@ error:
 }
 
 /**
- * gst_h266_parser_new:
+ * gst_h266_parser_new: (skip)
  *
  * Creates a new #GstH266Parser. It should be freed with
  * gst_h266_parser_free after use.
@@ -1926,6 +1976,180 @@ gst_h266_parser_identify_nalu_vvc (GstH266Parser * parser,
   nalu->valid = TRUE;
 
   return GST_H266_PARSER_OK;
+}
+
+/**
+ * gst_h266_parser_identify_and_split_nalu_vvc:
+ * @parser: a #GstH266Parser
+ * @data: The data to parse, must be the beging of the Nal unit
+ * @offset: the offset from which to parse @data
+ * @size: the size of @data
+ * @nal_length_size: the size in bytes of the VVC nal length prefix.
+ * @nalus: (element-type GstH266NalUnit): a caller allocated #GArray of #GstH266NalUnit where to store parsed nal headers
+ * @consumed: the size of consumed bytes
+ *
+ * Parses @data for packetized (e.g., vvc1/vvi1) bitstream and
+ * sets @nalus. In addition to nal identifying process,
+ * this method scans start-code prefix to split malformed packet into
+ * actual nal chunks.
+ *
+ * Returns: a #GstH266ParserResult
+ *
+ * Since: 1.28
+ */
+GstH266ParserResult
+gst_h266_parser_identify_and_split_nalu_vvc (GstH266Parser * parser,
+    const guint8 * data, guint offset, gsize size, guint8 nal_length_size,
+    GArray * nalus, gsize * consumed)
+{
+  GstBitReader br;
+  guint nalu_size;
+  guint remaining;
+  guint off;
+  guint sc_size;
+
+  g_return_val_if_fail (parser != NULL, GST_H266_PARSER_ERROR);
+  g_return_val_if_fail (data != NULL, GST_H266_PARSER_ERROR);
+  g_return_val_if_fail (nalus != NULL, GST_H266_PARSER_ERROR);
+  g_return_val_if_fail (nal_length_size > 0 && nal_length_size < 5,
+      GST_H266_PARSER_ERROR);
+
+  g_array_set_size (nalus, 0);
+
+  if (consumed)
+    *consumed = 0;
+
+  /* Would overflow guint below otherwise: the callers needs to ensure that
+   * this never happens */
+  if (offset > G_MAXUINT32 - nal_length_size) {
+    GST_WARNING ("offset + nal_length_size overflow");
+    return GST_H266_PARSER_BROKEN_DATA;
+  }
+
+  if (size < offset + nal_length_size) {
+    GST_DEBUG ("Can't parse, buffer has too small size %" G_GSIZE_FORMAT
+        ", offset %u", size, offset);
+    return GST_H266_PARSER_ERROR;
+  }
+
+  /* Read nal unit size and unwrap the size field */
+  gst_bit_reader_init (&br, data + offset, size - offset);
+  nalu_size = gst_bit_reader_get_bits_uint32_unchecked (&br,
+      nal_length_size * 8);
+
+  if (nalu_size < 2) {
+    GST_WARNING ("too small nal size %d", nalu_size);
+    return GST_H266_PARSER_BROKEN_DATA;
+  }
+
+  if (size < (gsize) nalu_size + nal_length_size) {
+    GST_WARNING ("larger nalu size %d than data size %" G_GSIZE_FORMAT,
+        nalu_size + nal_length_size, size);
+    return GST_H266_PARSER_BROKEN_DATA;
+  }
+
+  if (consumed)
+    *consumed = nalu_size + nal_length_size;
+
+  off = offset + nal_length_size;
+  remaining = nalu_size;
+  sc_size = nal_length_size;
+
+  /* Drop trailing start-code since it will not be scanned */
+  if (remaining >= 3) {
+    if (data[off + remaining - 1] == 0x01 && data[off + remaining - 2] == 0x00
+        && data[off + remaining - 3] == 0x00) {
+      remaining -= 3;
+
+      /* 4 bytes start-code */
+      if (remaining > 0 && data[off + remaining - 1] == 0x00)
+        remaining--;
+    }
+  }
+
+  /* Looping to split malformed nal units. nal-length field was dropped above
+   * so expected bitstream structure are:
+   *
+   * <complete nalu>
+   * | nalu |
+   * sc scan result will be -1 and handled in CONDITION-A
+   *
+   * <nalu with startcode prefix>
+   * | SC | nalu |
+   * Hit CONDITION-C first then terminated in CONDITION-A
+   *
+   * <first nal has no startcode but others have>
+   * | nalu | SC | nalu | ...
+   * CONDITION-B handles those cases
+   */
+  do {
+    GstH266NalUnit nalu;
+    gint sc_offset = -1;
+    guint skip_size = 0;
+
+    memset (&nalu, 0, sizeof (GstH266NalUnit));
+
+    /* startcode 3 bytes + minimum nal size 2 */
+    if (remaining >= 5)
+      sc_offset = scan_for_start_codes (data + off, remaining);
+
+    if (sc_offset < 0) {
+      if (remaining >= 2) {
+        /* CONDITION-A */
+        /* Last chunk */
+        nalu.size = remaining;
+        nalu.sc_offset = off - sc_size;
+        nalu.offset = off;
+        nalu.data = (guint8 *) data;
+        nalu.valid = TRUE;
+
+        gst_h266_parse_nalu_header (&nalu);
+        g_array_append_val (nalus, nalu);
+      }
+      break;
+    } else if ((sc_offset == 2 && data[off + sc_offset - 1] != 0)
+        || sc_offset > 2) {
+      /* CONDITION-B */
+      /* Found trailing startcode prefix */
+
+      nalu.size = sc_offset;
+      if (data[off + sc_offset - 1] == 0) {
+        /* 4 bytes start code */
+        nalu.size--;
+      }
+
+      nalu.sc_offset = off - sc_size;
+      nalu.offset = off;
+      nalu.data = (guint8 *) data;
+      nalu.valid = TRUE;
+
+      gst_h266_parse_nalu_header (&nalu);
+      g_array_append_val (nalus, nalu);
+    } else {
+      /* CONDITION-C */
+      /* startcode located at beginning of this chunk without actual nal data.
+       * skip this start code */
+    }
+
+    skip_size = sc_offset + 3;
+    if (skip_size >= remaining)
+      break;
+
+    /* no more nal-length bytes but 3bytes startcode */
+    sc_size = 3;
+    if (sc_offset > 0 && data[off + sc_offset - 1] == 0)
+      sc_size++;
+
+    remaining -= skip_size;
+    off += skip_size;
+  } while (remaining >= 2);
+
+  if (nalus->len > 0)
+    return GST_H266_PARSER_OK;
+
+  GST_WARNING ("No nal found");
+
+  return GST_H266_PARSER_BROKEN_DATA;
 }
 
 /**
@@ -3618,15 +3842,28 @@ gst_h266_parser_parse_picture_partition (GstH266SPS * sps,
               goto error;
             }
 
-            tile_idx += pps->tile_idx_delta_val[i];
+            gint new_tile_idx = (gint) tile_idx + pps->tile_idx_delta_val[i];
+            if (new_tile_idx < 0 ||
+                new_tile_idx >= (gint) pps->num_tiles_in_pic) {
+              GST_WARNING ("tile_idx %d out of bounds.", new_tile_idx);
+              goto error;
+            }
+            tile_idx = new_tile_idx;
           } else {
             pps->tile_idx_delta_val[i] = 0;
 
-            tile_idx += pps->slice_width_in_tiles_minus1[i] + 1;
-            if (tile_idx % pps->num_tile_columns == 0) {
-              tile_idx += pps->slice_height_in_tiles_minus1[i] *
+            gint new_tile_idx = (gint) tile_idx +
+                pps->slice_width_in_tiles_minus1[i] + 1;
+            if (new_tile_idx % pps->num_tile_columns == 0) {
+              new_tile_idx += pps->slice_height_in_tiles_minus1[i] *
                   pps->num_tile_columns;
             }
+            if (new_tile_idx < 0 ||
+                new_tile_idx >= (gint) pps->num_tiles_in_pic) {
+              GST_WARNING ("tile_idx %d out of bounds.", new_tile_idx);
+              goto error;
+            }
+            tile_idx = new_tile_idx;
           }
         }
       }
@@ -4375,7 +4612,7 @@ gst_h266_parse_aps (GstH266Parser * parser, GstH266NalUnit * nalu,
   READ_UINT8 (&nr, params_type, 3);
   aps->params_type = params_type;
   READ_UINT8 (&nr, aps->aps_id, 5);
-  CHECK_ALLOWED_MAX (aps->aps_id, GST_H266_MAX_APS_COUNT);
+  CHECK_ALLOWED_MAX (aps->aps_id, GST_H266_MAX_APS_COUNT - 1);
   READ_UINT8 (&nr, aps->chroma_present_flag, 1);
 
   switch (aps->params_type) {
@@ -5125,7 +5362,7 @@ error_with_ret:
  * gst_h266_parser_parse_picture_hdr:
  * @parser: a #GstH266Parser
  * @nalu: The picture header #GstH266NalUnit to parse
- * @ph: The #GstH266PicHdr to fill.
+ * @picture: The #GstH266PicHdr to fill.
  *
  * Parses @data, and fills the @ph structure.
  *
@@ -5217,7 +5454,7 @@ error:
  * gst_h266_parser_parse_slice_hdr:
  * @parser: a #GstH266Parser
  * @nalu: The slice #GstH266NalUnit to parse
- * @sh: The #GstH266SliceHdr to fill.
+ * @slice: The #GstH266SliceHdr to fill.
  *
  * Parses @data, and fills the @sh structure.
  *
@@ -5818,6 +6055,10 @@ gst_h266_parser_parse_sei_message (GstH266SEIMessage * sei, NalReader * nr,
         res = gst_h266_parser_parse_pic_timing (&sei->payload.pic_timing, nr,
             &parser->buffering_period.payload.buffering_period, nal_tid);
         break;
+      case GST_H266_SEI_REGISTERED_USER_DATA:
+        res = gst_h266_parser_parse_registered_user_data (parser,
+            &sei->payload.registered_user_data, nr, payload_size >> 3);
+        break;
       case GST_H266_SEI_DU_INFO:
         if (!parser->last_buffering_period) {
           GST_WARNING ("No buffering_period SEI.");
@@ -5889,9 +6130,9 @@ error:
 
 /**
  * gst_h266_parser_parse_sei:
- * @nalparser: a #GstH266Parser
+ * @parser: a #GstH266Parser
  * @nalu: The `GST_H266_NAL_*_SEI` #GstH266NalUnit to parse
- * @messages: The GArray of #GstH266SEIMessage to fill. The caller must free
+ * @messages: (element-type GstH266SEIMessage): The GArray of #GstH266SEIMessage to fill. The caller must free
  *  it when done.
  *
  * Parses @data, create and fills the @messages array.

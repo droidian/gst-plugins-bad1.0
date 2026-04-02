@@ -21,6 +21,7 @@
  * Free Software Foundation, Inc., 51 Franklin St, Fifth Floor,
  * Boston, MA 02110-1301, USA.
  */
+
 /**
  * SECTION:gstav1parser
  * @title: GstAV1Parser
@@ -67,7 +68,7 @@
  * should call gst_av1_parser_reference_frame_update() to update the parser's inside
  * state(such as reference information, global segmentation information, etc).
  *
- * @since: 1.18.00
+ * Since: 1.18
  */
 
 #ifdef HAVE_CONFIG_H
@@ -2045,7 +2046,7 @@ gst_av1_parse_segmentation_params (GstAV1Parser * parser, GstBitReader * br,
   gint i, j;
   GstAV1ParserResult retval = GST_AV1_PARSER_OK;
   gint clipped_value /* clippedValue */ ;
-  GstAV1SegmenationParams *seg_params;
+  GstAV1SegmentationParams *seg_params;
   gint feature_value = 0;
 
   const guint8 segmentation_feature_bits[GST_AV1_SEG_LVL_MAX] = {
@@ -2119,7 +2120,7 @@ gst_av1_parse_segmentation_params (GstAV1Parser * parser, GstBitReader * br,
       }
     } else {
       gint8 ref_idx;
-      GstAV1SegmenationParams *ref_seg_params;
+      GstAV1SegmentationParams *ref_seg_params;
 
       /* Copy it from prime_ref */
       if (frame_header->primary_ref_frame >= GST_AV1_PRIMARY_REF_NONE) {
@@ -4668,7 +4669,7 @@ gst_av1_parser_set_operating_point (GstAV1Parser * parser,
 }
 
 /**
- * gst_av1_parser_new:
+ * gst_av1_parser_new: (skip)
  *
  * Allocates a new #GstAV1Parser,
  *

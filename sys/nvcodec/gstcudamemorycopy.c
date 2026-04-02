@@ -567,6 +567,11 @@ gst_cuda_memory_copy_propose_allocation (GstBaseTransform * trans,
     if (!pool) {
       GST_DEBUG_OBJECT (self, "creating system buffer pool");
       pool = gst_video_buffer_pool_new ();
+      {
+        gchar *name = g_strdup_printf ("cuda-memory-copy-upstream-pool");
+        g_object_set (pool, "name", name, NULL);
+        g_free (name);
+      }
     }
 
     config = gst_buffer_pool_get_config (pool);
@@ -918,7 +923,7 @@ gst_cuda_memory_copy_transform (GstBaseTransform * trans, GstBuffer * inbuf,
     in_type = GST_CUDA_BUFFER_COPY_CUDA;
     use_device_copy = TRUE;
 #ifdef HAVE_CUDA_GST_GL
-  } else if (self->gl_context && gst_is_gl_memory_pbo (in_mem)) {
+  } else if (gst_is_gl_memory_pbo (in_mem)) {
     in_type = GST_CUDA_BUFFER_COPY_GL;
 #endif
 #ifdef G_OS_WIN32
@@ -938,7 +943,7 @@ gst_cuda_memory_copy_transform (GstBaseTransform * trans, GstBuffer * inbuf,
     out_type = GST_CUDA_BUFFER_COPY_CUDA;
     use_device_copy = TRUE;
 #ifdef HAVE_CUDA_GST_GL
-  } else if (self->gl_context && gst_is_gl_memory_pbo (out_mem)) {
+  } else if (gst_is_gl_memory_pbo (out_mem)) {
     out_type = GST_CUDA_BUFFER_COPY_GL;
 #endif
 #ifdef G_OS_WIN32

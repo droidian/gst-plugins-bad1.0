@@ -94,10 +94,8 @@ typedef enum
                                  * Push incoming buffers to the array */
   PENDING_PACKET_HEADER,        /* PES header needs to be parsed
                                  * Push incoming buffers to the array */
-  PENDING_PACKET_BUFFER,        /* Currently filling up output buffer
+  PENDING_PACKET_BUFFER         /* Currently filling up output buffer
                                  * Push incoming buffers to the bufferlist */
-  PENDING_PACKET_DISCONT        /* Discontinuity in incoming packets
-                                 * Drop all incoming buffers */
 } PendingPacketState;
 
 /* Pending buffer */
@@ -183,6 +181,8 @@ struct _TSDemuxStream
   /* Current PTS/DTS for this stream (in running time) */
   GstClockTime pts;
   GstClockTime dts;
+
+  PESHeaderFlags current_pes_packet_flags;
 
   /* Reference PTS used to detect gaps */
   GstClockTime gap_ref_pts;
@@ -802,6 +802,7 @@ scan_keyframe_h264 (TSDemuxStream * stream, const guint8 * data,
         break;
       }
       default:
+        GST_TRACE_OBJECT (stream->pad, "unit type %d", unit.type);
         break;
     }
 
@@ -1348,7 +1349,7 @@ create_pad_for_stream (MpegTSBase * base, MpegTSBaseStream * bstream,
   GstPad *pad = NULL;
   gboolean sparse = FALSE;
   gboolean is_audio = FALSE, is_video = FALSE, is_subpicture = FALSE,
-      is_private = FALSE;
+      is_private = FALSE, is_metadata = FALSE;
 
   gst_ts_demux_create_tags (stream);
 
@@ -1402,6 +1403,9 @@ create_pad_for_stream (MpegTSBase * base, MpegTSBaseStream * bstream,
         is_audio = TRUE;
         caps = gst_caps_new_empty_simple ("audio/x-dts");
         stream->target_pes_substream = 0x71;
+        break;
+      default:
+        GST_DEBUG_OBJECT (demux, "Stream type %d", bstream->stream_type);
         break;
     }
   }
@@ -1692,8 +1696,16 @@ create_pad_for_stream (MpegTSBase * base, MpegTSBaseStream * bstream,
         case DRF_ID_KLVA:
           sparse = TRUE;
           is_private = TRUE;
+          is_metadata = TRUE;
           caps = gst_caps_new_simple ("meta/x-klv",
               "parsed", G_TYPE_BOOLEAN, TRUE, NULL);
+          break;
+        case DRF_ID_ID3:
+          sparse = TRUE;
+          is_private = TRUE;
+          is_metadata = TRUE;
+          caps = gst_caps_new_simple ("meta/x-id3",
+              "parsed", G_TYPE_BOOLEAN, FALSE, NULL);
           break;
         case DRF_ID_AC4:
           is_audio = TRUE;
@@ -1705,6 +1717,7 @@ create_pad_for_stream (MpegTSBase * base, MpegTSBaseStream * bstream,
           break;
         case DRF_ID_VANC:
           is_private = TRUE;
+          is_metadata = TRUE;
           caps =
               gst_caps_new_simple ("meta/x-st-2038", "alignment", G_TYPE_STRING,
               "line", NULL);
@@ -1760,17 +1773,32 @@ create_pad_for_stream (MpegTSBase * base, MpegTSBaseStream * bstream,
       if (desc) {
         GstMpegtsMetadataDescriptor *metadataDescriptor;
         if (gst_mpegts_descriptor_parse_metadata (desc, &metadataDescriptor)) {
-          if ((metadataDescriptor->metadata_format ==
-                  GST_MPEGTS_METADATA_FORMAT_IDENTIFIER_FIELD)
-              && (metadataDescriptor->metadata_format_identifier ==
-                  DRF_ID_KLVA)) {
-            sparse = TRUE;
-            is_private = TRUE;
-            /* registration_id is not correctly set or parsed for some streams */
-            bstream->registration_id = DRF_ID_KLVA;
+          if (metadataDescriptor->metadata_format ==
+              GST_MPEGTS_METADATA_FORMAT_IDENTIFIER_FIELD) {
 
-            caps = gst_caps_new_simple ("meta/x-klv",
-                "parsed", G_TYPE_BOOLEAN, TRUE, NULL);
+            switch (metadataDescriptor->metadata_format_identifier) {
+              case DRF_ID_KLVA:
+                sparse = TRUE;
+                is_private = TRUE;
+                is_metadata = TRUE;
+                /* registration_id is not correctly set or parsed for some streams */
+                bstream->registration_id = DRF_ID_KLVA;
+
+                caps = gst_caps_new_simple ("meta/x-klv",
+                    "parsed", G_TYPE_BOOLEAN, TRUE, NULL);
+                break;
+
+              case DRF_ID_ID3:
+                sparse = TRUE;
+                is_private = TRUE;
+                is_metadata = TRUE;
+                bstream->registration_id = DRF_ID_ID3;
+
+                caps = gst_caps_new_simple ("meta/x-id3",
+                    "parsed", G_TYPE_BOOLEAN, FALSE, NULL);
+                break;
+            }
+
           }
           g_free (metadataDescriptor);
         }
@@ -1859,6 +1887,8 @@ create_pad_for_stream (MpegTSBase * base, MpegTSBaseStream * bstream,
             colorimetry_mode = GST_VIDEO_COLORIMETRY_BT709;
             break;
           default:
+            GST_DEBUG_OBJECT (demux, "color specification %d",
+                color_specification);
             break;
         }
         caps = gst_caps_new_simple ("image/x-jpc",
@@ -2094,6 +2124,9 @@ done:
       name =
           g_strdup_printf ("private_%01x_%04x", demux->program_generation,
           bstream->pid);
+      if (is_metadata)
+        gst_stream_set_stream_type (bstream->stream_object,
+            GST_STREAM_TYPE_METADATA);
     } else if (is_subpicture) {
       template = gst_static_pad_template_get (&subpicture_template);
       name =
@@ -2830,6 +2863,7 @@ gst_ts_demux_parse_pes_header (GstTSDemux * demux, TSDemuxStream * stream,
   stream->current_size = length;
 
   stream->state = PENDING_PACKET_BUFFER;
+  stream->current_pes_packet_flags = header.flags;
 
   if (stream->pending_header_data) {
     g_free (stream->pending_header_data);
@@ -2845,7 +2879,13 @@ discont:
     stream->pending_header_data = NULL;
     stream->pending_header_size = 0;
   }
-  stream->state = PENDING_PACKET_DISCONT;
+  if (stream->data) {
+    g_free (stream->data);
+    stream->data = NULL;
+    stream->current_size = 0;
+  }
+  /* We need a new PUSI */
+  stream->state = PENDING_PACKET_EMPTY;
   return;
 }
 
@@ -2859,60 +2899,15 @@ gst_ts_demux_queue_data (GstTSDemux * demux, TSDemuxStream * stream,
 {
   guint8 *data;
   guint size;
-  guint8 cc = FLAGS_CONTINUITY_COUNTER (packet->scram_afc_cc);
 
   GST_LOG_OBJECT (demux, "pid: 0x%04x state:%d", stream->stream.pid,
       stream->state);
 
-  /* Handle expected discontinuity */
-  if (G_UNLIKELY (packet->afc_flags & MPEGTS_AFC_DISCONTINUITY_FLAG)) {
-    GST_LOG_OBJECT (demux, "pid: 0x%04x discontinuity flag, resetting counter",
-        stream->stream.pid);
-    stream->continuity_counter = CONTINUITY_UNSET;
-  }
-
   size = packet->data_end - packet->payload;
   data = packet->payload;
 
-  if (stream->continuity_counter == CONTINUITY_UNSET) {
-    GST_DEBUG_OBJECT (demux, "CONTINUITY: Initialize to %d", cc);
-  } else if ((cc == stream->continuity_counter + 1 ||
-          (stream->continuity_counter == MAX_CONTINUITY && cc == 0))) {
-    GST_LOG_OBJECT (demux, "CONTINUITY: Got expected %d", cc);
-  } else {
-    if (stream->state != PENDING_PACKET_EMPTY) {
-      if (packet->payload_unit_start_indicator) {
-        /* A mismatch is fatal, except if this is the beginning of a new
-         * frame (from which we can recover) */
-        if (G_UNLIKELY (stream->data)) {
-          g_free (stream->data);
-          stream->data = NULL;
-        }
-        if (G_UNLIKELY (stream->pending_header_data)) {
-          g_free (stream->pending_header_data);
-          stream->pending_header_data = NULL;
-        }
-        stream->state = PENDING_PACKET_HEADER;
-      } else {
-        gchar *pad_name = gst_pad_get_name (stream->pad);
-        GST_ELEMENT_WARNING_WITH_DETAILS (demux, STREAM, DEMUX,
-            ("CONTINUITY: Mismatch packet %d, stream %d (pid 0x%04x)", cc,
-                stream->continuity_counter, stream->stream.pid), (NULL),
-            ("warning-type", G_TYPE_STRING, "continuity-mismatch",
-                "packet", G_TYPE_INT, cc,
-                "stream", G_TYPE_INT, stream->continuity_counter,
-                "pid", G_TYPE_UINT, stream->stream.pid,
-                "pad-name", G_TYPE_STRING, pad_name, NULL));
-        g_free (pad_name);
-        stream->state = PENDING_PACKET_DISCONT;
-      }
-    }
-  }
-  stream->continuity_counter = cc;
-
   if (stream->state == PENDING_PACKET_EMPTY) {
     if (G_UNLIKELY (!packet->payload_unit_start_indicator)) {
-      stream->state = PENDING_PACKET_DISCONT;
       GST_DEBUG_OBJECT (demux, "Didn't get the first packet of this PES");
     } else {
       GST_LOG_OBJECT (demux, "EMPTY=>HEADER");
@@ -2941,20 +2936,6 @@ gst_ts_demux_queue_data (GstTSDemux * demux, TSDemuxStream * stream,
       }
       memcpy (stream->data + stream->current_size, data, size);
       stream->current_size += size;
-      break;
-    }
-    case PENDING_PACKET_DISCONT:
-    {
-      GST_LOG_OBJECT (demux, "DISCONT: not storing/pushing");
-      if (G_UNLIKELY (stream->data)) {
-        g_free (stream->data);
-        stream->data = NULL;
-      }
-      if (G_UNLIKELY (stream->pending_header_data)) {
-        g_free (stream->pending_header_data);
-        stream->pending_header_data = NULL;
-      }
-      stream->continuity_counter = CONTINUITY_UNSET;
       break;
     }
     default:
@@ -3622,9 +3603,17 @@ parse_access_unit (GstTSDemux * demux, TSDemuxStream * stream,
     buffer = parse_jp2k_access_unit (stream);
   } else if (bs->stream_type == GST_MPEGTS_STREAM_TYPE_AUDIO_AAC_ADTS) {
     buffer = parse_aac_adts_frame (stream);
-  } else if (bs->stream_type == GST_MPEGTS_STREAM_TYPE_METADATA_PES_PACKETS
-      && bs->registration_id == DRF_ID_KLVA) {
-    buffer_list = parse_pes_metadata_frame (stream);
+  } else if (bs->stream_type == GST_MPEGTS_STREAM_TYPE_METADATA_PES_PACKETS) {
+    if (bs->registration_id == DRF_ID_KLVA) {
+      buffer_list = parse_pes_metadata_frame (stream);
+    } else if (bs->registration_id == DRF_ID_ID3) {
+      buffer = gst_buffer_new_wrapped (stream->data, stream->current_size);
+      if ((stream->current_pes_packet_flags & PES_FLAG_DATA_ALIGNMENT) == 0) {
+        gst_buffer_set_flags (buffer, GST_BUFFER_FLAG_DELTA_UNIT);
+      }
+    } else {
+      buffer = gst_buffer_new_wrapped (stream->data, stream->current_size);
+    }
   } else if (bs->stream_type == GST_MPEGTS_STREAM_TYPE_VIDEO_JPEG_XS) {
     buffer = parse_jpegxs_access_unit (stream);
   } else {
@@ -3912,19 +3901,54 @@ beach:
   return res;
 }
 
+/* packet is guaranteed to have a payload */
 static GstFlowReturn
 gst_ts_demux_handle_packet (GstTSDemux * demux, TSDemuxStream * stream,
-    MpegTSPacketizerPacket * packet, GstMpegtsSection * section)
+    MpegTSPacketizerPacket * packet, GstMpegtsSection * section G_GNUC_UNUSED)
 {
   GstFlowReturn res = GST_FLOW_OK;
+  guint8 cc = FLAGS_CONTINUITY_COUNTER (packet->scram_afc_cc);
 
-  GST_LOG_OBJECT (demux, "pid 0x%04x pusi:%d, afc:%d, cont:%d, payload:%p",
+  GST_LOG_OBJECT (demux, "pid 0x%04x pusi:%d, afc:%d, cc:%d, payload:%p",
       packet->pid, packet->payload_unit_start_indicator,
-      packet->scram_afc_cc & 0x30,
-      FLAGS_CONTINUITY_COUNTER (packet->scram_afc_cc), packet->payload);
+      packet->scram_afc_cc & 0x30, cc, packet->payload);
 
-  if (G_UNLIKELY (packet->payload_unit_start_indicator) &&
-      FLAGS_HAS_PAYLOAD (packet->scram_afc_cc)) {
+  /* Check continuity */
+  if (stream->continuity_counter != CONTINUITY_UNSET) {
+    if (((stream->continuity_counter + 1) % 16) != cc) {
+      if (stream->state != PENDING_PACKET_EMPTY) {
+#ifndef GST_DISABLE_GST_DEBUG
+        gchar *pad_name = gst_pad_get_name (stream->pad);
+        GST_ELEMENT_WARNING_WITH_DETAILS (demux, STREAM, DEMUX,
+            ("CONTINUITY: Mismatch packet %d, stream %d (pid 0x%04x)", cc,
+                stream->continuity_counter, stream->stream.pid),
+            (NULL),
+            ("warning-type", G_TYPE_STRING, "continuity-mismatch", "packet",
+                G_TYPE_INT, cc, "stream", G_TYPE_INT,
+                stream->continuity_counter, "pid", G_TYPE_UINT,
+                stream->stream.pid, "pad-name", G_TYPE_STRING, pad_name, NULL));
+        g_free (pad_name);
+#endif
+        /* Clear pending state and don't process packet */
+        stream->continuity_counter = cc;
+        if (G_UNLIKELY (stream->data)) {
+          g_free (stream->data);
+          stream->data = NULL;
+          stream->current_size = 0;
+        }
+        if (G_UNLIKELY (stream->pending_header_data)) {
+          g_free (stream->pending_header_data);
+          stream->pending_header_data = NULL;
+        }
+        stream->state = PENDING_PACKET_EMPTY;
+
+        return GST_FLOW_OK;
+      }
+    }
+  }
+  stream->continuity_counter = cc;
+
+  if (G_UNLIKELY (packet->payload_unit_start_indicator)) {
     /* Flush previous data */
     res = gst_ts_demux_push_pending_data (demux, stream, NULL);
     if (res != GST_FLOW_REWINDING) {
@@ -3932,9 +3956,13 @@ gst_ts_demux_handle_packet (GstTSDemux * demux, TSDemuxStream * stream,
        * rewinding since the states will have been resetted accordingly */
       stream->state = PENDING_PACKET_HEADER;
     }
+  } else if (stream->state == PENDING_PACKET_EMPTY) {
+    GST_LOG_OBJECT (demux, "pid: 0x%04x waiting for packet start",
+        stream->stream.pid);
+    return GST_FLOW_OK;
   }
 
-  if (packet->payload && (res == GST_FLOW_OK || res == GST_FLOW_NOT_LINKED)
+  if ((res == GST_FLOW_OK || res == GST_FLOW_NOT_LINKED)
       && stream->pad) {
     gst_ts_demux_queue_data (demux, stream, packet);
     GST_LOG_OBJECT (demux, "current_size:%d, expected_size:%d",
@@ -4008,7 +4036,7 @@ gst_ts_demux_push (MpegTSBase * base, MpegTSPacketizerPacket * packet,
   TSDemuxStream *stream = NULL;
   GstFlowReturn res = GST_FLOW_OK;
 
-  if (G_LIKELY (demux->program)) {
+  if (G_LIKELY (packet->payload && demux->program)) {
     stream = (TSDemuxStream *) demux->program->streams[packet->pid];
 
     if (stream) {

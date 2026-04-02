@@ -1,0 +1,17 @@
+Description: meson missing vmaf_dep variable with vmaf disabled
+Author: Marc Leeman <marc.leeman@gmail.com>
+Last-Update: 2025-12-11
+
+Index: gst-plugins-bad1.0/tests/check/meson.build
+===================================================================
+--- gst-plugins-bad1.0.orig/tests/check/meson.build
++++ gst-plugins-bad1.0/tests/check/meson.build
+@@ -172,7 +172,7 @@ if host_machine.system() != 'windows'
+     [['elements/netsim.c'], true ],
+     [['elements/shm.c'], not shm_enabled, shm_deps],
+     [['elements/unixfd.c'], not gio_unix_dep.found()],
+-    [['elements/vmaf.c'], get_option('vmaf').disabled() or not libvmaf_dep.found(), [libvmaf_dep]],
++    [['elements/vmaf.c'], true, ],
+     [['elements/voaacenc.c'],
+         not voaac_dep.found() or not cdata.has('HAVE_UNISTD_H'), [voaac_dep]],
+     [['elements/webrtcbin.c'], not libnice_dep.found(), [gstwebrtc_dep]],

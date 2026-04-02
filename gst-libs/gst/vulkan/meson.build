@@ -35,7 +35,6 @@ vulkan_sources = files(
   'gstvkswapper.c',
   'gstvktrash.c',
   'gstvkvideofilter.c',
-  'gstvkvideoutils.c',
   'gstvkutils.c',
   'gstvkwindow.c',
 )
@@ -71,7 +70,6 @@ vulkan_headers = files(
   'gstvktrash.h',
   'gstvkutils.h',
   'gstvkvideofilter.h',
-  'gstvkvideoutils.h',
   'gstvkwindow.h',
   'vulkan-prelude.h',
   'vulkan_fwd.h',
@@ -116,7 +114,7 @@ foreach option : vulkan_conf_options
   vulkan_conf.set(option, 0)
 endforeach
 
-if ['ios', 'darwin'].contains(host_system)
+if host_system == 'darwin'
   vulkan_dep = dependency('vulkan', method: 'pkg-config', required : false)
   if not vulkan_dep.found()
     # - ios does not support the loader/validation layers
@@ -126,7 +124,10 @@ if ['ios', 'darwin'].contains(host_system)
     #   on implementing a proper Metal extension for Vulkan
     #   https://github.com/KhronosGroup/MoltenVK/issues/492
     objcpp = meson.get_compiler('objcpp')
-    vulkan_dep = objcpp.find_library('MoltenVK', required : vulkan_opt)
+    vulkan_dep = objcpp.find_library('MoltenVK', required: false)
+    if not vulkan_dep.found()
+      vulkan_dep = dependency('MoltenVK', fallback: 'moltenvk', required: vulkan_opt)
+    endif
   endif
 elif host_system == 'windows'
   vulkan_root = run_command(python3, '-c', 'import os; print(os.environ.get("VK_SDK_PATH"))', check: false).stdout().strip()
@@ -235,7 +236,7 @@ if 'wayland' in vulkan_windowing_opt or 'auto' in vulkan_windowing_opt
   endif
 endif
 
-if ['darwin', 'ios'].contains(host_system)
+if host_system == 'darwin'
   objc = meson.get_compiler('objc')
   if not objc.has_argument('-fobjc-arc')
     error('ARC is required for building')
@@ -251,7 +252,7 @@ if ['darwin', 'ios'].contains(host_system)
   endif
 endif
 
-if host_system == 'darwin'
+if subsystem == 'macos'
   cocoa_dep = dependency('appleframeworks', modules : ['Cocoa'], required : vulkan_opt)
 
   if cocoa_dep.found() and cc.has_header('vulkan/vulkan_macos.h', dependencies: vulkan_dep, required: vulkan_opt)
@@ -264,9 +265,7 @@ if host_system == 'darwin'
     vulkan_conf.set('GST_VULKAN_HAVE_WINDOW_COCOA', 1)
     enabled_vulkan_winsys += ['cocoa']
   endif
-endif
-
-if host_system == 'ios'
+elif host_system == 'darwin'
   uikit_dep = dependency('appleframeworks', modules : ['UIKit', 'IOSurface', 'CoreGraphics', 'Metal'], required : vulkan_opt)
 
   if uikit_dep.found() and cc.has_header('vulkan/vulkan_ios.h', dependencies : vulkan_dep, required: vulkan_opt)
@@ -322,8 +321,8 @@ if get_option('vulkan-video').allowed()
   video_test = '''
 #include <vulkan/vulkan.h>
 
-#if !(defined(VK_VERSION_1_4) || (defined(VK_VERSION_1_3) && VK_HEADER_VERSION >= 275))
-#error "Need at least Vulkan 1.3.275"
+#if !(defined(VK_VERSION_1_5) || (defined(VK_VERSION_1_4) && VK_HEADER_VERSION >= 317))
+#error "Need at least Vulkan 1.4.317"
 #endif
 
 /* vk_video/vulkan_video_codec_h264std.h */
@@ -346,6 +345,7 @@ static VkVideoEncodeH265ProfileInfoKHR h265_profile;
   if have_vk_video
     vulkan_conf.set('GST_VULKAN_HAVE_VIDEO_EXTENSIONS', 1)
     vulkan_priv_sources += files(
+      'gstvkvideoutils-private.c',
       'gstvkvideo-private.c',
       'gstvkdecoder-private.c',
       'gstvkencoder-private.c',
