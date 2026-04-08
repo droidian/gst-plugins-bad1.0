@@ -48,13 +48,6 @@ typedef struct _GstVtdecClass GstVtdecClass;
 
 #define GST_VTDEC_DPB_MAX_SIZE 16
 
-typedef enum
-{
-    NoneSupported   = 0,
-    Av1Supported    = 1 << 0,
-    Vp9Supported    = 1 << 1,
-} SupplementalSupport;
-
 struct _GstVtdec
 {
   GstVideoDecoder base_vtdec;
@@ -78,13 +71,15 @@ struct _GstVtdec
   /* protected by the STREAM_LOCK */
   GstFlowReturn downstream_ret;
 
+  /* access via g_atomic_int_* */
+  gboolean require_reset;
+
 #if defined(APPLEMEDIA_MOLTENVK)
   GstVulkanInstance *instance;
   GstVulkanDevice *device;
 #endif
 
   gboolean require_hardware;
-  SupplementalSupport codec_support;
 
   gboolean av1_needs_sequence_header;  /* TRUE if we need to wait for sequence header OBU before creating session */
   GstBuffer *av1_sequence_header_obu;  /* Store the sequence header OBU for format description */
