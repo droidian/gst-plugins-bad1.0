@@ -246149,12 +246149,12 @@
                 "long-name": "Pitch controller",
                 "pad-templates": {
                     "sink": {
-                        "caps": "audio/x-raw:\n         format: F32LE\n           rate: [ 8000, 2147483647 ]\n       channels: [ 1, 2147483647 ]\n         layout: interleaved\n",
+                        "caps": "audio/x-raw:\n         format: F32LE\n           rate: [ 8000, 192000 ]\n       channels: [ 1, 16 ]\n         layout: interleaved\n",
                         "direction": "sink",
                         "presence": "always"
                     },
                     "src": {
-                        "caps": "audio/x-raw:\n         format: F32LE\n           rate: [ 8000, 2147483647 ]\n       channels: [ 1, 2147483647 ]\n         layout: interleaved\n",
+                        "caps": "audio/x-raw:\n         format: F32LE\n           rate: [ 8000, 192000 ]\n       channels: [ 1, 16 ]\n         layout: interleaved\n",
                         "direction": "src",
                         "presence": "always"
                     }

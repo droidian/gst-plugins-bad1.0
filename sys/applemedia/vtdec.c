@@ -58,15 +58,6 @@
 #include <gst/video/gstvideodecoder.h>
 #include <gst/gl/gstglcontext.h>
 
-#if TARGET_OS_OSX || TARGET_OS_IOS || TARGET_OS_TV || TARGET_OS_VISION
-#define HAVE_SUPPLEMENTAL
-#if (TARGET_OS_OSX && __MAC_OS_X_VERSION_MAX_ALLOWED >= 110000) || (TARGET_OS_IOS && __IPHONE_OS_VERSION_MAX_ALLOWED >= 260200) || (TARGET_OS_TV && __TV_OS_VERSION_MAX_ALLOWED >= 260200) || (TARGET_OS_VISION && __VISION_OS_VERSION_MAX_ALLOWED >= 260200)
-#define HAVE_SUPPLEMENTAL_DEFINITION
-#else
-#include <dlfcn.h>
-#endif
-#endif
-
 #include "vtutil.h"
 #include "helpers.h"
 #include "corevideobuffer.h"
@@ -78,6 +69,13 @@
 
 GST_DEBUG_CATEGORY_STATIC (gst_vtdec_debug_category);
 #define GST_CAT_DEFAULT gst_vtdec_debug_category
+
+typedef enum
+{
+  NoneSupported = 0,
+  Av1Supported = 1 << 0,
+  Vp9Supported = 1 << 1,
+} SupplementalSupport;
 
 enum
 {
@@ -159,6 +157,8 @@ static GstStaticPadTemplate gst_vtdec_sink_template =
         " width=(int)[64, MAX], height=(int)[64, MAX];")
     );
 
+static SupplementalSupport gst_vtdec_codec_support = NoneSupported;
+
 /* define EnableHardwareAcceleratedVideoDecoder in < 10.9 */
 #if defined(MAC_OS_X_VERSION_MAX_ALLOWED) && MAC_OS_X_VERSION_MAX_ALLOWED < 1090
 const CFStringRef
@@ -172,15 +172,15 @@ CFSTR ("RequireHardwareAcceleratedVideoDecoder");
 #define VIDEO_SRC_CAPS_FORMATS "{ NV12, AYUV64, ARGB64_BE, P010_10LE }"
 
 #define VIDEO_SRC_CAPS_NATIVE                                           \
-    GST_VIDEO_CAPS_MAKE(VIDEO_SRC_CAPS_FORMATS) ";"                     \
     GST_VIDEO_CAPS_MAKE_WITH_FEATURES(GST_CAPS_FEATURE_MEMORY_GL_MEMORY,\
         VIDEO_SRC_CAPS_FORMATS) ", "                                    \
-    "texture-target = (string) rectangle "
+    "texture-target = (string) rectangle ;"                             \
+    GST_VIDEO_CAPS_MAKE(VIDEO_SRC_CAPS_FORMATS)
 
 #if defined(APPLEMEDIA_MOLTENVK)
-#define VIDEO_SRC_CAPS VIDEO_SRC_CAPS_NATIVE "; "                           \
+#define VIDEO_SRC_CAPS                                                      \
     GST_VIDEO_CAPS_MAKE_WITH_FEATURES(GST_CAPS_FEATURE_MEMORY_VULKAN_IMAGE, \
-        VIDEO_SRC_CAPS_FORMATS)
+        VIDEO_SRC_CAPS_FORMATS) ";" VIDEO_SRC_CAPS_NATIVE
 #else
 #define VIDEO_SRC_CAPS VIDEO_SRC_CAPS_NATIVE
 #endif
@@ -206,6 +206,7 @@ gst_vtdec_class_init (GstVtdecClass * klass)
       caps = gst_vtutil_caps_append_video_format (caps, "RGBA64_LE");
     gst_element_class_add_pad_template (element_class,
         gst_pad_template_new ("src", GST_PAD_SRC, GST_PAD_ALWAYS, caps));
+    gst_caps_unref (caps);
   }
 
   gst_element_class_set_static_metadata (element_class,
@@ -261,6 +262,7 @@ gst_vtdec_start (GstVideoDecoder * decoder)
   vtdec->is_flushing = FALSE;
   vtdec->is_draining = FALSE;
   vtdec->downstream_ret = GST_FLOW_OK;
+  g_atomic_int_set (&vtdec->require_reset, FALSE);
   vtdec->reorder_queue = gst_vec_deque_new (0);
 
   /* Create the output task, but pause it immediately */
@@ -369,8 +371,6 @@ gst_vtdec_output_loop (GstVtdec * vtdec)
     /* we need to check this in case dpb_size=0 (jpeg for
      * example) or we're draining/flushing */
     if (frame) {
-      GST_VIDEO_DECODER_STREAM_LOCK (vtdec);
-
       if (frame->flags & VTDEC_FRAME_FLAG_ERROR) {
         GST_VIDEO_DECODER_ERROR (vtdec, 1, STREAM, DECODE,
             ("Got frame %d with an error flag", frame->system_frame_number),
@@ -389,8 +389,6 @@ gst_vtdec_output_loop (GstVtdec * vtdec)
         GST_TRACE_OBJECT (vtdec, "frame %d push ret %s", frame_num,
             gst_flow_get_name (ret));
       }
-
-      GST_VIDEO_DECODER_STREAM_UNLOCK (vtdec);
     }
 
     g_mutex_lock (&vtdec->queue_mutex);
@@ -845,6 +843,8 @@ gst_vtdec_set_format (GstVideoDecoder * decoder, GstVideoCodecState * state)
     gst_video_codec_state_unref (vtdec->input_state);
   vtdec->input_state = gst_video_codec_state_ref (state);
 
+  g_atomic_int_set (&vtdec->require_reset, FALSE);
+
   return negotiate_now ? gst_vtdec_negotiate (decoder) : TRUE;
 }
 
@@ -940,6 +940,51 @@ gst_vtdec_change_state (GstElement * element, GstStateChange transition)
       transition);
 }
 
+static gboolean
+gst_vtdec_reset_session (GstVtdec * vtdec)
+{
+  GstVideoDecoder *decoder = GST_VIDEO_DECODER_CAST (vtdec);
+  GstVideoCodecState *output_state;
+  GstVideoFormat format;
+  OSStatus status;
+
+  if (!vtdec->session) {
+    GST_ERROR_OBJECT (vtdec, "Cannot reset without a valid session!");
+    return FALSE;
+  }
+
+  output_state = gst_video_decoder_get_output_state (decoder);
+  if (!output_state) {
+    GST_ERROR_OBJECT (vtdec,
+        "Cannot reset session without a current output state!");
+    return FALSE;
+  }
+
+  gst_vtdec_invalidate_session (vtdec);
+
+  format = GST_VIDEO_INFO_FORMAT (&output_state->info);
+  gst_video_codec_state_unref (output_state);
+
+  status = gst_vtdec_create_session (vtdec, format, TRUE);
+  if (status == noErr) {
+    GST_INFO_OBJECT (vtdec, "reset session using hardware decoder");
+  } else if (status == kVTVideoDecoderNotAvailableNowErr) {
+    GST_WARNING_OBJECT (vtdec, "hw decoder not available after reset");
+    status = gst_vtdec_create_session (vtdec, format, FALSE);
+  }
+
+  if (status != noErr) {
+    GST_ERROR_OBJECT (vtdec,
+        "Could not reset decoder session, VTDecompressionSessionCreate returned %d",
+        (int) status);
+    return FALSE;
+  }
+
+  g_atomic_int_set (&vtdec->require_reset, FALSE);
+
+  return TRUE;
+}
+
 static GstFlowReturn
 gst_vtdec_handle_frame (GstVideoDecoder * decoder, GstVideoCodecFrame * frame)
 {
@@ -954,6 +999,17 @@ gst_vtdec_handle_frame (GstVideoDecoder * decoder, GstVideoCodecFrame * frame)
   if (vtdec->format_description == NULL) {
     ret = GST_FLOW_NOT_NEGOTIATED;
     goto drop;
+  }
+
+  if (g_atomic_int_get (&vtdec->require_reset)) {
+    GST_DEBUG_OBJECT (vtdec, "Resetting session due to decoder error");
+    gst_video_decoder_request_sync_point (decoder, frame,
+        GST_VIDEO_DECODER_REQUEST_SYNC_POINT_DISCARD_INPUT);
+
+    if (!gst_vtdec_reset_session (vtdec)) {
+      ret = GST_FLOW_ERROR;
+      goto drop;
+    }
   }
 
   /* Check if we need to extract AV1 sequence header for delayed initialization */
@@ -1066,6 +1122,32 @@ gst_vtdec_handle_frame (GstVideoDecoder * decoder, GstVideoCodecFrame * frame)
   status = VTDecompressionSessionDecodeFrame (vtdec->session, cm_sample_buffer,
       input_flags, frame, NULL);
   GST_VIDEO_DECODER_STREAM_LOCK (vtdec);
+
+  GST_LOG_OBJECT (vtdec, "VTDecompressionSessionDecodeFrame returned: %d",
+      status);
+
+  /* kVTInvalidSessionErr is usually returned on iOS if the application goes
+   * into background mode, if so, we can reset the session and request an
+   * intra frame to continue decoding.
+   *
+   * kVTVideoDecoderMalfunctionErr is returned for some unknown reason. It is
+   * only seen on iOS so far, but could also happen on macOS.
+   */
+  if (status == kVTInvalidSessionErr ||
+#if TARGET_OS_OSX
+      status == codecErr ||
+#endif
+      status == kVTVideoDecoderMalfunctionErr) {
+    GST_WARNING_OBJECT (vtdec, "DecodeFrame returned %i, resetting session",
+        status);
+    if (!gst_vtdec_reset_session (vtdec))
+      return GST_FLOW_ERROR;
+
+    gst_video_decoder_request_sync_point (decoder, frame,
+        GST_VIDEO_DECODER_REQUEST_SYNC_POINT_DISCARD_INPUT);
+    gst_video_decoder_drop_frame (decoder, frame);
+    return GST_FLOW_OK;
+  }
 
   if (status != noErr) {
     GST_VIDEO_DECODER_ERROR (vtdec, 1, STREAM, DECODE,
@@ -1563,12 +1645,24 @@ gst_vtdec_session_output_callback (void *decompression_output_ref_con,
             frame->decode_frame_number);
         frame->flags |= VTDEC_FRAME_FLAG_ERROR;
         break;
+#if TARGET_OS_OSX
+      case codecErr:
+#endif
+      case kVTVideoDecoderMalfunctionErr:
+        GST_WARNING_OBJECT (vtdec,
+            "MalfunctionError when decoding frame %d, resetting",
+            frame->decode_frame_number);
+        frame->flags |= VTDEC_FRAME_FLAG_ERROR;
+        g_atomic_int_set (&vtdec->require_reset, TRUE);
+        break;
       default:
         GST_ERROR_OBJECT (vtdec, "Error decoding frame %d: %d",
             frame->decode_frame_number, (int) status);
         frame->flags |= VTDEC_FRAME_FLAG_ERROR;
         break;
     }
+  } else if (g_atomic_int_get (&vtdec->require_reset)) {
+    GST_INFO_OBJECT (vtdec, "Got decoded frame while reset is scheduled");
   }
 
   if (image_buffer) {
@@ -1578,7 +1672,7 @@ gst_vtdec_session_output_callback (void *decompression_output_ref_con,
     state = gst_video_decoder_get_output_state (GST_VIDEO_DECODER (vtdec));
     if (state == NULL) {
       GST_WARNING_OBJECT (vtdec, "Output state not configured, release buffer");
-      frame->flags &= VTDEC_FRAME_FLAG_SKIP;
+      frame->flags |= VTDEC_FRAME_FLAG_SKIP;
     } else {
       buf =
           gst_core_video_buffer_new (image_buffer, &state->info,
@@ -1928,9 +2022,6 @@ gst_vtdec_set_latency (GstVtdec * vtdec)
   gst_video_decoder_set_latency (GST_VIDEO_DECODER (vtdec), latency, latency);
 }
 
-typedef void (*VTRegisterSupplementalVideoDecoderIfAvailableFunc)
-  (CMVideoCodecType codecType);
-
 static gboolean
 gst_vtdec_check_vp9_support (GstVtdec * vtdec)
 {
@@ -1938,24 +2029,7 @@ gst_vtdec_check_vp9_support (GstVtdec * vtdec)
 
   GST_DEBUG_OBJECT (vtdec, "Checking VP9 VideoToolbox support");
 
-#ifdef HAVE_SUPPLEMENTAL
-#ifdef HAVE_SUPPLEMENTAL_DEFINITION
-  if (__builtin_available (macOS 11.0, iOS 26.2, tvOS 26.2, visionOS 26.2, *)) {
-    VTRegisterSupplementalVideoDecoderIfAvailable (kCMVideoCodecType_VP9);
-  }
-#else
-  /* Needed temporarily till we can require a new-enough Xcode that has
-   * VTRegisterSupplementalVideoDecoderIfAvailable on iOS, tvOS, visionOS 26.2
-   */
-  VTRegisterSupplementalVideoDecoderIfAvailableFunc func =
-      (VTRegisterSupplementalVideoDecoderIfAvailableFunc)
-      dlsym (RTLD_DEFAULT, "VTRegisterSupplementalVideoDecoderIfAvailable");
-
-  if (func != NULL) {
-    func (kCMVideoCodecType_VP9);
-  }
-#endif
-#endif
+  gst_vtutil_register_supplemental_decoder (kCMVideoCodecType_VP9);
 
   vp9_supported = VTIsHardwareDecodeSupported (kCMVideoCodecType_VP9);
 
@@ -1976,25 +2050,7 @@ gst_vtdec_check_av1_support (GstVtdec * vtdec)
 
   GST_DEBUG_OBJECT (vtdec, "Checking AV1 VideoToolbox support");
 
-#ifdef HAVE_SUPPLEMENTAL
-#ifdef HAVE_SUPPLEMENTAL_DEFINITION
-  if (__builtin_available (macOS 11.0, iOS 26.2, tvOS 26.2, visionOS 26.2, *)) {
-    VTRegisterSupplementalVideoDecoderIfAvailable (kCMVideoCodecType_AV1);
-  }
-#else
-  /* Needed temporarily till we can require a new-enough Xcode that has
-   * VTRegisterSupplementalVideoDecoderIfAvailable on iOS, tvOS, visionOS 26.2
-   */
-  VTRegisterSupplementalVideoDecoderIfAvailableFunc func =
-      (VTRegisterSupplementalVideoDecoderIfAvailableFunc)
-      dlsym (RTLD_DEFAULT,
-      "VTRegisterSupplementalVideoDecoderIfAvailable");
-
-  if (func != NULL) {
-    func (kCMVideoCodecType_AV1);
-  }
-#endif
-#endif
+  gst_vtutil_register_supplemental_decoder (kCMVideoCodecType_AV1);
 
   /* Check if hardware decode is supported for AV1 */
   av1_supported = VTIsHardwareDecodeSupported (kCMVideoCodecType_AV1);
@@ -2028,21 +2084,21 @@ gst_vtdec_getcaps (GstVideoDecoder * decoder, GstCaps * filter)
     if (gst_structure_has_name (s, "video/x-av1")) {
       if (g_once_init_enter (&av1_once)) {
         if (gst_vtdec_check_av1_support (vtdec))
-          vtdec->codec_support |= Av1Supported;
+          g_atomic_int_or (&gst_vtdec_codec_support, Av1Supported);
         g_once_init_leave (&av1_once, Av1Supported);
       }
     } else if (gst_structure_has_name (s, "video/x-vp9")) {
       if (g_once_init_enter (&vp9_once)) {
         if (gst_vtdec_check_vp9_support (vtdec))
-          vtdec->codec_support |= Vp9Supported;
+          g_atomic_int_or (&gst_vtdec_codec_support, Vp9Supported);
         g_once_init_leave (&vp9_once, Vp9Supported);
       }
     }
 
     if ((gst_structure_has_name (s, "video/x-av1")
-            && !(vtdec->codec_support & Av1Supported))
+            && !(g_atomic_int_get (&gst_vtdec_codec_support) & Av1Supported))
         || (gst_structure_has_name (s, "video/x-vp9")
-            && !(vtdec->codec_support & Vp9Supported))) {
+            && !(g_atomic_int_get (&gst_vtdec_codec_support) & Vp9Supported))) {
       gst_caps_remove_structure (sinkcaps, i);
       n--;
     } else {

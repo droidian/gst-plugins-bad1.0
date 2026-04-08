@@ -2363,6 +2363,16 @@ search_in_segment:
           MIN (etrack->min_edit_units,
           (segment->index_start_position + segment->index_duration) - position);
       entry->size = segment->edit_unit_byte_count * entry->duration;
+
+      if (entry->size > G_MAXUINT32) {
+        GST_ERROR_OBJECT (demux,
+            "Suspisciously large entry size %" G_GINT64_FORMAT
+            " = edit_unit_byte_count %" G_GUINT32_FORMAT " * entry duration %"
+            G_GINT64_FORMAT ", exceeds pullable size => not proceeding",
+            entry->size, segment->edit_unit_byte_count, entry->duration);
+        entry = NULL;
+        return FALSE;
+      }
     } else {
       entry->size = segment->edit_unit_byte_count;
     }
@@ -2397,14 +2407,13 @@ search_in_segment:
 
     /* Apply reverse temporal reordering if present */
     if (index_table->reordered_delta_entry == etrack->delta_id) {
-      if (position >= index_table->reverse_temporal_offsets->len) {
-        GST_WARNING_OBJECT (demux,
-            "Can't apply temporal offset for position %" G_GINT64_FORMAT
-            " (max:%d)", position, index_table->reverse_temporal_offsets->len);
-      }
       if (demux->temporal_order_misuse) {
         GST_DEBUG_OBJECT (demux, "Handling temporal order misuse");
         entry->pts = position + segment_index_entry->temporal_offset;
+      } else if (position >= index_table->reverse_temporal_offsets->len) {
+        GST_WARNING_OBJECT (demux,
+            "Can't apply temporal offset for position %" G_GINT64_FORMAT
+            " (max:%d)", position, index_table->reverse_temporal_offsets->len);
       } else {
         entry->pts =
             position + g_array_index (index_table->reverse_temporal_offsets,
@@ -2578,6 +2587,17 @@ find_entry_for_offset (GstMXFDemux * demux, GstMXFDemuxEssenceTrack * etrack,
           (index_segment->index_start_position +
               index_segment->index_duration) - position);
       retentry->size = index_segment->edit_unit_byte_count * retentry->duration;
+
+      if (retentry->size > G_MAXUINT32) {
+        GST_ERROR_OBJECT (demux,
+            "Suspisciously large entry size %" G_GINT64_FORMAT
+            " = edit_unit_byte_count %" G_GUINT32_FORMAT " * entry duration %"
+            G_GINT64_FORMAT ", exceeds pullable size => not proceeding",
+            retentry->size, index_segment->edit_unit_byte_count,
+            retentry->duration);
+        retentry = NULL;
+        return FALSE;
+      }
     } else {
       retentry->size = index_segment->edit_unit_byte_count;
     }
@@ -2667,12 +2687,17 @@ find_entry_for_offset (GstMXFDemux * demux, GstMXFDemuxEssenceTrack * etrack,
 
   if (index_entry && delta_entry && delta_entry->pos_table_index == -1) {
     retentry->keyframe = (index_entry->flags & 0x80) == 0x80;
-    if (!demux->temporal_order_misuse)
+    if (demux->temporal_order_misuse) {
+      retentry->pts = position + index_entry->temporal_offset;
+    } else if (position >= index_table->reverse_temporal_offsets->len) {
+      GST_WARNING_OBJECT (demux,
+          "Can't apply temporal offset for position %" G_GINT64_FORMAT
+          " (max:%d)", position, index_table->reverse_temporal_offsets->len);
+    } else {
       retentry->pts =
           position + g_array_index (index_table->reverse_temporal_offsets,
           gint8, position);
-    else
-      retentry->pts = position + index_entry->temporal_offset;
+    }
     GST_LOG_OBJECT (demux,
         "Applied temporal offset. dts:%" G_GINT64_FORMAT " pts:%"
         G_GINT64_FORMAT, position, retentry->pts);
