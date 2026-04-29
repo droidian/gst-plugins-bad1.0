@@ -1,3 +1,10 @@
+gst-plugins-bad1.0 (1.28.2-2) unstable; urgency=medium
+
+  * d/control: bring orc build dependency with meson version
+  * d/control: remove libkate-dev from Build-Depends (Closes: #1134864)
+
+ -- Marc Leeman <marc.leeman@gmail.com>  Wed, 29 Apr 2026 10:40:31 +0200
+
 gst-plugins-bad1.0 (1.28.2-1) unstable; urgency=medium
 
   * New upstream version 1.28.2
