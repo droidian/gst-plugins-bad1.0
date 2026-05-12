@@ -30,7 +30,7 @@
 
 #include "videotexturecache-gl.h"
 
-#if defined(APPLEMEDIA_MOLTENVK)
+#ifdef APPLEMEDIA_MOLTENVK
 #include "videotexturecache-vulkan.h"
 #if TARGET_OS_OSX
 #include "iosurfacevulkanmemory.h"
@@ -133,7 +133,7 @@ _create_glmem (GstAppleCoreVideoPixelBuffer * gpixbuf,
 #endif
 }
 
-#if defined(APPLEMEDIA_MOLTENVK)
+#ifdef APPLEMEDIA_MOLTENVK
 /* in videotexturecache-vulkan.m to avoid objc-ism from Metal being included
   * in a non-objc file */
 extern GstMemory *_create_vulkan_memory (GstAppleCoreVideoPixelBuffer * gpixbuf,
@@ -153,7 +153,7 @@ gst_core_video_wrap_pixel_buffer (GstBuffer * buf,
   GstAppleCoreVideoPixelBuffer *gpixbuf;
   GstMemory *mem = NULL;
   gboolean do_gl = GST_IS_VIDEO_TEXTURE_CACHE_GL (cache);
-#if defined(APPLEMEDIA_MOLTENVK)
+#ifdef APPLEMEDIA_MOLTENVK
   gboolean do_vulkan = GST_IS_VIDEO_TEXTURE_CACHE_VULKAN (cache);
 #endif
 
@@ -163,22 +163,20 @@ gst_core_video_wrap_pixel_buffer (GstBuffer * buf,
     *has_padding = FALSE;
 
   if (CVPixelBufferIsPlanar (pixel_buf)) {
-    gint i, size = 0, plane_offset = 0;
+    gint size = 0;
 
     n_planes = CVPixelBufferGetPlaneCount (pixel_buf);
-    for (i = 0; i < n_planes; i++) {
+    for (gint i = 0; i < n_planes; i++) {
       stride[i] = CVPixelBufferGetBytesPerRowOfPlane (pixel_buf, i);
 
       if (stride[i] != GST_VIDEO_INFO_PLANE_STRIDE (info, i) && has_padding)
         *has_padding = TRUE;
 
       size = stride[i] * CVPixelBufferGetHeightOfPlane (pixel_buf, i);
-      offset[i] = plane_offset;
-      plane_offset += size;
 
       if (do_gl)
         mem = _create_glmem (gpixbuf, info, i, size, cache);
-#if defined(APPLEMEDIA_MOLTENVK)
+#ifdef APPLEMEDIA_MOLTENVK
       else if (do_vulkan)
         mem = _create_vulkan_memory (gpixbuf, info, i, size, cache);
 #endif
@@ -186,6 +184,7 @@ gst_core_video_wrap_pixel_buffer (GstBuffer * buf,
         mem =
             GST_MEMORY_CAST (gst_apple_core_video_memory_new_wrapped (gpixbuf,
                 i, size));
+      offset[i] = gst_buffer_get_size (buf);
       gst_buffer_append_memory (buf, mem);
     }
   } else {
@@ -196,7 +195,7 @@ gst_core_video_wrap_pixel_buffer (GstBuffer * buf,
 
     if (do_gl)
       mem = _create_glmem (gpixbuf, info, 0, size, cache);
-#if defined(APPLEMEDIA_MOLTENVK)
+#ifdef APPLEMEDIA_MOLTENVK
     else if (do_vulkan)
       mem = _create_vulkan_memory (gpixbuf, info, 0, size, cache);
 #endif

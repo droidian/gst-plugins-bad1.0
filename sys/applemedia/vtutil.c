@@ -18,15 +18,16 @@
  */
 
 #include "vtutil.h"
+
+#include <dlfcn.h>
 #include <VideoToolbox/VideoToolbox.h>
 #include <TargetConditionals.h>
 
 #if TARGET_OS_OSX || TARGET_OS_IOS || TARGET_OS_TV || TARGET_OS_VISION
 #define HAVE_SUPPLEMENTAL
-#if (TARGET_OS_OSX && __MAC_OS_X_VERSION_MAX_ALLOWED >= 110000) || (TARGET_OS_IOS && __IPHONE_OS_VERSION_MAX_ALLOWED >= 260200) || (TARGET_OS_TV && __TV_OS_VERSION_MAX_ALLOWED >= 260200) || (TARGET_OS_VISION && __VISION_OS_VERSION_MAX_ALLOWED >= 260200)
+/* Added in Xcode 12 for macOS and in Xcode 26.2 for iPhone/tvOS/visionOS */
+#if (TARGET_OS_OSX && MAC_OS_X_VERSION_MAX_ALLOWED >= 110000) || __IPHONE_OS_VERSION_MAX_ALLOWED >= 260200
 #define HAVE_SUPPLEMENTAL_DEFINITION
-#else
-#include <dlfcn.h>
 #endif
 #endif
 
@@ -148,26 +149,38 @@ gst_vtutil_codec_type_to_prores_variant (CMVideoCodecType codec_type)
 }
 
 GstCaps *
-gst_vtutil_caps_append_video_format (GstCaps * caps, const char *vfmt)
+gst_vtutil_caps_append_video_format (GstCaps * caps, const char *vfmt,
+    const char *features_filter)
 {
-  GstStructure *s;
-  GValueArray *arr;
+  guint i;
   GValue val = G_VALUE_INIT;
 
   caps = gst_caps_make_writable (caps);
-  s = gst_caps_get_structure (caps, 0);
-  gst_structure_get_list (s, "format", &arr);
-
   g_value_init (&val, G_TYPE_STRING);
-
   g_value_set_string (&val, vfmt);
-  G_GNUC_BEGIN_IGNORE_DEPRECATIONS;
-  arr = g_value_array_append (arr, &val);
-  G_GNUC_END_IGNORE_DEPRECATIONS;
+
+  for (i = 0; i < gst_caps_get_size (caps); i++) {
+    GstCapsFeatures *features;
+    GstStructure *s;
+    GValueArray *arr;
+
+    features = gst_caps_get_features (caps, i);
+    if (features_filter &&
+        (!features || !gst_caps_features_contains (features, features_filter)))
+      continue;
+
+    s = gst_caps_get_structure (caps, i);
+    gst_structure_get_list (s, "format", &arr);
+
+    G_GNUC_BEGIN_IGNORE_DEPRECATIONS;
+    arr = g_value_array_append (arr, &val);
+    G_GNUC_END_IGNORE_DEPRECATIONS;
+
+    gst_structure_set_list (s, "format", arr);
+  }
 
   g_value_unset (&val);
 
-  gst_structure_set_list (s, "format", arr);
   return caps;
 }
 
@@ -182,7 +195,11 @@ gst_vtutil_register_supplemental_decoder (CMVideoCodecType codec_type)
 
 #ifdef HAVE_SUPPLEMENTAL
 #ifdef HAVE_SUPPLEMENTAL_DEFINITION
+#if MAC_OS_X_VERSION_MAX_ALLOWED < 140000
+  if (__builtin_available (macOS 11.0, iOS 26.2, tvOS 26.2, *)) {
+#else
   if (__builtin_available (macOS 11.0, iOS 26.2, tvOS 26.2, visionOS 26.2, *)) {
+#endif
     GST_INFO ("Registering supplemental VideoToolbox decoder by direct call");
     VTRegisterSupplementalVideoDecoderIfAvailable (codec_type);
     return TRUE;

@@ -1,8 +1,9 @@
 project('gst-plugins-bad', 'c', 'cpp',
-  version : '1.28.2',
+  version : '1.28.3',
   meson_version : '>= 1.4',
   default_options : [ 'warning_level=1',
-                      'buildtype=debugoptimized' ])
+                      'buildtype=debugoptimized',
+                      'c_std=gnu11,c11' ])
 
 gst_version = meson.project_version()
 version_arr = gst_version.split('.')

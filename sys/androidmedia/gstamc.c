@@ -200,18 +200,18 @@ scan_codecs (GstPlugin * plugin)
       goto next_codec;
     }
 
-    GST_INFO ("Checking codec '%s'", name_str);
+    GST_LOG ("Checking codec '%s'", name_str);
 
     /* Compatibility codec names */
     if (strcmp (name_str, "AACEncoder") == 0 ||
         strcmp (name_str, "OMX.google.raw.decoder") == 0) {
-      GST_INFO ("Skipping compatibility codec '%s'", name_str);
+      GST_LOG ("Skipping compatibility codec '%s'", name_str);
       valid_codec = FALSE;
       goto next_codec;
     }
 
     if (g_str_has_suffix (name_str, ".secure")) {
-      GST_INFO ("Skipping DRM codec '%s'", name_str);
+      GST_LOG ("Skipping DRM codec '%s'", name_str);
       valid_codec = FALSE;
       goto next_codec;
     }
@@ -223,14 +223,14 @@ scan_codecs (GstPlugin * plugin)
      */
     if (gst_amc_jni_is_vm_started () &&
         !g_str_has_prefix (name_str, "OMX.google.")) {
-      GST_INFO ("Skipping non-Google codec '%s' in standalone mode", name_str);
+      GST_LOG ("Skipping non-Google codec '%s' in standalone mode", name_str);
       valid_codec = FALSE;
       goto next_codec;
     }
 #endif
 
     if (g_str_has_prefix (name_str, "OMX.ARICENT.")) {
-      GST_INFO ("Skipping possible broken codec '%s'", name_str);
+      GST_LOG ("Skipping possible broken codec '%s'", name_str);
       valid_codec = FALSE;
       goto next_codec;
     }
@@ -242,7 +242,7 @@ scan_codecs (GstPlugin * plugin)
     if (strcmp (name_str, "OMX.google.vorbis.decoder") == 0 ||
         strcmp (name_str, "OMX.google.g711.alaw.decoder") == 0 ||
         strcmp (name_str, "OMX.google.g711.mlaw.decoder") == 0) {
-      GST_INFO ("Skipping known broken codec '%s'", name_str);
+      GST_LOG ("Skipping known broken codec '%s'", name_str);
       valid_codec = FALSE;
       goto next_codec;
     }
@@ -282,7 +282,7 @@ scan_codecs (GstPlugin * plugin)
       goto next_codec;
     }
 
-    GST_INFO ("Codec '%s' (%s) has %" G_GSIZE_FORMAT " supported types",
+    GST_LOG ("Codec '%s' (%s) has %" G_GSIZE_FORMAT " supported types",
         name_str, gst_amc_accel_to_string (gst_codec_info->accel),
         n_supported_types);
 
@@ -305,7 +305,7 @@ scan_codecs (GstPlugin * plugin)
       gst_codec_type = &gst_codec_info->supported_types[j];
       supported_type_str = supported_types[j];
 
-      GST_INFO ("Supported type '%s'", supported_type_str);
+      GST_LOG ("Supported type '%s'", supported_type_str);
       gst_codec_type->mime = g_strdup (supported_type_str);
 
       capabilities =
@@ -330,7 +330,7 @@ scan_codecs (GstPlugin * plugin)
         }
 
         for (k = 0; k < gst_codec_type->n_color_formats; k++) {
-          GST_INFO ("Color format %d: 0x%x", k,
+          GST_LOG ("Color format %d: 0x%x", k,
               gst_codec_type->color_formats[k]);
         }
 
@@ -361,9 +361,9 @@ scan_codecs (GstPlugin * plugin)
       }
 
       for (k = 0; k < gst_codec_type->n_profile_levels; k++) {
-        GST_INFO ("Level %d: 0x%08x", k,
+        GST_LOG ("Level %d: 0x%08x", k,
             gst_codec_type->profile_levels[k].level);
-        GST_INFO ("Profile %d: 0x%08x", k,
+        GST_LOG ("Profile %d: 0x%08x", k,
             gst_codec_type->profile_levels[k].profile);
       }
 
@@ -610,14 +610,14 @@ gst_amc_color_format_to_video_format (const GstAmcCodecInfo * codec_info,
 
   if (color_format == COLOR_FormatYCbYCr) {
     if (strcmp (codec_info->name, "OMX.k3.video.decoder.avc") == 0) {
-      GST_INFO
+      GST_LOG
           ("OMX.k3.video.decoder.avc: COLOR_FormatYCbYCr is actually GST_VIDEO_FORMAT_NV12.");
       return GST_VIDEO_FORMAT_NV12;
     }
 
     /* FIXME COLOR_FormatYCbYCr doesn't work properly for OMX.k3.video.encoder.avc temporarily. */
     if (strcmp (codec_info->name, "OMX.k3.video.encoder.avc") == 0) {
-      GST_INFO
+      GST_FIXME
           ("OMX.k3.video.encoder.avc: COLOR_FormatYCbYCr is not supported yet.");
       return GST_VIDEO_FORMAT_UNKNOWN;
     }
@@ -628,7 +628,7 @@ gst_amc_color_format_to_video_format (const GstAmcCodecInfo * codec_info,
 
   if (color_format == COLOR_FormatYUV420SemiPlanar) {
     if (strcmp (codec_info->name, "OMX.k3.video.encoder.avc") == 0) {
-      GST_INFO
+      GST_LOG
           ("OMX.k3.video.encoder.avc: COLOR_FormatYUV420SemiPlanar is actually GST_VIDEO_FORMAT_NV21.");
       return GST_VIDEO_FORMAT_NV21;
     }
@@ -661,7 +661,7 @@ gst_amc_video_format_to_color_format (const GstAmcCodecInfo * codec_info,
 
   if (video_format == GST_VIDEO_FORMAT_NV12) {
     if (strcmp (codec_info->name, "OMX.k3.video.decoder.avc") == 0) {
-      GST_INFO
+      GST_LOG
           ("OMX.k3.video.decoder.avc: GST_VIDEO_FORMAT_NV12 is reported as COLOR_FormatYCbYCr.");
 
       return COLOR_FormatYCbYCr;
@@ -670,7 +670,7 @@ gst_amc_video_format_to_color_format (const GstAmcCodecInfo * codec_info,
 
   if (video_format == GST_VIDEO_FORMAT_NV21) {
     if (strcmp (codec_info->name, "OMX.k3.video.encoder.avc") == 0) {
-      GST_INFO
+      GST_LOG
           ("OMX.k3.video.encoder.avc: GST_VIDEO_FORMAT_NV21 is reported as COLOR_FormatYUV420SemiPlanar.");
 
       return COLOR_FormatYUV420SemiPlanar;
@@ -1780,6 +1780,7 @@ register_codecs (GstPlugin * plugin)
       GType type, subtype;
       gchar *type_name, *element_name;
       guint rank;
+      GstCaps *caps;
       GstAmcCodecType *codec_type = &codec_info->supported_types[i];
 
       if (g_str_has_prefix (codec_type->mime, "audio/")) {
@@ -1910,10 +1911,24 @@ register_codecs (GstPlugin * plugin)
       }
 
       ret |= gst_element_register (plugin, element_name, rank, subtype);
-      g_free (element_name);
 
-      GST_INFO ("Registered %s codec '%s' with rank %u",
-          gst_amc_accel_to_string (codec_info->accel), codec_info->name, rank);
+      if (codec_info->is_encoder) {
+        gst_amc_codec_info_to_caps (codec_info, NULL, &caps);
+        GST_INFO
+            ("Registered encoder %s for %s impl %s with rank %u and outcaps %"
+            GST_PTR_FORMAT, element_name,
+            gst_amc_accel_to_string (codec_info->accel), codec_info->name, rank,
+            caps);
+      } else {
+        gst_amc_codec_info_to_caps (codec_info, &caps, NULL);
+        GST_INFO
+            ("Registered decoder %s for %s impl %s with rank %u and incaps %"
+            GST_PTR_FORMAT, element_name,
+            gst_amc_accel_to_string (codec_info->accel), codec_info->name, rank,
+            caps);
+      }
+      gst_caps_unref (caps);
+      g_free (element_name);
     }
   }
 
@@ -2329,6 +2344,8 @@ gst_amc_codec_info_to_caps (const GstAmcCodecInfo * codec_info,
         } else if (strcmp (type->mime, "video/avc") == 0) {
           gint j;
           gboolean have_profile_level = FALSE;
+          gboolean have_baseline_profile = FALSE;
+          gboolean have_constrained_baseline_profile = FALSE;
 
           tmp = gst_structure_new ("video/x-h264",
               "width", GST_TYPE_INT_RANGE, 16, 4096,
@@ -2353,6 +2370,12 @@ gst_amc_codec_info_to_caps (const GstAmcCodecInfo * codec_info,
                 continue;
               }
 
+              if (type->profile_levels[j].profile ==
+                  AVCProfileConstrainedBaseline)
+                have_constrained_baseline_profile = TRUE;
+              else if (type->profile_levels[j].profile == AVCProfileBaseline)
+                have_baseline_profile = TRUE;
+
               tmp2 = gst_structure_copy (tmp);
               gst_structure_set (tmp2, "profile", G_TYPE_STRING, profile, NULL);
 
@@ -2360,8 +2383,9 @@ gst_amc_codec_info_to_caps (const GstAmcCodecInfo * codec_info,
                 tmp3 = gst_structure_copy (tmp);
                 gst_structure_set (tmp3, "profile", G_TYPE_STRING, alternative,
                     NULL);
-              } else
+              } else {
                 tmp3 = NULL;
+              }
 
               if (codec_info->is_encoder) {
                 const gchar *level;
@@ -2400,6 +2424,12 @@ gst_amc_codec_info_to_caps (const GstAmcCodecInfo * codec_info,
           if (!have_profile_level) {
             encoded_ret = gst_caps_merge_structure (encoded_ret, tmp);
           } else {
+            if (have_baseline_profile && !have_constrained_baseline_profile) {
+              tmp2 = gst_structure_copy (tmp);
+              gst_structure_set (tmp2, "profile", G_TYPE_STRING,
+                  "constrained-baseline", NULL);
+              encoded_ret = gst_caps_merge_structure (encoded_ret, tmp2);
+            }
             gst_structure_free (tmp);
           }
         } else if (strcmp (type->mime, "video/hevc") == 0) {
@@ -2512,20 +2542,20 @@ gst_amc_codec_info_to_caps (const GstAmcCodecInfo * codec_info,
   }
 
   /* Split caps into structures to bypass logcat line length limit */
-  if (gst_debug_category_get_threshold (GST_CAT_DEFAULT) >= GST_LEVEL_INFO) {
+  if (gst_debug_category_get_threshold (GST_CAT_DEFAULT) >= GST_LEVEL_LOG) {
     guint i, n;
-    GST_INFO ("Returning caps for '%s':", codec_info->name);
+    GST_LOG ("Returning caps for '%s':", codec_info->name);
 
-    GST_INFO (" raw caps:");
+    GST_LOG (" raw caps:");
     n = gst_caps_get_size (raw_ret);
     for (i = 0; i < n; i++) {
-      GST_INFO ("  %" GST_PTR_FORMAT, gst_caps_get_structure (raw_ret, i));
+      GST_LOG ("  %" GST_PTR_FORMAT, gst_caps_get_structure (raw_ret, i));
     }
 
-    GST_INFO (" encoded caps:");
+    GST_LOG (" encoded caps:");
     n = gst_caps_get_size (encoded_ret);
     for (i = 0; i < n; i++) {
-      GST_INFO ("  %" GST_PTR_FORMAT, gst_caps_get_structure (encoded_ret, i));
+      GST_LOG ("  %" GST_PTR_FORMAT, gst_caps_get_structure (encoded_ret, i));
     }
   }
 }
