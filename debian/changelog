@@ -1,3 +1,11 @@
+gst-plugins-bad1.0 (1.28.3-1) unstable; urgency=medium
+
+  * New upstream version 1.28.3
+  * d/control: bump BD libgstreamer1.0-dev to 1.28.3
+  * d/patches: refresh
+
+ -- Marc Leeman <marc.leeman@gmail.com>  Tue, 12 May 2026 10:14:58 +0200
+
 gst-plugins-bad1.0 (1.28.2-2) unstable; urgency=medium
 
   * d/control: bring orc build dependency with meson version
