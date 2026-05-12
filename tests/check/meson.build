@@ -84,6 +84,7 @@ base_tests = [
   [['elements/videoframe-audiolevel.c'], get_option('videoframe_audiolevel').disabled()],
   [['elements/viewfinderbin.c']],
   [['elements/vkcolorconvert.c'], not gstvulkan_dep.found(), [gstvulkan_dep]],
+  [['elements/vkdownload.c'], not gstvulkan_dep.found(), [gstvulkan_dep]],
   [['elements/vkdeviceprovider.c'], not gstvulkan_dep.found(), [gstvulkan_dep]],
   [['elements/vkupload.c'], not gstvulkan_dep.found(), [gstvulkan_dep]],
   [['elements/voamrwbenc.c'], not voamrwbenc_dep.found(), [voamrwbenc_dep]],
@@ -180,6 +181,14 @@ if host_machine.system() != 'windows'
     [['elements/zbar.c'], not zbar_dep.found(), [zbar_dep]],
     [['elements/zxing.c'], not zxing_dep.found(), [zxing_dep]],
     [['elements/lc3.c'], not lc3_dep.found(), [lc3_dep]],
+  ]
+endif
+
+if ['darwin', 'ios'].contains(host_system)
+  videotoolbox_dep = dependency('VideoToolbox', required : false)
+  base_tests += [
+    [['pipelines/vtdec-output-paths.c'],
+        not videotoolbox_dep.found(), [videotoolbox_dep]],
   ]
 endif
 
