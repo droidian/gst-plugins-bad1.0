@@ -1138,7 +1138,8 @@ static const struct
       HEVCProfileMain, "main"}, {
       HEVCProfileMain10, "main-10"}, {
       HEVCProfileMain10HDR10, "main-10"}, {
-      HEVCProfileMain10HDR10Plus, "main-10"}
+      HEVCProfileMain10HDR10Plus, "main-10"}, {
+      HEVCProfileMainStill, "main-still-picture"}
 };
 
 const gchar *
@@ -1527,7 +1528,10 @@ static const struct
       AACObjectMain, "main"}, {
       AACObjectLC, "lc"}, {
       AACObjectSSR, "ssr"}, {
-      AACObjectLTP, "ltp"}
+      AACObjectLTP, "ltp"},
+  {AACObjectLD, "ld"},
+  {AACObjectHE, "he-aac-v1"},
+  {AACObjectHE_PS, "he-aac-v2"},
 };
 
 const gchar *
@@ -2158,6 +2162,14 @@ gst_amc_codec_info_to_caps (const GstAmcCodecInfo * codec_info,
               "channels", GST_TYPE_INT_RANGE, 1, G_MAXINT,
               "framed", G_TYPE_BOOLEAN, TRUE, NULL);
           encoded_ret = gst_caps_merge_structure (encoded_ret, tmp);
+        } else if (strcmp (type->mime, "audio/mpeg-L1") == 0) {
+          tmp = gst_structure_new ("audio/mpeg",
+              "mpegversion", G_TYPE_INT, 1,
+              "layer", G_TYPE_INT, 1,
+              "rate", GST_TYPE_INT_RANGE, 1, G_MAXINT,
+              "channels", GST_TYPE_INT_RANGE, 1, G_MAXINT,
+              "parsed", G_TYPE_BOOLEAN, TRUE, NULL);
+          encoded_ret = gst_caps_merge_structure (encoded_ret, tmp);
         } else if (strcmp (type->mime, "audio/mpeg-L2") == 0) {
           tmp = gst_structure_new ("audio/mpeg",
               "mpegversion", G_TYPE_INT, 1,
@@ -2166,6 +2178,22 @@ gst_amc_codec_info_to_caps (const GstAmcCodecInfo * codec_info,
               "channels", GST_TYPE_INT_RANGE, 1, G_MAXINT,
               "parsed", G_TYPE_BOOLEAN, TRUE, NULL);
           encoded_ret = gst_caps_merge_structure (encoded_ret, tmp);
+        } else if (strcmp (type->mime, "audio/ac3") == 0) {
+          tmp = gst_structure_new ("audio/x-ac3",
+              "rate", GST_TYPE_INT_RANGE, 1, G_MAXINT,
+              "channels", GST_TYPE_INT_RANGE, 1, G_MAXINT,
+              "framed", G_TYPE_BOOLEAN, TRUE, NULL);
+          encoded_ret = gst_caps_merge_structure (encoded_ret, tmp);
+        } else if (strcmp (type->mime, "audio/eac3") == 0) {
+          tmp = gst_structure_new ("audio/x-eac3",
+              "rate", GST_TYPE_INT_RANGE, 1, G_MAXINT,
+              "channels", GST_TYPE_INT_RANGE, 1, G_MAXINT,
+              "framed", G_TYPE_BOOLEAN, TRUE, NULL);
+          encoded_ret = gst_caps_merge_structure (encoded_ret, tmp);
+        } else if (strcmp (type->mime, "audio/ac4") == 0) {
+          tmp = gst_structure_new ("audio/x-ac4",
+              "rate", GST_TYPE_INT_RANGE, 1, G_MAXINT,
+              "channels", GST_TYPE_INT_RANGE, 1, G_MAXINT, NULL);
         } else {
           GST_WARNING ("Unsupported mimetype '%s'", type->mime);
         }
@@ -2202,7 +2230,8 @@ gst_amc_codec_info_to_caps (const GstAmcCodecInfo * codec_info,
       }
 
       if (encoded_ret) {
-        if (strcmp (type->mime, "video/mp4v-es") == 0) {
+        if (strcmp (type->mime, "video/mp4v-es") == 0
+            || strcmp (type->mime, "video/mp43") == 0) {
           gint j;
           gboolean have_profile_level = FALSE;
 
@@ -2534,6 +2563,39 @@ gst_amc_codec_info_to_caps (const GstAmcCodecInfo * codec_info,
               "parsed", G_TYPE_BOOLEAN, TRUE, NULL);
 
           encoded_ret = gst_caps_merge_structure (encoded_ret, tmp);
+        } else if (strcmp (type->mime, "video/wvc1") == 0) {
+          tmp = gst_structure_new ("video/x-wmv",
+              "width", GST_TYPE_INT_RANGE, 16, 4096,
+              "height", GST_TYPE_INT_RANGE, 16, 4096,
+              "framerate", GST_TYPE_FRACTION_RANGE, 0, 1, G_MAXINT, 1,
+              "format", G_TYPE_STRING, "WVC1", NULL);
+
+          encoded_ret = gst_caps_merge_structure (encoded_ret, tmp);
+        } else if (strcmp (type->mime, "video/x-ms-wmv") == 0) {
+          tmp = gst_structure_new ("video/x-wmv",
+              "width", GST_TYPE_INT_RANGE, 16, 4096,
+              "height", GST_TYPE_INT_RANGE, 16, 4096,
+              "framerate", GST_TYPE_FRACTION_RANGE, 0, 1, G_MAXINT, 1,
+              "format", G_TYPE_STRING, "WMV3",
+              "wmvversion", G_TYPE_INT, 3, NULL);
+
+          encoded_ret = gst_caps_merge_structure (encoded_ret, tmp);
+        } else if (strcmp (type->mime, "video/x-ms-wmv8") == 0) {
+          tmp = gst_structure_new ("video/x-wmv",
+              "width", GST_TYPE_INT_RANGE, 16, 4096,
+              "height", GST_TYPE_INT_RANGE, 16, 4096,
+              "framerate", GST_TYPE_FRACTION_RANGE, 0, 1, G_MAXINT, 1,
+              "wmvversion", G_TYPE_INT, 2, NULL);
+
+          encoded_ret = gst_caps_merge_structure (encoded_ret, tmp);
+        } else if (strcmp (type->mime, "video/x-ms-wmv7") == 0) {
+          tmp = gst_structure_new ("video/x-wmv",
+              "width", GST_TYPE_INT_RANGE, 16, 4096,
+              "height", GST_TYPE_INT_RANGE, 16, 4096,
+              "framerate", GST_TYPE_FRACTION_RANGE, 0, 1, G_MAXINT, 1,
+              "wmvversion", G_TYPE_INT, 1, NULL);
+
+          encoded_ret = gst_caps_merge_structure (encoded_ret, tmp);
         } else {
           GST_WARNING ("Unsupported mimetype '%s'", type->mime);
         }
@@ -2546,16 +2608,20 @@ gst_amc_codec_info_to_caps (const GstAmcCodecInfo * codec_info,
     guint i, n;
     GST_LOG ("Returning caps for '%s':", codec_info->name);
 
-    GST_LOG (" raw caps:");
-    n = gst_caps_get_size (raw_ret);
-    for (i = 0; i < n; i++) {
-      GST_LOG ("  %" GST_PTR_FORMAT, gst_caps_get_structure (raw_ret, i));
+    if (raw_ret) {
+      GST_LOG (" raw caps:");
+      n = gst_caps_get_size (raw_ret);
+      for (i = 0; i < n; i++) {
+        GST_LOG ("  %" GST_PTR_FORMAT, gst_caps_get_structure (raw_ret, i));
+      }
     }
 
-    GST_LOG (" encoded caps:");
-    n = gst_caps_get_size (encoded_ret);
-    for (i = 0; i < n; i++) {
-      GST_LOG ("  %" GST_PTR_FORMAT, gst_caps_get_structure (encoded_ret, i));
+    if (encoded_ret) {
+      GST_LOG (" encoded caps:");
+      n = gst_caps_get_size (encoded_ret);
+      for (i = 0; i < n; i++) {
+        GST_LOG ("  %" GST_PTR_FORMAT, gst_caps_get_structure (encoded_ret, i));
+      }
     }
   }
 }
