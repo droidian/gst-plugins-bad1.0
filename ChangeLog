@@ -1,3 +1,247 @@
+=== release 1.28.4 ===
+
+2026-06-12 13:19:43 +0100  Tim-Philipp Müller <tim@centricular.com>
+
+	* gst-plugins-bad.doap:
+	* meson.build:
+	  Release 1.28.4
+
+2026-06-04 11:47:12 +0300  Sebastian Dröge <sebastian@centricular.com>
+
+	* gst/mxf/mxfdemux.c:
+	* gst/mxf/mxfmetadata.c:
+	* gst/mxf/mxfmetadata.h:
+	* gst/mxf/mxftypes.c:
+	* gst/mxf/mxftypes.h:
+	  mxfdemux: Use unsigned integers in more places and don't truncate 64 bit integers
+	  Fixes https://gitlab.freedesktop.org/gstreamer/gstreamer/-/work_items/5048
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/11837>
+
+2026-06-09 09:40:41 +0300  Sebastian Dröge <sebastian@centricular.com>
+
+	* sys/va/gstjpegdecoder.c:
+	  vajpegdecoder: Validate that enough data is available for the current JPEG segment
+	  gst_jpeg_parse() does not ensure this and relies on the caller to collect enough
+	  data. All other users of the function are doing this correctly.
+	  Here we can directly error out if not enough data is available as we require
+	  parsing input.
+	  Patch provided by Junyi Liu, who also reported this.
+	  Fixes https://gitlab.freedesktop.org/gstreamer/gstreamer/-/work_items/5104
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/11834>
+
+2026-06-09 09:26:38 +0300  Sebastian Dröge <sebastian@centricular.com>
+
+	* gst-libs/gst/codecparsers/gstav1parser.c:
+	  av1parser: Fix bytes/bits confusion when parsing tile data size
+	  Which would then later lead to an assertion.
+	  Patch provided by Junyi Liu, who also reported this.
+	  Fixes https://gitlab.freedesktop.org/gstreamer/gstreamer/-/work_items/5103
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/11827>
+
+2026-06-10 12:17:10 +0300  Vivia Nikolaidou <vivia@ahiru.eu>
+
+	* gst/mpegtsdemux/mpegtspacketizer.c:
+	  mpegtspacketizer: Do not seek before the first PCR
+	  It can be that the first PCR offset is slightly non-zero (for instance, video
+	  starts mid-GOP). In that case, when we try to seek earlier than that (usually to
+	  zero, see also SEEK_TIMESTAMP_OFFSET which will still throw us to zero when
+	  we're seeking before 2.5sec) we shouldn't fail/EOS. Just return the first PCR
+	  instead.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/11786>
+
+2026-06-05 12:50:39 +0900  Seungha Yang <seungha@centricular.com>
+
+	* sys/d3d12/gstd3d12decoder.cpp:
+	  d3d12decoder: Use subresource index as view ID directly for tier-1 decoders
+	  D3D12 Tier-1 decoding uses a texture-array DPB. Some drivers seem to
+	  expect DXVA view IDs to match subresource index, like D3D11 decoding.
+	  Use the actual subresource index as the view ID in this mode instead of
+	  assigning a separate internal slot ID
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/11781>
+
+2026-06-05 12:25:14 +0900  Seungha Yang <seungha@centricular.com>
+
+	* sys/d3d12/gstd3d12decoder.cpp:
+	  d3d12decoder: Set colorspace to conversion args
+	  Don't use RGB color space for YUV formats
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/11781>
+
+2026-06-05 10:07:59 +0900  Seungha Yang <seungha@centricular.com>
+
+	* gst-libs/gst/dxva/gstdxvavp8decoder.cpp:
+	* gst-libs/gst/dxva/gstdxvavp9decoder.cpp:
+	  dxva: Fix VP8/VP9 decoding on Qualcomm GPUs
+	  AssociatedFlag must be zero for valid reference frames according
+	  to the DXVA VP8/VP9 specification
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/11781>
+
+2026-05-11 19:11:01 +0200  Jakub Adam <jakub.adam@collabora.com>
+
+	* gst-libs/gst/mse/meson.build:
+	* tests/check/libs/gstlibscpp.cc:
+	* tests/check/meson.build:
+	  meson: fix building -bad tests with disabled mse
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/11617>
+
+2026-05-12 16:08:30 +0200  Carlos Falgueras García <cfalgueras@fluendo.com>
+
+	* tests/check/libs/av1parser.c:
+	  tests: fix support with glib <= 2.67.2
+	  These tests use "g_memdup2()" but they don't include
+	  "gst/glib-compat-private.h", which makes the compilation fail when linking
+	  against Glib <= 2.67.2 as "g_memdup2()" was included at 2.67.3
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/11618>
+
+2026-04-27 17:03:14 +0800  Hou Qi <qi.hou@nxp.com>
+
+	* gst/camerabin2/gstwrappercamerabinsrc.c:
+	  camerabin: Fix caps negotiation when starting to capture
+	  Use BLOCK_DOWNSTREAM probe instead of IDLE probe when starting image and
+	  video capture to ensure proper caps negotiation with downstream elements.
+	  Using an IDLE probe could allow buffers to flow before caps negotiation
+	  completes with the downstream encodebin elements, causing the camerabinsrc
+	  to select caps that are incompatible with the video or image encoder.
+	  BLOCK_DOWNSTREAM ensures the pipeline is blocked during reconfiguration
+	  and caps negotiation completes before buffers flow.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/11774>
+
+2026-05-26 13:22:03 +0300  Sebastian Dröge <sebastian@centricular.com>
+
+	* sys/androidmedia/ndk/gstamc-codec-ndk.c:
+	  androidmedia: Fix typo in error message
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/11692>
+
+2026-05-25 19:05:44 +0300  Sebastian Dröge <sebastian@centricular.com>
+
+	* sys/androidmedia/gstamc.c:
+	  amc: Don't try printing NULL caps
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/11688>
+
+2026-05-25 18:50:39 +0300  Sebastian Dröge <sebastian@centricular.com>
+
+	* sys/androidmedia/gstamcvideodec.c:
+	  amcvideodec: Don't keep crop-rectangle uninitialized if not specified
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/11686>
+
+2026-05-22 16:56:12 +0900  MilkClouds <milkclouds00@gmail.com>
+
+	* sys/wasapi2/gstwasapi2rbuf.cpp:
+	  wasapi2: Don't reset process loopback capture client
+	  The process loopback virtual device does not resume capture after
+	  IAudioClient::Reset(): a later Start() returns S_OK but no buffers
+	  are delivered and the event handle is never signalled, so the
+	  pipeline stalls.
+	  Two paths call Reset() on the capture client:
+	  - the warm-up in gst_wasapi2_rbuf_ctx_init() (Start/Stop/Reset). It
+	  exists to hide idle-hardware Start() latency and is meaningless for
+	  the virtual process loopback device. Skip it for process loopback.
+	  - RbufCtx::Stop(). Skip the Reset() there for process loopback so the
+	  client survives a stop/start (pause/resume) cycle.
+	  Start/Stop/Start without Reset() works correctly, so only Reset()
+	  needs to be avoided.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/11683>
+
+2026-05-13 10:52:53 -0400  Xavier Claessens <xclaessens@netflix.com>
+
+	* sys/va/gstvafilter.c:
+	* sys/va/gstvafilter.h:
+	  vafilter: Add support for premultiplied alpha
+	  This is a backport of a part of
+	  https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/11619.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/11675>
+
+2026-02-03 10:59:13 +0100  Marcus Hanestad <marlhan@proton.me>
+
+	* sys/androidmedia/gstamcaudiodec.c:
+	  androidmedia: support decoding flac
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/11647>
+
+2026-05-15 15:56:45 +0800  Cheah, Vincent Beng Keat <vincent.beng.keat.cheah@intel.com>
+
+	* gst-libs/gst/va/gstvadisplay_drm.c:
+	  va: drm: Fix fd leak and return type in create_va_display
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/11642>
+
+2026-03-17 15:03:09 +0530  Nirbheek Chauhan <nirbheek@centricular.com>
+
+	* ext/vulkan/vkupload.c:
+	  vulkanupload: Don't reallocate the pool when the framerate changes
+	  This causes an unnecessary stall in pipelines where the framerate
+	  changes frequently because we're decoding, for instance, fmp4.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/11628>
+
+2026-05-08 15:32:02 +0300  Sebastian Dröge <sebastian@centricular.com>
+
+	* sys/androidmedia/gstamc.c:
+	  androidmedia: Add H265 main-still-picture profile mapping
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/11614>
+
+2026-05-08 15:28:58 +0300  Sebastian Dröge <sebastian@centricular.com>
+
+	* sys/androidmedia/gstamc-constants.h:
+	* sys/androidmedia/gstamc.c:
+	  androidmedia: Add some more AAC profile mappings
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/11614>
+
+2026-05-08 15:16:15 +0300  Sebastian Dröge <sebastian@centricular.com>
+
+	* sys/androidmedia/gstamc.c:
+	* sys/androidmedia/gstamcaudiodec.c:
+	  androidmedia: Add caps mappings for AC3/EAC3/AC4
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/11614>
+
+2026-05-08 15:12:01 +0300  Sebastian Dröge <sebastian@centricular.com>
+
+	* sys/androidmedia/gstamc.c:
+	* sys/androidmedia/gstamcvideodec.c:
+	* sys/androidmedia/gstamcvideoenc.c:
+	  androidmedia: Add caps mappings for WMV and VC1
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/11614>
+
+2026-05-08 14:48:40 +0300  Sebastian Dröge <sebastian@centricular.com>
+
+	* sys/androidmedia/gstamc.c:
+	  androidmedia: Add video/mp43 as alias for video/mp4v-es
+	  Some devices use it for the same codec.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/11614>
+
+2026-05-08 14:39:21 +0300  Sebastian Dröge <sebastian@centricular.com>
+
+	* sys/androidmedia/gstamc.c:
+	* sys/androidmedia/gstamcaudiodec.c:
+	  androidmedia: Add audio/mpeg-L1 caps mapping
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/11614>
+
+2026-05-08 13:50:02 +0300  Sebastian Dröge <sebastian@centricular.com>
+
+	* sys/androidmedia/gstahcsrc.c:
+	  ahcsrc: Register exposure-mode property for GstPhotography interface
+	  This was added some years ago to the interface, which was technically a breaking
+	  change. Now the property needs to be provided by all implementers of the
+	  interface.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/11613>
+
+2026-05-08 12:56:37 +0300  Sebastian Dröge <sebastian@centricular.com>
+
+	* sys/androidmedia/gstamcaudiodec.c:
+	* sys/androidmedia/gstamcvideodec.c:
+	* sys/androidmedia/gstamcvideoenc.c:
+	  androidmedia: Don't print error logs if downstream returns flushing / EOS
+	  Just log them normally as debug logs.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/11610>
+
+2026-04-07 17:31:50 +0900  Seungmin Lee <seungmin.lee.cpp@navercorp.com>
+
+	* ext/svtav1/gstsvtav1enc.c:
+	* ext/svtav1/meson.build:
+	  svtav1enc: Scale MDCV and CLL to SVT-AV1's expected units
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/11609>
+
+2026-05-11 18:33:25 +0100  Tim-Philipp Müller <tim@centricular.com>
+
+	* meson.build:
+	  Back to development after 1.28.3
+
 === release 1.28.3 ===
 
 2026-05-11 18:28:12 +0100  Tim-Philipp Müller <tim@centricular.com>
