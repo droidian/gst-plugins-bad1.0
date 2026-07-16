@@ -925,6 +925,7 @@ gst_mxf_demux_update_essence_tracks (GstMXFDemux * demux)
         tmp->track_number = track->parent.track_number;
         tmp->track_id = track->parent.track_id;
         memcpy (&tmp->source_package_uid, &package->parent.package_uid, 32);
+        tmp->offsets = g_array_new (FALSE, TRUE, sizeof (GstMXFDemuxIndex));
 
         if (demux->current_partition->partition.body_sid == edata->body_sid &&
             demux->current_partition->partition.body_offset == 0)
@@ -2153,16 +2154,17 @@ find_offset (GArray * offsets, guint64 * position, gboolean keyframe)
     return -1;
 
   idx = &g_array_index (offsets, GstMXFDemuxIndex, *position);
-  if (idx->offset != 0 && (!keyframe || idx->keyframe)) {
+  if (idx->initialized && (!keyframe || idx->keyframe)) {
     current_offset = idx->offset;
-  } else if (idx->offset != 0 && current_position > 0) {
+  } else if (keyframe && current_position > 0) {
     current_position--;
     while (TRUE) {
       GST_LOG ("current_position %" G_GUINT64_FORMAT, current_position);
       idx = &g_array_index (offsets, GstMXFDemuxIndex, current_position);
-      if (idx->offset == 0) {
-        GST_LOG ("breaking offset 0");
-        break;
+      if (!idx->initialized) {
+        /* don't search for a keyframe in an uninitialized gap */
+        GST_LOG ("breaking on uninitialized offset");
+        return -1;
       } else if (!idx->keyframe && current_position > 0) {
         current_position--;
         continue;
@@ -2179,6 +2181,40 @@ find_offset (GArray * offsets, guint64 * position, gboolean keyframe)
 
   *position = current_position;
   return current_offset;
+}
+
+static void
+have_new_essence_track_index_entry (GstMXFDemux * demux,
+    GstMXFDemuxEssenceTrack * etrack, guint64 position,
+    GstMXFDemuxIndex * entry)
+{
+  if (etrack->offsets->len > position) {
+    GstMXFDemuxIndex *cur_entry =
+        &g_array_index (etrack->offsets, GstMXFDemuxIndex, position);
+    if (cur_entry->initialized) {
+      GST_TRACE_OBJECT (demux,
+          "track %u body_sid:%u index_sid:%u delta_id:%d found initialized entry at position:%"
+          G_GUINT64_FORMAT, etrack->track_id, etrack->body_sid,
+          etrack->index_sid, etrack->delta_id, position);
+
+      return;
+    }
+
+    GST_LOG_OBJECT (demux,
+        "track %u body_sid:%u index_sid:%u delta_id:%d initializing entry at position:%"
+        G_GUINT64_FORMAT, etrack->track_id, etrack->body_sid,
+        etrack->index_sid, etrack->delta_id, position);
+    *cur_entry = *entry;
+
+    return;
+  }
+
+  GST_LOG_OBJECT (demux,
+      "track %u body_sid:%u index_sid:%u delta_id:%d appending entry at position:%"
+      G_GUINT64_FORMAT, etrack->track_id, etrack->body_sid,
+      etrack->index_sid, etrack->delta_id, position);
+
+  g_array_insert_val (etrack->offsets, position, *entry);
 }
 
 /**
@@ -2220,20 +2256,19 @@ find_edit_entry (GstMXFDemux * demux, GstMXFDemuxEssenceTrack * etrack,
       G_GUINT64_FORMAT " keyframe:%d", etrack->track_id, etrack->body_sid,
       etrack->index_sid, etrack->delta_id, position, keyframe);
 
+  /* Look in the track offsets */
+  if (find_offset (etrack->offsets, &position, keyframe) != -1) {
+    *entry = g_array_index (etrack->offsets, GstMXFDemuxIndex, position);
+    GST_LOG_OBJECT (demux, "Found entry in track offsets");
+    return TRUE;
+  } else {
+    GST_LOG_OBJECT (demux, "Didn't find entry in track offsets");
+  }
+
   /* Default values */
   entry->duration = 1;
   /* By default every entry is a keyframe unless specified otherwise */
   entry->keyframe = TRUE;
-
-  /* Look in the track offsets */
-  if (etrack->offsets && etrack->offsets->len > position) {
-    if (find_offset (etrack->offsets, &position, keyframe) != -1) {
-      *entry = g_array_index (etrack->offsets, GstMXFDemuxIndex, position);
-      GST_LOG_OBJECT (demux, "Found entry in track offsets");
-      return TRUE;
-    } else
-      GST_LOG_OBJECT (demux, "Didn't find entry in track offsets");
-  }
 
   /* Look in the indextables */
   index_table = get_track_index_table (demux, etrack);
@@ -2454,6 +2489,8 @@ search_in_segment:
   entry->offset = absolute_offset;
   entry->dts = position;
 
+  have_new_essence_track_index_entry (demux, etrack, position, entry);
+
   return TRUE;
 }
 
@@ -2494,17 +2531,16 @@ find_entry_for_offset (GstMXFDemux * demux, GstMXFDemuxEssenceTrack * etrack,
   retentry->keyframe = TRUE;
 
   /* Index-less search */
-  if (etrack->offsets) {
-    for (i = 0; i < etrack->offsets->len; i++) {
-      GstMXFDemuxIndex *idx =
-          &g_array_index (etrack->offsets, GstMXFDemuxIndex, i);
+  for (i = 0; i < etrack->offsets->len; i++) {
+    GstMXFDemuxIndex *idx =
+        &g_array_index (etrack->offsets, GstMXFDemuxIndex, i);
 
-      if (idx->initialized && idx->offset != 0 && idx->offset == offset) {
-        *retentry = *idx;
-        GST_DEBUG_OBJECT (demux,
-            "Found in track index. Position:%" G_GUINT64_FORMAT, idx->dts);
-        return TRUE;
-      }
+    if (idx->initialized && idx->offset == offset) {
+      g_assert (offset != 0);
+      *retentry = *idx;
+      GST_DEBUG_OBJECT (demux,
+          "Found in track offsets. Position:%" G_GUINT64_FORMAT, idx->dts);
+      return TRUE;
     }
   }
 
@@ -2705,6 +2741,8 @@ find_entry_for_offset (GstMXFDemux * demux, GstMXFDemuxEssenceTrack * etrack,
   retentry->initialized = TRUE;
   retentry->offset = original_offset;
   retentry->dts = position;
+
+  have_new_essence_track_index_entry (demux, etrack, position, retentry);
 
   return TRUE;
 }
@@ -2935,9 +2973,6 @@ gst_mxf_demux_handle_generic_container_essence_element (GstMXFDemux * demux,
     return ret;
   }
 
-  if (!etrack->offsets)
-    etrack->offsets = g_array_new (FALSE, TRUE, sizeof (GstMXFDemuxIndex));
-
   if (!index_entry.initialized) {
     /* This can happen when doing scanning without entry tables */
     index_entry.duration = 1;
@@ -2953,11 +2988,8 @@ gst_mxf_demux_handle_generic_container_essence_element (GstMXFDemux * demux,
         etrack->track_id, index_entry.dts, index_entry.offset,
         index_entry.keyframe);
 
-    /* We only ever append to the track offset entry. */
-    g_assert (etrack->position <= etrack->offsets->len);
-    g_array_insert_val (etrack->offsets, etrack->position, index_entry);
-  } else if (etrack->position == etrack->offsets->len) {
-    g_array_insert_val (etrack->offsets, etrack->position, index_entry);
+    have_new_essence_track_index_entry (demux, etrack, etrack->position,
+        &index_entry);
   }
 
   if (peek)
@@ -3881,13 +3913,13 @@ find_closest_offset (GArray * offsets, guint64 * position, gboolean keyframe)
   current_position = MIN (current_position, offsets->len - 1);
 
   idx = &g_array_index (offsets, GstMXFDemuxIndex, current_position);
-  while ((idx->offset == 0 || (keyframe && !idx->keyframe))
+  while ((!idx->initialized || (keyframe && !idx->keyframe))
       && current_position > 0) {
     current_position--;
     idx = &g_array_index (offsets, GstMXFDemuxIndex, current_position);
   }
 
-  if (idx->offset != 0 && (!keyframe || idx->keyframe)) {
+  if (idx->initialized && (!keyframe || idx->keyframe)) {
     *position = current_position;
     return idx->offset;
   }
@@ -4024,9 +4056,9 @@ from_track_offset:
     /* If we found the position read it from the index again */
     if (((ret == GST_FLOW_OK && etrack->position == *position + 1) ||
             (ret == GST_FLOW_EOS && etrack->position == *position + 1))
-        && etrack->offsets && etrack->offsets->len > *position
+        && etrack->offsets->len > *position
         && g_array_index (etrack->offsets, GstMXFDemuxIndex,
-            *position).offset != 0) {
+            *position).initialized) {
       GST_DEBUG_OBJECT (demux, "Found at offset %" G_GUINT64_FORMAT,
           demux->offset);
       demux->offset = old_offset;
