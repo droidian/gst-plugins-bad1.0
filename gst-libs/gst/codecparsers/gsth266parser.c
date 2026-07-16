@@ -360,7 +360,8 @@ gst_h266_parse_general_constraints_info (GstH266GeneralConstraintsInfo * gci,
     }
 
     /* skip the reserved zero bits */
-    if (!nal_reader_skip (nr, num_additional_bits - num_additional_bits_used))
+    if (!nal_reader_skip_long (nr,
+            num_additional_bits - num_additional_bits_used))
       goto error;
   }
 
@@ -486,9 +487,13 @@ gst_h266_parse_vui_parameters (GstH266VUIParams * vui, NalReader * nr)
       READ_UINT16 (nr, vui->sar_height, 16);
       vui->par_n = vui->sar_width;
       vui->par_d = vui->sar_height;
-    } else {
+    } else if (vui->aspect_ratio_idc <= 16) {
       vui->par_n = aspect_ratios[vui->aspect_ratio_idc].par_n;
       vui->par_d = aspect_ratios[vui->aspect_ratio_idc].par_d;
+    } else {
+      GST_WARNING ("Invalid bitstream: aspect_ratio_idc set "
+          "to value %d (must be 0-16 or %d)",
+          vui->aspect_ratio_idc, EXTENDED_SAR);
     }
   } else {
     vui->aspect_ratio_constant_flag = 0;
@@ -2168,30 +2173,39 @@ gst_h266_parser_identify_and_split_nalu_vvc (GstH266Parser * parser,
 GstH266ParserResult
 gst_h266_parser_parse_nal (GstH266Parser * parser, GstH266NalUnit * nalu)
 {
-  GstH266VPS vps;
-  GstH266SPS sps;
-  GstH266PPS pps;
-  GstH266APS aps;
+  GstH266ParserResult res = GST_H266_PARSER_OK;
 
   switch (nalu->type) {
-    case GST_H266_NAL_VPS:
-      return gst_h266_parser_parse_vps (parser, nalu, &vps);
+    case GST_H266_NAL_VPS:{
+      GstH266VPS *vps = g_new (GstH266VPS, 1);
+      res = gst_h266_parser_parse_vps (parser, nalu, vps);
+      g_free (vps);
       break;
-    case GST_H266_NAL_SPS:
-      return gst_h266_parser_parse_sps (parser, nalu, &sps);
+    }
+    case GST_H266_NAL_SPS:{
+      GstH266SPS *sps = g_new (GstH266SPS, 1);
+      res = gst_h266_parser_parse_sps (parser, nalu, sps);
+      g_free (sps);
       break;
-    case GST_H266_NAL_PPS:
-      return gst_h266_parser_parse_pps (parser, nalu, &pps);
+    }
+    case GST_H266_NAL_PPS:{
+      GstH266PPS *pps = g_new (GstH266PPS, 1);
+      res = gst_h266_parser_parse_pps (parser, nalu, pps);
+      g_free (pps);
       break;
+    }
     case GST_H266_NAL_PREFIX_APS:
-    case GST_H266_NAL_SUFFIX_APS:
-      return gst_h266_parser_parse_aps (parser, nalu, &aps);
+    case GST_H266_NAL_SUFFIX_APS:{
+      GstH266APS *aps = g_new (GstH266APS, 1);
+      res = gst_h266_parser_parse_aps (parser, nalu, aps);
+      g_free (aps);
       break;
+    }
     default:
       break;
   }
 
-  return GST_H266_PARSER_OK;
+  return res;
 }
 
 /**
@@ -3760,9 +3774,15 @@ gst_h266_parser_parse_picture_partition (GstH266SPS * sps,
           } else {              /* tile contains multi slices */
             guint16 slice_height_in_ctus;
 
+            if (pps->num_exp_slices_in_tile[i] > GST_H266_MAX_TILE_ROWS) {
+              GST_WARNING ("Too many exp slices %d",
+                  pps->num_exp_slices_in_tile[i]);
+              goto error;
+            }
+
             for (j = 0; j < pps->num_exp_slices_in_tile[i]; j++) {
               if (i + j >= pps->num_slices_in_pic_minus1) {
-                GST_WARNING ("Too may slices %d", i + j + 1);
+                GST_WARNING ("Too many slices %d", i + j + 1);
                 goto error;
               }
 
@@ -3786,7 +3806,7 @@ gst_h266_parser_parse_picture_partition (GstH266SPS * sps,
             /* Assign the remaining CTBs to slices */
             while (remaining_height_in_ctbs_y > uniform_slice_height) {
               if (i + j > pps->num_slices_in_pic_minus1) {
-                GST_WARNING ("Too may slices %d", i + j + 1);
+                GST_WARNING ("Too many slices %d", i + j + 1);
                 goto error;
               }
 
@@ -3802,7 +3822,7 @@ gst_h266_parser_parse_picture_partition (GstH266SPS * sps,
 
             if (remaining_height_in_ctbs_y > 0) {
               if (i + j > pps->num_slices_in_pic_minus1) {
-                GST_WARNING ("Too may slices %d", i + j + 1);
+                GST_WARNING ("Too many slices %d", i + j + 1);
                 goto error;
               }
 
@@ -5972,15 +5992,15 @@ gst_h266_parser_parse_slice_hdr (GstH266Parser * parser,
           parser->ctb_to_tile_col_bd[pre_ctb_addr_x]
           || (ctb_addr_y != pre_ctb_addr_y
               && sps->entropy_coding_sync_enabled_flag)) {
+        if (sh->num_entry_points >= GST_H266_MAX_ENTRY_POINTS) {
+          GST_WARNING ("Too many entry points: %d.", sh->num_entry_points);
+          goto error;
+        }
         sh->entry_point_start_ctu[sh->num_entry_points] = i;
         sh->num_entry_points++;
       }
     }
 
-    if (sh->num_entry_points > GST_H266_MAX_ENTRY_POINTS) {
-      GST_WARNING ("Too many entry points: %d.", sh->num_entry_points);
-      goto error;
-    }
     if (sh->num_entry_points > 0) {
       READ_UE_MAX (&nr, sh->entry_offset_len_minus1, 31);
       for (i = 0; i < sh->num_entry_points; i++) {
