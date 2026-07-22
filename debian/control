@@ -212,6 +212,7 @@ Package: gstreamer1.0-wpe
 Architecture: amd64 arm64 armel armhf i386 mips64el ppc64el riscv64 s390x ia64 loong64 powerpc sparc64 x32
 Multi-Arch: same
 Depends: gstreamer1.0-plugins-base,
+         gstreamer1.0-gl,
          libgstreamer-plugins-bad1.0-0 (= ${binary:Version}),
          ${misc:Depends},
          ${shlibs:Depends}
