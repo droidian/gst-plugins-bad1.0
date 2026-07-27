@@ -7,6 +7,9 @@ export DEB_BUILD_MAINT_OPTIONS = hardening=+all
 export DEB_LDFLAGS_MAINT_APPEND = -Wl,-O1 -Wl,-z,defs
 export HOME=$(CURDIR)/fake-home
 
+# Prevent slower builds from hitting the default 20s test timeout
+export CK_TIMEOUT_MULTIPLIER=2
+
 # upstream version
 gst_version=$(shell echo $(DEB_VERSION) | cut -d '-' -f 1)
 
