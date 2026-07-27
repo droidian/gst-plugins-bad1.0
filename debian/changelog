@@ -1,3 +1,13 @@
+gst-plugins-bad1.0 (1.28.5-3) unstable; urgency=medium
+
+  [ Charles ]
+  * Fix FTBS in openssl 4.0
+
+  [ Marc Leeman ]
+  * d/rules: CK_TIMEOUT_MULTIPLIER=2 (mpegtsmux test) (Closes: #1142875)
+
+ -- Marc Leeman <marc.leeman@gmail.com>  Mon, 27 Jul 2026 16:28:59 +0200
+
 gst-plugins-bad1.0 (1.28.5-2) unstable; urgency=medium
 
   * d/control: gstreamer1.0-wpe, depend on gstreamer1.0-gl (Closes: #1141906)
