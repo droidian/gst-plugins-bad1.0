@@ -7,6 +7,9 @@ export DEB_BUILD_MAINT_OPTIONS = hardening=+all
 export DEB_LDFLAGS_MAINT_APPEND = -Wl,-O1 -Wl,-z,defs
 export HOME=$(CURDIR)/fake-home
 
+# Prevent slower builds from hitting the default 20s test timeout
+export CK_TIMEOUT_MULTIPLIER=2
+
 # upstream version
 gst_version=$(shell echo $(DEB_VERSION) | cut -d '-' -f 1)
 
@@ -42,8 +45,6 @@ conf_flags += -Dtflite-edgetpu=disabled
 conf_flags += -Dwpe2=disabled
 conf_flags += -Dmpeghdec=disabled
 conf_flags += -Dvmaf=disabled
-# Unmaintained library
-conf_flags += -Dmsdk=disabled
 # Only available on Windows
 conf_flags += -Damfcodec=disabled -Ddirectshow=disabled -Dwasapi=disabled -Dwasapi2=disabled
 # In non-free currently
@@ -55,6 +56,13 @@ conf_flags += -Dandroidmedia=disabled
 
 # vulkan now has a dependency on sdl3 that is not in debian
 conf_flags += -Dvulkan=disabled
+
+# Enable msdk with the oneVPL API on amd64, x32 (only archs where libvpl-dev is available)
+ifneq (,$(filter $(DEB_HOST_ARCH),amd64 x32))
+conf_flags += -Dmsdk=enabled -Dmfx_api=oneVPL
+else
+conf_flags += -Dmsdk=disabled
+endif
 
 ifeq (,$(filter $(DEB_HOST_ARCH),amd64 arm64 armel armhf i386 mips64el ppc64el riscv64 s390x alpha hppa hurd-i386 m68k powerpc ppc64 sparc64))
 conf_flags += -Dzxing=disabled
@@ -161,6 +169,10 @@ endif
 
 ifneq (,$(filter $(DEB_HOST_ARCH),amd64 arm64 armhf riscv64))
 	dh_install -pgstreamer1.0-plugins-bad debian/tmp/usr/lib/$(DEB_HOST_MULTIARCH)/gstreamer-1.0/libgstonnx.so
+endif
+
+ifneq (,$(filter $(DEB_HOST_ARCH),amd64 x32))
+	dh_install -pgstreamer1.0-plugins-bad debian/tmp/usr/lib/$(DEB_HOST_MULTIARCH)/gstreamer-1.0/libgstmsdk.so
 endif
 
 ifeq ($(DEB_HOST_ARCH_ENDIAN),little)

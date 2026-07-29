@@ -214,7 +214,7 @@ gst_h264_parse_finalize (GObject * object)
 
   gst_video_clear_user_data_unregistered (&h264parse->user_data_unregistered,
       TRUE);
-  gst_video_clear_user_data (&h264parse->user_data, TRUE);
+  gst_video_clear_user_data (&h264parse->user_data);
 
   g_object_unref (h264parse->frame_out);
 
@@ -243,7 +243,7 @@ gst_h264_parse_reset_frame (GstH264Parse * h264parse)
   h264parse->have_pps_in_frame = FALSE;
   h264parse->have_aud_in_frame = FALSE;
   gst_adapter_clear (h264parse->frame_out);
-  gst_video_clear_user_data (&h264parse->user_data, FALSE);
+  gst_video_clear_user_data (&h264parse->user_data);
   gst_video_clear_user_data_unregistered (&h264parse->user_data_unregistered,
       FALSE);
 }
@@ -1106,7 +1106,8 @@ gst_h264_parse_process_nal (GstH264Parse * h264parse, GstH264NalUnit * nalu)
       h264parse->picture_start = TRUE;
 
       /* don't need to parse the whole slice (header) here */
-      if (*(nalu->data + nalu->offset + nalu->header_bytes) & 0x80) {
+      if (nalu->size > nalu->header_bytes &&
+          *(nalu->data + nalu->offset + nalu->header_bytes) & 0x80) {
         /* means first_mb_in_slice == 0 */
         /* real frame data */
         GST_DEBUG_OBJECT (h264parse, "first_mb_in_slice = 0");
@@ -1927,8 +1928,9 @@ get_compatible_profile_caps (GstH264SPS * sps)
       g_value_unset (&value);
     }
     gst_caps_set_value (caps, "profile", &compat_profiles);
-    g_value_unset (&compat_profiles);
   }
+
+  g_value_unset (&compat_profiles);
 
   return caps;
 }

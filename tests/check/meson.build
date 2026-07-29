@@ -84,6 +84,7 @@ base_tests = [
   [['elements/videoframe-audiolevel.c'], get_option('videoframe_audiolevel').disabled()],
   [['elements/viewfinderbin.c']],
   [['elements/vkcolorconvert.c'], not gstvulkan_dep.found(), [gstvulkan_dep]],
+  [['elements/vkdownload.c'], not gstvulkan_dep.found(), [gstvulkan_dep]],
   [['elements/vkdeviceprovider.c'], not gstvulkan_dep.found(), [gstvulkan_dep]],
   [['elements/vkupload.c'], not gstvulkan_dep.found(), [gstvulkan_dep]],
   [['elements/voamrwbenc.c'], not voamrwbenc_dep.found(), [voamrwbenc_dep]],
@@ -99,7 +100,7 @@ base_tests = [
   [['libs/nalutils.c', '../../gst-libs/gst/codecparsers/nalutils.c'], false, [nalutils_dep]],
   [['libs/mpegts.c'], false, [gstmpegts_dep]],
   [['libs/mpegvideoparser.c'], false, [gstcodecparsers_dep]],
-  [['libs/mse.c'], false, [gstmse_private_test_dep]],
+  [['libs/mse.c'], not gstmse_private_test_dep.found(), [gstmse_private_test_dep]],
   [['libs/planaraudioadapter.c'], false, [gstbadaudio_dep]],
   [['libs/play.c'], not enable_gst_play_tests, [gstplay_dep, libsoup_dep]],
   [['libs/vc1parser.c'], false, [gstcodecparsers_dep]],
@@ -183,6 +184,14 @@ if host_machine.system() != 'windows'
   ]
 endif
 
+if ['darwin', 'ios'].contains(host_system)
+  videotoolbox_dep = dependency('VideoToolbox', required : false)
+  base_tests += [
+    [['pipelines/vtdec-output-paths.c'],
+        not videotoolbox_dep.found(), [videotoolbox_dep]],
+  ]
+endif
+
 # linux only tests
 if host_machine.system() == 'linux'
   base_tests += [
@@ -204,11 +213,16 @@ test_defines = [
 
 test_deps = [gst_dep, gstapp_dep, gstbase_dep, gstbadaudio_dep,
              gstbasecamerabin_dep, gstphotography_dep, gstwebrtc_dep,
-             gstmpegts_dep, gstmse_dep, gstplay_dep, gstplayer_dep,
+             gstmpegts_dep, gstplay_dep, gstplayer_dep,
              gstanalytics_dep, gstinsertbin_dep, gst_transcoder_dep,
              gstpbutils_dep, gstcontroller_dep, gstaudio_dep,
              gstvideo_dep, gstrtp_dep, gsturidownloader_dep,
              gstcheck_dep, gio_dep, gsttag_dep]
+
+if get_option('mse').enabled()
+  test_defines += '-DGST_HAVE_MSE'
+  test_deps += gstmse_dep
+endif
 
 pluginsdirs = [  ]
 

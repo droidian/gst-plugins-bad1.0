@@ -1,3 +1,47 @@
+gst-plugins-bad1.0 (1.28.5-3) unstable; urgency=medium
+
+  [ Charles ]
+  * Fix FTBS in openssl 4.0
+
+  [ Marc Leeman ]
+  * d/rules: CK_TIMEOUT_MULTIPLIER=2 (mpegtsmux test) (Closes: #1142875)
+
+ -- Marc Leeman <marc.leeman@gmail.com>  Mon, 27 Jul 2026 16:28:59 +0200
+
+gst-plugins-bad1.0 (1.28.5-2) unstable; urgency=medium
+
+  * d/control: gstreamer1.0-wpe, depend on gstreamer1.0-gl (Closes: #1141906)
+  * d/rules: enable msdk with oneVPL backend
+
+ -- Marc Leeman <marc.leeman@gmail.com>  Wed, 22 Jul 2026 12:43:45 +0200
+
+gst-plugins-bad1.0 (1.28.5-1) unstable; urgency=medium
+
+  * New upstream version 1.28.5
+
+ -- Marc Leeman <marc.leeman@gmail.com>  Thu, 16 Jul 2026 16:03:59 +0200
+
+gst-plugins-bad1.0 (1.28.4-1) unstable; urgency=medium
+
+  * New upstream version 1.28.4
+
+ -- Marc Leeman <marc.leeman@gmail.com>  Mon, 15 Jun 2026 09:09:07 +0200
+
+gst-plugins-bad1.0 (1.28.3-1) unstable; urgency=medium
+
+  * New upstream version 1.28.3
+  * d/control: bump BD libgstreamer1.0-dev to 1.28.3
+  * d/patches: refresh
+
+ -- Marc Leeman <marc.leeman@gmail.com>  Tue, 12 May 2026 10:14:58 +0200
+
+gst-plugins-bad1.0 (1.28.2-2) unstable; urgency=medium
+
+  * d/control: bring orc build dependency with meson version
+  * d/control: remove libkate-dev from Build-Depends (Closes: #1134864)
+
+ -- Marc Leeman <marc.leeman@gmail.com>  Wed, 29 Apr 2026 10:40:31 +0200
+
 gst-plugins-bad1.0 (1.28.2-1) unstable; urgency=medium
 
   * New upstream version 1.28.2
