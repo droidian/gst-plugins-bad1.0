@@ -1,3 +1,342 @@
+=== release 1.28.6 ===
+
+2026-08-05 12:59:39 +0100  Tim-Philipp Müller <tim@centricular.com>
+
+	* gst-plugins-bad.doap:
+	* meson.build:
+	  Release 1.28.6
+
+2026-07-08 17:05:14 +0300  Sebastian Dröge <sebastian@centricular.com>
+
+	* ext/openjpeg/gstopenjpegdec.c:
+	  openjpegdec: Clamp x0/x1/y0/y1 to the available frame size in stripe mode
+	  While y0/y1 were already clamped, the lack of clamping x0/x1 allowed caps to
+	  specify a different size than the actual frame which could then lead to reading
+	  or writing too many bytes.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/12246>
+
+2026-07-07 17:20:50 +0300  Sebastian Dröge <sebastian@centricular.com>
+
+	* ext/openjpeg/gstopenjpegdec.c:
+	  openjpegdec: Use gsize for strides instead of gint
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/12246>
+
+2026-07-07 15:22:34 +0300  Sebastian Dröge <sebastian@centricular.com>
+
+	* ext/openjpeg/gstopenjpeg.h:
+	* ext/openjpeg/gstopenjpegdec.c:
+	  openjpegdec: Fix some typos in error messages
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/12246>
+
+2026-07-07 15:18:10 +0300  Sebastian Dröge <sebastian@centricular.com>
+
+	* ext/openjpeg/gstopenjpegdec.c:
+	  openjpegdec: Unmap input/output buffers in error cases
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/12246>
+
+2026-07-07 16:28:28 +0300  Sebastian Dröge <sebastian@centricular.com>
+
+	* ext/openjpeg/gstopenjpegdec.c:
+	  openjpegdec: Only use YOsiz and Ysiz in striped mode and clamp to caps height
+	  We assume that in striped mode the smallest YOsiz of a frame is always 0.
+	  Fixes https://gitlab.freedesktop.org/gstreamer/gstreamer/-/work_items/5187
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/12246>
+
+2026-07-07 15:20:51 +0300  Sebastian Dröge <sebastian@centricular.com>
+
+	* ext/openjpeg/gstopenjpegdec.c:
+	  openjpegdec: Negotiate with width/height of the actual image instead of upstream caps
+	  In non-striped mode. This allows us to not rely on the upstream caps being
+	  correct and work from the data we have anyway.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/12246>
+
+2026-08-03 12:30:45 +0300  Sebastian Dröge <sebastian@centricular.com>
+
+	* gst/adpcmdec/adpcmdec.c:
+	  adpcmdec: Fix IMA ADPCM input size check to match with the actual code
+	  Fixes https://gitlab.freedesktop.org/gstreamer/gstreamer/-/work_items/5231
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/12245>
+
+2026-08-03 12:30:30 +0300  Sebastian Dröge <sebastian@centricular.com>
+
+	* gst/adpcmdec/adpcmdec.c:
+	  adpcmdec: Fail negotiation if block_align is not provided
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/12245>
+
+2026-07-13 11:04:28 +0900  Seungha Yang <seungha@centricular.com>
+
+	* gst-libs/gst/codecparsers/gsth265parser.c:
+	  h265parser: Fix out-of-bounds writes in RPS parsing
+	  Add missing bounds checks.
+	  Fixes: https://gitlab.freedesktop.org/gstreamer/gstreamer/-/work_items/5196
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/12239>
+
+2026-07-18 16:19:17 +0200  Tim-Philipp Müller <tim@centricular.com>
+
+	* ext/bz2/gstbz2dec.h:
+	* ext/bz2/gstbz2enc.h:
+	* ext/dtls/gstdtlsagent.h:
+	* ext/dtls/gstdtlscertificate.h:
+	* ext/dtls/gstdtlsconnection.h:
+	* ext/resindvd/rsndec.h:
+	* ext/ttml/gstttmlrender.h:
+	* ext/wayland/gstwaylandsink.h:
+	* gst/debugutils/gsttestsrcbin.c:
+	* gst/pnm/gstpnmdec.h:
+	* gst/pnm/gstpnmenc.h:
+	* gst/transcode/gst-cpu-throttling-clock.h:
+	* sys/kms/gstkmsallocator.h:
+	* sys/kms/gstkmsbufferpool.h:
+	* sys/kms/gstkmssink.h:
+	* sys/va/gstvafilter.h:
+	  gst-plugins-bad: remove incorrect G_GNUC_CONST annotation for get_type() functions
+	  G_GNUC_CONST must only be used for functions that don't modify global state.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/12157>
+
+2026-06-19 10:49:57 +0100  Charles <charles05@canonical.com>
+
+	* ext/dtls/gstdtlsconnection.c:
+	  dtls: make BIO read signal retry instead of EOF when no data
+	  The DTLS plugin was using OpenSSL through a custom memory BIO registered
+	  via BIO_meth_set_read. When the handshake is driven and no incoming datagram is
+	  queued, the bio_method_read callback returned 0 without setting the read-retry
+	  flag, while the BIO's BIO_CTRL_EOF control reports "not at EOF". This is invalid
+	  usage, a BIO that has no data available right now must signal retry, not return
+	  0.
+	  Up to and including OpenSSL 3.5.x this happened to be tolerated: the empty read
+	  surfaced as SSL_ERROR_SYSCALL with an empty error queue (errno 0), which
+	  gstdtlsconnection's handle_error explicitly ignores and retries.
+	  OpenSSL 4.0.0 stopped allowing it. Commit
+	  be42447469dcccc68b7e115c7947e3c25124f3f2 "Fix the converters between the old and
+	  new BIO_read functions to handle end-of-file state properly"
+	  (PR openssl/openssl#29290, first released in 4.0.0) reworked bread_conv: when an
+	  old-style read returns 0 and BIO_CTRL_EOF reports not-at-EOF it now sets
+	  BIO_FLAGS_AUTO_EOF, and BIO_eof returns 1 whenever that flag is set.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/12191>
+
+2026-07-29 15:20:40 +0900  Seungha Yang <seungha@centricular.com>
+
+	* gst/closedcaption/gsth265reorder.c:
+	  h265seiinserter: Fix HEVC with alpha stream handling
+	  Ignore NAL units with non-zero nuh_layer_id, as h265decoder does,
+	  applying the same change as
+	  https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/11144
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/12189>
+
+2026-07-17 12:01:06 +0300  Sebastian Dröge <sebastian@centricular.com>
+
+	* ext/resindvd/gstmpegdemux.c:
+	  resindvd: mpegpsdemux: Port parse_psm() to byte readers
+	  Apply 948b87bf15 here too.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/12183>
+
+2026-07-17 11:13:44 +0300  Sebastian Dröge <sebastian@centricular.com>
+
+	* ext/resindvd/gstmpegdemux.c:
+	  resindvd: mpegpsdemux: Port over byte reader changes from the main plugin
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/12183>
+
+2026-07-16 15:34:02 +0300  Sebastian Dröge <sebastian@centricular.com>
+
+	* gst/mpegdemux/gstmpegdemux.c:
+	  mpegpsdemux: Use byte readers for parsing data and make sure enough data is available
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/12183>
+
+2026-07-21 15:35:44 +0530  Nirbheek Chauhan <nirbheek@centricular.com>
+
+	* meson.build:
+	  meson: Make the g-ir-scanner init section consistent across modules
+	  We weren't disabling the registry correctly due to typos and missing
+	  env vars.
+	  This speeds up introspection builds considerably on Windows.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/12163>
+
+2026-07-21 15:32:45 -0400  Nicolas Dufresne <nicolas.dufresne@collabora.com>
+
+	* gst/mpegtsdemux/tsdemux.c:
+	  tsdemux: Don't assert if stream pad was not yet created
+	  Fix an assert when a continuity missmatch is detected for a stream for which its
+	  pad is not yet exposed.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/12162>
+
+2026-07-20 16:51:43 +0900  Jihoon Lee <ejihoon.lee@lge.com>
+
+	* gst-libs/gst/wayland/gstwlvideobufferpool.c:
+	  wlvideobufferpool: Fix memory leak in gst_wl_video_buffer_pool_alloc_buffer
+	  Fix dma_mem leak on buffer too small path in gst_wl_video_buffer_pool_alloc_buffer()
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/12160>
+
+2026-07-14 04:01:10 +0530  Nirbheek Chauhan <nirbheek@centricular.com>
+
+	* sys/applemedia/vtdec.c:
+	  vtdec: Don't register the hw-only variant on simulators
+	  Simulators *never* expose a hardware decoder in the VT APIs. It is
+	  always a software decoder, even if the implementation might be backed
+	  by a hardware decoder on the host system.
+	  This was tested on iOS and tvOS Simulators on an M4 Mac Mini, M1 Mac
+	  Mini, and a 2014 Intel Mac Mini.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/12112>
+
+2026-07-16 21:31:45 +0200  Diego Nieto <dnieto@fluendo.com>
+
+	* gst-libs/gst/codecparsers/gsth266parser.c:
+	  h266parser: fix SEI parsing error handler
+	  Clear the partially parsed SEI message in case of an error to
+	  prevent memory leaks and avoid processing stale data.
+	  Fixes #5219
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/12132>
+
+2026-04-10 19:50:06 -0400  Olivier Crête <olivier.crete@collabora.com>
+
+	* ext/tflite/gsttfliteinference.c:
+	  tflifeinference: Fix leaks
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/11404>
+
+2026-07-13 18:47:16 +0300  Sebastian Dröge <sebastian@centricular.com>
+
+	* gst/dvdspu/gstspu-vobsub.c:
+	  dvdspu: Fix too strict off-by-one bounds check in a couple of places
+	  This prevented reading the last byte in some cases.
+	  Also add a missing bounds check to a debug function that is not compiled in by
+	  default, so is actually not really important at all.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/12126>
+
+2026-07-16 13:45:51 +0300  Sebastian Dröge <sebastian@centricular.com>
+
+	* gst/pnm/gstpnmdec.c:
+	  pnmdec: Fix out-of-bounds write with bitmap PNM files and non-multiple-of-8 resolutions
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/12124>
+
+2026-07-16 13:42:04 +0300  Sebastian Dröge <sebastian@centricular.com>
+
+	* gst/pnm/gstpnmdec.c:
+	  pnmdec: Use correct return value for negotiation failure
+	  This returns GstFlowReturn and FALSE equals to GST_FLOW_OK.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/12124>
+
+2026-07-16 13:31:58 +0300  Sebastian Dröge <sebastian@centricular.com>
+
+	* gst/pnm/gstpnmdec.c:
+	  pnmdec: Don't flush more data from the adapter than is available
+	  Instead wait for future data.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/12124>
+
+2026-07-16 13:31:26 +0300  Sebastian Dröge <sebastian@centricular.com>
+
+	* gst/pnm/gstpnmdec.c:
+	  pnmdec: Don't assert if creating the output state fails
+	  This can happen e.g. if the resolution is too large for the given format.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/12124>
+
+2026-07-08 19:30:19 +0800  He Junyan <junyan.he@intel.com>
+
+	* sys/va/gstvavp9enc.c:
+	  va: vp9enc: Mark super frame as corrupt when any frame is corrupt
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/12123>
+
+2026-07-08 19:24:14 +0800  He Junyan <junyan.he@intel.com>
+
+	* sys/va/gstvaav1enc.c:
+	  va: av1enc: Mark TU as corrupt when any frame is corrupt
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/12123>
+
+2026-07-08 15:02:16 +0200  Maksim Nikolaev <maksim.nikolaev.dev@gmail.com>
+
+	* sys/va/gstvabaseenc.c:
+	* sys/va/gstvaencoder.c:
+	* sys/va/gstvaencoder.h:
+	  va: recover from corrupt or overflowing coded buffers
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/12123>
+
+2026-07-08 15:01:42 +0200  Maksim Nikolaev <maksim.nikolaev.dev@gmail.com>
+
+	* sys/va/gstvaav1enc.c:
+	* sys/va/gstvabaseenc.c:
+	* sys/va/gstvabaseenc.h:
+	* sys/va/gstvah264enc.c:
+	* sys/va/gstvah265enc.c:
+	* sys/va/gstvavp8enc.c:
+	* sys/va/gstvavp9enc.c:
+	  va: size the coded buffer for the CBR bitrate budget
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/12123>
+
+2026-07-13 15:24:31 +1000  Matthew Waters <matthew@centricular.com>
+
+	* gst-libs/gst/vulkan/gstvktrash.c:
+	  vulkantrash: avoid reinitializing trash objects multiple times
+	  Fixes a leak of miniobject private data.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/12117>
+
+2026-07-13 16:02:34 +1000  Matthew Waters <matthew@centricular.com>
+
+	* gst-libs/gst/vulkan/gstvkformat.c:
+	  vulkan/format: add 3-plane i420 format
+	  mesa/amd chooses this format for I420.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/12117>
+
+2026-07-16 09:00:50 +1000  Jan Schmidt <jan@centricular.com>
+
+	* sys/d3d11/gstd3d11winrtcapture.cpp:
+	  d3d11winrtcapture: Fix incorrect capture height
+	  Fix a typo where capture_height would not get properly
+	  assigned. Fixes invalid copy region errors.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/12115>
+
+2026-07-14 18:15:07 +0530  Nirbheek Chauhan <nirbheek@centricular.com>
+
+	* docs/meson.build:
+	  docs: Fix build when mse library is disabled
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/12113>
+
+2026-07-08 10:30:35 +0300  Sebastian Dröge <sebastian@centricular.com>
+
+	* gst/videoparsers/gstvc1parse.c:
+	  vc1parse: Set has_timing_info() / syncable() in start()
+	  The values are reset in PAUSED->READY so setting them only in instance init is
+	  not enough.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/12102>
+
+2026-07-08 10:29:59 +0300  Sebastian Dröge <sebastian@centricular.com>
+
+	* gst/pcapparse/gstirtspparse.c:
+	  irtspparse: Set min frame size in start()
+	  The value is reset in PAUSED->READY so setting it only once in instance init is
+	  not enough.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/12102>
+
+2026-07-10 09:24:27 -0400  Nicolas Dufresne <nicolas.dufresne@collabora.com>
+
+	* ext/gtk/gstgtkwaylandsink.c:
+	* ext/wayland/gstwaylandsink.c:
+	  waylandsink: Omit reporting drop frame on preroll
+	  These sink are a bit special, since they report dropped frame on the next
+	  incoming frame. If the sink queue is full when the paused state is reached,
+	  the preroll during paused to playing transition will report a drop, which
+	  leads to base sink aborting the transition.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/12037>
+
+2026-07-07 19:23:32 +0300  Sebastian Dröge <sebastian@centricular.com>
+
+	* gst/videoparsers/gstdiracparse.c:
+	* gst/videoparsers/gsth263parse.c:
+	  h263parse: diracparse: Sync baseparse configuration with other compressed video parsers
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/12096>
+
+2026-07-08 15:41:59 +0200  Albert Sjölund <alberts@axis.com>
+
+	* ext/webrtc/gstwebrtcbin.c:
+	  webrtcbin: fix possible floating leak for post-aux
+	  The behaviour is different between aux-sender and post-aux-sender. There
+	  is a conditional ref_sink if the element is floating in one but not the
+	  other. As the element is afterwards added to a bin sink the element
+	  before adding.
+	  Part-of: <https://gitlab.freedesktop.org/gstreamer/gstreamer/-/merge_requests/12085>
+
+2026-07-08 23:48:39 +0200  Tim-Philipp Müller <tim@centricular.com>
+
+	* meson.build:
+	  Back to development after 1.28.5
+
 === release 1.28.5 ===
 
 2026-07-08 23:42:39 +0200  Tim-Philipp Müller <tim@centricular.com>
