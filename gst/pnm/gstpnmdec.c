@@ -170,7 +170,7 @@ gst_pnmdec_negotiate (GstVideoDecoder * decoder)
         GST_DEBUG ("Received caps from peer: %" GST_PTR_FORMAT, peercaps);
         if (gst_caps_is_empty (peercaps)) {
           gst_caps_unref (peercaps);
-          return FALSE;
+          return GST_FLOW_NOT_NEGOTIATED;
         }
 
         if (!gst_caps_is_fixed (peercaps))
@@ -215,6 +215,9 @@ gst_pnmdec_negotiate (GstVideoDecoder * decoder)
   output_state =
       gst_video_decoder_set_output_state (decoder, fmt,
       pnmdec->mngr.info.width, pnmdec->mngr.info.height, pnmdec->input_state);
+  if (!output_state)
+    return GST_FLOW_NOT_NEGOTIATED;
+
   gst_video_codec_state_unref (output_state);
 
   if (!gst_video_decoder_negotiate (decoder))
@@ -385,7 +388,7 @@ gst_pnmdec_handle_frame (GstVideoDecoder * decoder, GstVideoCodecFrame * frame)
   guint i_rowstride;
   guint o_rowstride;
   GstFlowReturn r = GST_FLOW_OK;
-  gint bytes, i, total_bytes = 0;
+  gint i, total_bytes = 0;
 
   r = gst_video_decoder_allocate_output_frame (decoder, frame);
   if (r != GST_FLOW_OK) {
@@ -406,8 +409,13 @@ gst_pnmdec_handle_frame (GstVideoDecoder * decoder, GstVideoCodecFrame * frame)
       GST_BUFFER_COPY_METADATA, 0, 0);
 
   if (s->mngr.info.type == GST_PNM_TYPE_BITMAP) {
-    bytes = (s->mngr.info.width * s->mngr.info.height + 7) / 8;
-    for (i = 0; i < bytes; i++) {
+    guint pixels = s->mngr.info.width * s->mngr.info.height;
+    guint full_bytes = pixels / 8;
+    guint remainder = pixels % 8;
+    guint8 mask;
+
+    /* Process all complete bytes (8 pixels each) */
+    for (i = 0; i < full_bytes; i++) {
       omap.data[i * 8] = (imap.data[i] & 0x80) ? 0 : 255;
       omap.data[i * 8 + 1] = (imap.data[i] & 0x40) ? 0 : 255;
       omap.data[i * 8 + 2] = (imap.data[i] & 0x20) ? 0 : 255;
@@ -417,7 +425,19 @@ gst_pnmdec_handle_frame (GstVideoDecoder * decoder, GstVideoCodecFrame * frame)
       omap.data[i * 8 + 6] = (imap.data[i] & 0x02) ? 0 : 255;
       omap.data[i * 8 + 7] = (imap.data[i] & 0x01) ? 0 : 255;
     }
-    total_bytes = bytes * 8;
+
+    /* Process remainder pixels from the last byte */
+    if (remainder > 0) {
+      guint8 b = imap.data[full_bytes];
+      guint8 *dst = omap.data + full_bytes * 8;
+      mask = 0x80;
+      for (i = 0; i < remainder; i++) {
+        dst[i] = (b & mask) ? 0 : 255;
+        mask >>= 1;
+      }
+    }
+
+    total_bytes = pixels;
   } else
     /* Need to convert from PNM rowstride to GStreamer rowstride */
   if (s->mngr.info.width % 4 != 0) {
@@ -529,6 +549,9 @@ gst_pnmdec_parse (GstVideoDecoder * decoder, GstVideoCodecFrame * frame,
         r = GST_FLOW_OK;
         goto out;
       case GST_PNM_INFO_MNGR_RESULT_FINISHED:
+        offset = s->mngr.data_offset;
+        if (size < offset)
+          goto need_more_data;
 
         r = gst_pnmdec_negotiate (decoder);
         if (r != GST_FLOW_OK)
@@ -541,7 +564,6 @@ gst_pnmdec_parse (GstVideoDecoder * decoder, GstVideoCodecFrame * frame,
           GST_DEBUG_OBJECT (s, "Allocating output frame of size %u", s->size);
           s->buf = gst_buffer_new_and_alloc (s->size);
         }
-        offset = s->mngr.data_offset;
         gst_adapter_flush (adapter, offset);
         size = size - offset;
     }
