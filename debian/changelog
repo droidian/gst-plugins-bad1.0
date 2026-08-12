@@ -1,3 +1,10 @@
+gst-plugins-bad1.0 (1.28.6-1) unstable; urgency=medium
+
+  * New upstream version 1.28.6
+  * Revert "Fix FTBS in openssl 4.0"
+
+ -- Marc Leeman <marc.leeman@gmail.com>  Wed, 05 Aug 2026 16:26:08 +0200
+
 gst-plugins-bad1.0 (1.28.5-3) unstable; urgency=medium
 
   [ Charles ]

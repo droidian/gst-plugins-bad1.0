@@ -1768,7 +1768,8 @@ _vp9_calculate_coded_size (GstVaVp9Enc * self)
     codedbuf_size = codedbuf_size / 2;
   }
 
-  base->codedbuf_size = codedbuf_size;
+  base->codedbuf_size = gst_va_base_enc_adjust_coded_buffer_size (base,
+      codedbuf_size, self->rc.rc_ctrl_mode, self->rc.target_bitrate_bits);
 
   GST_INFO_OBJECT (self, "Calculate codedbuf size: %u", base->codedbuf_size);
 }
@@ -2560,6 +2561,7 @@ _vp9_create_super_frame_output_buffer (GstVaVp9Enc * self,
   GstBuffer *buf = NULL;
   gint frame_size[GST_VP9_MAX_FRAMES_IN_SUPERFRAME] = { 0, };
   guint num;
+  gboolean corrupt = FALSE;
 
   g_assert ((_enc_frame (last_frame)->flags & FRAME_TYPE_REPEAT) == 0);
   g_assert ((_enc_frame (last_frame)->flags & FRAME_FLAG_NOT_SHOW) == 0);
@@ -2585,10 +2587,16 @@ _vp9_create_super_frame_output_buffer (GstVaVp9Enc * self,
       goto error;
     }
 
+    if (frame_enc->base.picture->corrupt)
+      corrupt = TRUE;
+
     offset += frame_size[num];
   }
 
   frame_enc = _enc_frame (last_frame);
+  /* If any frame is corrupt, make the whole super frame as corrupt. */
+  frame_enc->base.picture->corrupt |= corrupt;
+
   frame_size[num] = gst_va_base_enc_copy_output_data (base,
       frame_enc->base.picture, data + offset, total_sz - offset);
   if (frame_size[num] <= 0) {
