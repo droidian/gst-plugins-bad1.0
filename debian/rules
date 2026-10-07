@@ -150,7 +150,7 @@ ifeq ($(DEB_HOST_ARCH_OS),linux)
 	dh_install -pgstreamer1.0-plugins-bad debian/tmp/usr/lib/$(DEB_HOST_MULTIARCH)/gstreamer-1.0/libgstwebrtc.so
 	dh_install -plibgstreamer-plugins-bad1.0-0 debian/tmp/usr/lib/$(DEB_HOST_MULTIARCH)/libgstwebrtcnice-1.0.so.* usr/lib/$(DEB_HOST_MULTIARCH)
 	dh_install -pgstreamer1.0-plugins-bad debian/tmp/usr/lib/$(DEB_HOST_MULTIARCH)/gstreamer-1.0/libgsttflite.so
-	dh_install -plibgstreamer-plugins-bad1.0-0 debian/tmp/usr/lib/$(DEB_HOST_MULTIARCH)/libgsthip.so.* usr/lib/$(DEB_HOST_MULTIARCH)
+	dh_install -plibgstreamer-plugins-bad1.0-0 usr/lib/$(DEB_HOST_MULTIARCH)/libgsthip-1.0.so.* usr/lib/$(DEB_HOST_MULTIARCH)
 	dh_install -pgstreamer1.0-plugins-bad debian/tmp/usr/lib/$(DEB_HOST_MULTIARCH)/gstreamer-1.0/libgsthip.so
 ifeq ($(DEB_HOST_ARCH),amd64)
 	dh_install -pgstreamer1.0-plugins-bad debian/tmp/usr/lib/$(DEB_HOST_MULTIARCH)/gstreamer-1.0/libgstqsv.so

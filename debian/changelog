@@ -1,3 +1,17 @@
+gst-plugins-bad1.0 (1.28.7-2) unstable; urgency=medium
+
+  * d/control: disable wpewebkit for big endian architectures
+    (Closes: #1148086)
+
+ -- Marc Leeman <marc.leeman@gmail.com>  Fri, 18 Sep 2026 16:08:47 +0200
+
+gst-plugins-bad1.0 (1.28.7-1) unstable; urgency=medium
+
+  * New upstream version 1.28.7
+  * d/rules: rename to libgsthip-1.0
+
+ -- Marc Leeman <marc.leeman@gmail.com>  Tue, 08 Sep 2026 09:41:14 +0200
+
 gst-plugins-bad1.0 (1.28.6-1) unstable; urgency=medium
 
   * New upstream version 1.28.6
